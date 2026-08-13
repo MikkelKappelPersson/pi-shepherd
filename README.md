@@ -9,7 +9,7 @@ and herding **pi agents inside Herdr**.
 
 ```
 you ──► pi-subagent ──► a new Herdr tab (e.g. "scout") runs pi live, completes, hands the result back
-        └────────────► herd   (list / start / prompt / status / read / close)
+        └────────────► herd   (list / start / prompt / status / read / close / gc)
 ```
 
 Two capabilities, one extension, exposed to the model as two **tools**:
@@ -23,7 +23,8 @@ Two capabilities, one extension, exposed to the model as two **tools**:
 - **`herd`** — manage the pi agents living in your Herdr panes: see them
   (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check
   status / read output (`status`, `read`), and close panes that pi-shepherd
-  created (`close`). Panes pi-shepherd created are marked `●`.
+  created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes
+  stale registry entries (panes that no longer exist) and cleans their temp dirs.
 
 > **Compatibility:** the tool is named **`pi-subagent`** (not `subagent`) so it
 > coexists with the `pi-herdr-agents` package, whose own `subagent` tool drives
@@ -233,7 +234,7 @@ Requirements:
 ├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
 ├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
 ├── subagent.ts       # pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain)
-├── herd.ts           # herd tool (list/start/prompt/status/read/close) + herdr agent runner (runAgentInHerdr)
+├── herd.ts           # herd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
 ├── test/             # verification: fixture tree + test/verify-discovery.mjs
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)

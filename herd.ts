@@ -312,6 +312,22 @@ function paneExists(paneId: string): boolean {
 	}
 }
 
+/**
+ * Drop created-pane registrations whose pane no longer exists (and clean
+ * their retained temp launch dirs). Safe: paneExists() returns true when the
+ * check itself fails, so we never prune a pane we can't confirm is gone.
+ * Returns how many stale entries were pruned.
+ */
+function pruneStaleCreatedPanes(): number {
+	const panes = loadCreatedPanes();
+	if (panes.length === 0) return 0;
+	const stale = panes.filter((p) => !paneExists(p.paneId));
+	if (stale.length === 0) return 0;
+	for (const p of stale) removeCreatedPaneDir(p.paneId);
+	saveCreatedPanes(panes.filter((p) => !stale.includes(p)));
+	return stale.length;
+}
+
 /** True when this pane id (or the agent name it was created under) belongs to pi-shepherd. */
 function isShepherdPane(idOrName: string): boolean {
 	return loadCreatedPanes().some((p) => p.paneId === idOrName || p.name === idOrName);
@@ -745,7 +761,7 @@ export async function runAgentInHerdr(opts: {
 	}
 }
 
-const ActionSchema = StringEnum(["list", "start", "prompt", "status", "read", "close"] as const, {
+const ActionSchema = StringEnum(["list", "start", "prompt", "status", "read", "close", "gc"] as const, {
 	description: "Herd action to perform",
 });
 const DirectionSchema = StringEnum(["right", "down"] as const, {
@@ -792,6 +808,9 @@ function textResult(text: string, details: Record<string, unknown>): AgentToolRe
 async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
 	switch (action) {
 		case "list": {
+			// Silently drop registrations for panes that no longer exist so a
+			// long-lived session doesn't accumulate stale entries.
+			pruneStaleCreatedPanes();
 			const out = herdrExecSync(["agent", "list"]);
 			const agents = agentSummaries(out);
 			if (agents.length === 0)
@@ -1046,6 +1065,17 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 			);
 		}
 
+		case "gc": {
+			const pruned = pruneStaleCreatedPanes();
+			const remaining = loadCreatedPanes().length;
+			return textResult(
+				pruned === 0
+					? `No stale pi-shepherd panes to prune (${remaining} registered).`
+					: `Pruned ${pruned} stale pane registration(s); ${remaining} remain.`,
+				{ pruned, remaining },
+			);
+		}
+
 		default:
 			return textResult(`Unknown herd action: ${action}`, {});
 	}
@@ -1057,8 +1087,9 @@ export function registerHerdTool(pi: ExtensionAPI) {
 		label: "Herd (Herdr agents)",
 		description: [
 			"Manage pi agents running in Herdr panes: list, start a sibling, prompt, status, read, close.",
-			`Actions: list | start | prompt | status | read | close. Requires a running Herdr session (HERDR_ENV=1).`,
+			`Actions: list | start | prompt | status | read | close | gc. Requires a running Herdr session (HERDR_ENV=1).`,
 			`Panes created by pi-shepherd (via this tool or pi-subagent) are marked ● and can be closed with close.`,
+			"gc prunes stale pi-shepherd pane registrations (panes that no longer exist) and cleans their temp dirs.",
 			"For isolated one-shot delegation use the 'pi-subagent' tool instead.",
 		].join(" "),
 		parameters: HerdParams,
