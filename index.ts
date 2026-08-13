@@ -10,13 +10,74 @@ import { discoverAgents, formatAgentList } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
 import { registerSubagentTool, subagentOnce } from "./subagent.ts";
-import { registerHerdTool, isHerdrAvailable } from "./herd.ts";
+import {
+	registerHerdTool,
+	isHerdrAvailable,
+	workingSubagents,
+	type HerdAgentSummary,
+} from "./herd.ts";
+
+/**
+ * Persistent "below the editor" status line listing the subagents currently
+ * working (see tui.md Pattern 5 / widget-placement.ts). Polls `herd list`
+ * every ~1s and re-renders on change. Safe no-op when Herdr isn't reachable.
+ */
+function registerSubagentStatusWidget(pi: ExtensionAPI): void {
+	const POLL_MS = 1_000;
+	let last = "";
+
+	pi.on("session_start", (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		ctx.ui.setWidget(
+			"pi-shepherd-working",
+			(tui, theme) => {
+				const tick = (): void => {
+					const line = renderWorkingLine(workingSubagents(), theme);
+					if (line !== last) {
+						last = line;
+						tui.requestRender();
+					}
+				};
+				tick();
+				const timer = setInterval(tick, POLL_MS);
+				return {
+					render: () => (last ? [last] : []),
+					invalidate: () => {
+						// Theme changed → re-render from the current snapshot, keep polling.
+						tick();
+					},
+					dispose: () => clearInterval(timer),
+				};
+			},
+			{ placement: "belowEditor" },
+		);
+	});
+}
+
+function renderWorkingLine(
+	agents: HerdAgentSummary[],
+	theme: {
+		fg(color: string, text: string): string;
+		dim(text: string): string;
+	},
+): string {
+	if (agents.length === 0) return "";
+	const parts = agents.map((a) => {
+		const name = theme.fg("accent", a.name);
+		const state = theme.fg("muted", a.state);
+		return `● ${name} [${state}]`;
+	});
+	return (
+		theme.fg("dim", "working: ") + parts.join(theme.fg("dim", "  "))
+	);
+}
 
 export default function (pi: ExtensionAPI) {
 	// Tools for natural-language use.
 	registerSubagentTool(pi);
 	registerHerdTool(pi);
 	registerSettingsCommand(pi);
+	registerSubagentStatusWidget(pi);
 
 	pi.registerCommand("pi-shepherd", {
 		description: "pi-shepherd: list | herd | settings | <agent> <task>",

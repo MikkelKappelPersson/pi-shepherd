@@ -139,6 +139,40 @@ function herdrExecSync(args: string[]): unknown {
 	return JSON.parse(stdout);
 }
 
+/**
+ * Sync snapshot of every agent keyed in Herdr. Cheap enough to call from a
+ * status widget every second or so. Returns [] when Herdr isn't reachable.
+ * The result is never cached (live view reflects the current state).
+ */
+export function listHerdrAgents(): HerdAgentSummary[] {
+	if (!isHerdrAvailable()) return [];
+	try {
+		return agentSummaries(herdrExecSync(["agent", "list"]));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * The subagents pi-shepherd is currently working on: our own panes whose
+ * agent is not idle (working, waiting on input, errored, …). Used for the
+ * persistent "below the editor" status line.
+ */
+export function workingSubagents(): HerdAgentSummary[] {
+	// `rec.agent` in `herdr agent list` is always the program name (“pi”),
+	// not the agent kind. For shepherd panes the agent kind (scout/worker/…)
+	// is what we recorded when the tab was created — use that for the label.
+	const kindByPane = new Map(
+		loadCreatedPanes().map((p) => [p.paneId, p.name]),
+	);
+	return listHerdrAgents()
+		.filter((s) => s.shepherd && s.state !== "idle")
+		.map((s) => {
+			const kind = kindByPane.get(s.paneId);
+			return kind && kind !== "pi" ? { ...s, name: kind } : s;
+		});
+}
+
 async function herdrExec(args: string[]): Promise<unknown> {
 	const { stdout } = await execFileAsync("herdr", args, { encoding: "utf8" });
 	return JSON.parse(stdout);
