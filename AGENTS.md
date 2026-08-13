@@ -6,6 +6,26 @@ a **Herdr tab**) and **herding pi agents inside Herdr** (list / start / prompt /
 For *usage / discovery / security*, see `README.md`. This file is for agents
 that **edit the code**. The implementation roadmap is `PLAN.md`.
 
+## Default workflow — dogfood the extension's own subagents
+
+When making changes to this repo, **default to delegating to the bundled
+subagents** (via `pi-subagent`) rather than doing everything inline:
+
+- **scout** — recon the repo first (`pi-subagent` → `scout`) to survey the
+  relevant code before editing, or ask it to scout changes when context runs
+  thin.
+- **planner** — for non-trivial work, have a **planner** turn the scout's
+  findings into a concrete implementation plan before touching files.
+- **worker** — delegate the actual **build/implement** step to a **worker**
+  (full capabilities, isolated context). There is no `builder` agent; **worker**
+  is the build agent.
+- **reviewer** — after implementing, have a **reviewer** (read-only) check the
+  diff for quality and security.
+
+You are the orchestrator: scout → plan → build (worker) → review. Run the
+agents you trust; per the security notes below, their context is isolated but
+their tool permissions match yours.
+
 ## Runtime / stack
 
 - **TypeScript, run directly by pi** (Bun-style). No bundler, no build step —
