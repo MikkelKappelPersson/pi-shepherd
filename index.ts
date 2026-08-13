@@ -37,13 +37,13 @@ export default function (pi: ExtensionAPI) {
 			if (arg === "herd") {
 				if (!isHerdrAvailable()) {
 					ctx.ui?.notify(
-						"pi-shepherd: not in a Herdr session (HERDR_ENV=1 + herdr on PATH required). The 'subagent' tool still works.",
+						"pi-shepherd: Herdr runtime not reachable (the `herdr` CLI on PATH and a running server are required). Start Herdr with `herdr`, or run pi inside a Herdr pane.",
 						"warning",
 					);
 					return;
 				}
 				ctx.ui?.notify(
-					"pi-shepherd herd: ask me to herd agents (e.g. \"list the agents in herdr\", \"start a reviewer agent\", \"prompt the worker\").",
+					"pi-shepherd herd: ask me to herd agents (e.g. \"list the agents in herdr\", \"start a reviewer agent\", \"prompt the worker\", \"close the scout tab\").",
 					"info",
 				);
 				return;

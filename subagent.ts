@@ -1,21 +1,20 @@
 /**
- * Phase 2 — Subagent tool.
+ * Phase 2 — Subagent tool (Herdr-native).
  *
- * Delegates tasks to specialized agents by spawning an isolated `pi`
- * subprocess per invocation (its own context window, delegated system prompt,
- * and per-agent tool/model config).
+ * Delegates tasks to specialized agents, each running in its own **Herdr tab**:
+ * a visible pi session with the delegated system prompt and per-agent
+ * tool/model config that works live in the tab and reports back on
+ * completion. When pi was started from a plain terminal (not inside Herdr),
+ * the referenced headless Herdr server is started/attached automatically.
  *
  * Modes:
  *   - Single:   { agent, task }
  *   - Parallel: { tasks: [{ agent, task }, ...] }  (max 8, 4 concurrent)
  *   - Chain:    { chain: [{ agent, task }, ...] }  ({previous} pipes output)
  *
- * Uses JSON mode to capture structured output (turns / tokens / cost).
  * Agent files are re-read from disk on every invocation (see discovery.ts).
  */
 
-import { spawn } from "node:child_process";
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -26,16 +25,17 @@ import {
 	type ExtensionAPI,
 	getAgentDir,
 	getMarkdownTheme,
-	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
+import { runAgentInHerdr } from "./herd.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
+const DEFAULT_HERDR_TIMEOUT = 600_000;
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -160,6 +160,8 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	/** Set when the agent ran in a Herdr tab (pi-shepherd runtime). */
+	herdrNote?: string;
 }
 
 interface SubagentDetails {
@@ -238,34 +240,22 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 	return results;
 }
 
-async function writePromptToTempFile(agentName: string, prompt: string): Promise<{ dir: string; filePath: string }> {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
-	const safeName = agentName.replace(/[^\w.-]+/g, "_");
-	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
-	await withFileMutationQueue(filePath, async () => {
-		await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
-	});
-	return { dir: tmpDir, filePath };
-}
-
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
-	const currentScript = process.argv[1];
-	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-		return { command: process.execPath, args: [currentScript, ...args] };
-	}
-
-	const execName = path.basename(process.execPath).toLowerCase();
-	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
-	if (!isGenericRuntime) {
-		return { command: process.execPath, args };
-	}
-
-	return { command: "pi", args };
-}
-
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
+function zeroUsage(): UsageStats {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+}
+
+/**
+ * Run one delegated agent to completion in the Herdr runtime.
+ *
+ * pi-shepherd is Herdr-native: every subagent runs in a real Herdr tab (its own
+ * workspace surface) so you can watch it work, and the result is picked back up
+ * by the caller when the tab's pi instance signals completion. When the parent
+ * pi was started from a plain terminal (not inside Herdr), the referenced
+ * headless Herdr server is started/attached automatically and a workspace is
+ * resolved for the new tab.
+ */
 async function runSingleAgent(
 	defaultCwd: string,
 	agents: AgentConfig[],
@@ -276,6 +266,12 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	opts: {
+		keepOpen?: boolean;
+		stayOpen?: boolean;
+		timeout?: number;
+		label?: string;
+	} = {},
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -288,146 +284,91 @@ async function runSingleAgent(
 			exitCode: 1,
 			messages: [],
 			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.`,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+			usage: zeroUsage(),
 			step,
 		};
 	}
 
-	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	const keepOpen = opts.keepOpen ?? true;
+	const stayOpen = opts.stayOpen ?? true;
+	const timeout = opts.timeout ?? DEFAULT_HERDR_TIMEOUT;
+	const label = opts.label ?? agentName;
 
-	let tmpPromptDir: string | null = null;
-	let tmpPromptPath: string | null = null;
-
-	const currentResult: SingleResult = {
+	const progress: SingleResult = {
 		agent: agentName,
 		agentSource: agent.source,
 		task,
 		exitCode: 0,
-		messages: [],
+		messages: [{ role: "assistant", content: [{ type: "text", text: "(starting…)" }] }],
 		stderr: "",
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		usage: zeroUsage(),
 		model: agent.model,
 		step,
 	};
 
-	const emitUpdate = () => {
-		if (onUpdate) {
-			onUpdate({
-				content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
-				details: makeDetails([currentResult]),
-			});
-		}
+	const emitProgress = (text: string) => {
+		if (!onUpdate) return;
+		const shown = text || "(running…)";
+		progress.messages = [{ role: "assistant", content: [{ type: "text", text: shown }] }];
+		onUpdate({
+			content: [{ type: "text", text: shown }],
+			details: makeDetails([{ ...progress }]),
+		});
 	};
 
+	let run: Awaited<ReturnType<typeof runAgentInHerdr>>;
 	try {
-		if (agent.systemPrompt.trim()) {
-			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
-			tmpPromptDir = tmp.dir;
-			tmpPromptPath = tmp.filePath;
-			args.push("--append-system-prompt", tmpPromptPath);
-		}
-
-		args.push(`Task: ${task}`);
-		let wasAborted = false;
-
-		const exitCode = await new Promise<number>((resolve) => {
-			const invocation = getPiInvocation(args);
-			const proc = spawn(invocation.command, invocation.args, {
-				cwd: cwd ?? defaultCwd,
-				shell: false,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			let buffer = "";
-
-			const processLine = (line: string) => {
-				if (!line.trim()) return;
-				let event: any;
-				try {
-					event = JSON.parse(line);
-				} catch {
-					return;
-				}
-
-				if (event.type === "message_end" && event.message) {
-					const msg = event.message as Message;
-					currentResult.messages.push(msg);
-
-					if (msg.role === "assistant") {
-						currentResult.usage.turns++;
-						const usage = msg.usage;
-						if (usage) {
-							currentResult.usage.input += usage.input || 0;
-							currentResult.usage.output += usage.output || 0;
-							currentResult.usage.cacheRead += usage.cacheRead || 0;
-							currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-							currentResult.usage.cost += usage.cost?.total || 0;
-							currentResult.usage.contextTokens = usage.totalTokens || 0;
-						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
-						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
-					}
-					emitUpdate();
-				}
-
-				if (event.type === "tool_result_end" && event.message) {
-					currentResult.messages.push(event.message as Message);
-					emitUpdate();
-				}
-			};
-
-			proc.stdout.on("data", (data) => {
-				buffer += data.toString();
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-				for (const line of lines) processLine(line);
-			});
-
-			proc.stderr.on("data", (data) => {
-				currentResult.stderr += data.toString();
-			});
-
-			proc.on("close", (code) => {
-				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
-			});
-
-			proc.on("error", () => {
-				resolve(1);
-			});
-
-			if (signal) {
-				const killProc = () => {
-					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
-				};
-				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
-			}
+		run = await runAgentInHerdr({
+			agentName,
+			systemPrompt: agent.systemPrompt,
+			task,
+			cwd: cwd ?? defaultCwd,
+			model: agent.model,
+			tools: agent.tools,
+			label,
+			keepOpen,
+			stayOpen,
+			timeout,
+			signal,
+			onProgress: emitProgress,
 		});
-
-		currentResult.exitCode = exitCode;
-		if (wasAborted) throw new Error("Subagent was aborted");
-		return currentResult;
-	} finally {
-		if (tmpPromptPath)
-			try {
-				fs.unlinkSync(tmpPromptPath);
-			} catch {
-				/* ignore */
-			}
-		if (tmpPromptDir)
-			try {
-				fs.rmdirSync(tmpPromptDir);
-			} catch {
-				/* ignore */
-			}
+	} catch (error: any) {
+		return {
+			agent: agentName,
+			agentSource: agent.source,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: String(error?.message ?? error),
+			usage: zeroUsage(),
+			errorMessage: String(error?.message ?? error),
+			step,
+		};
 	}
+
+	const assistantCount = run.messages.filter((m) => m.role === "assistant").length;
+	const ltLive = stayOpen
+		? `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}). ` +
+			`The subagent is still running there — ` +
+			`drive it further or close it with herd close ${run.paneId}.`
+		: keepOpen
+			? `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}). ` +
+				`The tab is left open for inspection — close it with herd close ${run.paneId}.`
+			: `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}) and was closed after pickup.`;
+
+	return {
+		agent: agentName,
+		agentSource: agent.source,
+		task,
+		exitCode: run.exitCode,
+		messages: run.messages,
+		stderr: run.errorMessage ?? "",
+		usage: { ...zeroUsage(), turns: assistantCount },
+		model: run.model ?? agent.model,
+		errorMessage: run.errorMessage,
+		step,
+		herdrNote: ltLive,
+	};
 }
 
 const TaskItem = Type.Object({
@@ -457,15 +398,34 @@ const SubagentParams = Type.Object({
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	keepOpen: Type.Optional(
+		Type.Boolean({
+			description: "Keep the Herdr tab open after completion for inspection. Default: true.",
+			default: true,
+		}),
+	),
+	stayOpen: Type.Optional(
+		Type.Boolean({
+			description:
+				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
+			default: true,
+		}),
+	),
+	timeout: Type.Optional(
+		Type.Integer({
+			description: "Time limit (ms) for the Herdr run before it is reported timed-out. Default: 600000 (10 min).",
+			default: 600_000,
+		}),
+	),
 });
 
 export function registerSubagentTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "pi-subagent",
-		label: "Subagent (isolated, no Herdr needed)",
+		label: "Subagent (herdr tab)",
 		description: [
-			"Delegate tasks to specialized subagents with isolated context by spawning a separate pi subprocess.",
-			"Works outside Herdr (plain terminal); unlike the 'subagent' tool from pi-herdr-agents it does not need panes/worktrees.",
+			"Delegate tasks to specialized subagents. Each runs live in its own Herdr tab (labelled with the agent name), so you can watch it work; the result is handed back when it completes.",
+			"Herdr-native: works from a plain terminal too — the referenced headless Herdr server is started/attached automatically. Requires the herdr CLI.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			`Built-in agents: scout, planner, reviewer, worker.`,
 			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
@@ -483,6 +443,9 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
 			const hasSingle = Boolean(params.agent && params.task);
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+			const keepOpen = params.keepOpen ?? true;
+			const stayOpen = params.stayOpen ?? true;
+			const timeout = params.timeout ?? DEFAULT_HERDR_TIMEOUT;
 
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
@@ -562,6 +525,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
+						{ keepOpen, stayOpen, timeout, label: `${step.agent}-${i + 1}` },
 					);
 					results.push(result);
 
@@ -569,15 +533,28 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 					if (isError) {
 						const errorMsg = getResultOutput(result);
 						return {
-							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
+							content: [
+								{
+									type: "text",
+									text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
+								},
+							],
 							details: makeDetails("chain")(results),
 							isError: true,
 						};
 					}
 					previousOutput = getFinalOutput(result.messages);
 				}
+				const last = results[results.length - 1];
 				return {
-					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
+					content: [
+						{
+							type: "text",
+							text:
+								(getFinalOutput(last.messages) || "(no output)") +
+								(last.herdrNote ? `\n${last.herdrNote}` : ""),
+						},
+					],
 					details: makeDetails("chain")(results),
 				};
 			}
@@ -637,6 +614,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
+						{ keepOpen, stayOpen, timeout, label: `${t.agent}-${index + 1}` },
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -649,7 +627,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 					const status = isFailedResult(r)
 						? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
 						: "completed";
-					return `### [${r.agent}] ${status}\n\n${output}`;
+					return `### [${r.agent}] ${status}\n\n${output}${r.herdrNote ? `\n\n${r.herdrNote}` : ""}`;
 				});
 				return {
 					content: [
@@ -673,18 +651,31 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
+					{ keepOpen, stayOpen, timeout, label: params.agent },
 				);
 				const isError = isFailedResult(result);
 				if (isError) {
 					const errorMsg = getResultOutput(result);
 					return {
-						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
+						content: [
+							{
+								type: "text",
+								text: `Agent ${result.stopReason || "failed"}: ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
+							},
+						],
 						details: makeDetails("single")([result]),
 						isError: true,
 					};
 				}
 				return {
-					content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
+					content: [
+						{
+							type: "text",
+							text:
+								(getFinalOutput(result.messages) || "(no output)") +
+								(result.herdrNote ? `\n${result.herdrNote}` : ""),
+						},
+					],
 					details: makeDetails("single")([result]),
 				};
 			}
@@ -806,6 +797,10 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 						container.addChild(new Spacer(1));
 						container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
 					}
+					if (r.herdrNote) {
+						container.addChild(new Spacer(1));
+						container.addChild(new Text(theme.fg("dim", r.herdrNote), 0, 0));
+					}
 					return container;
 				}
 
@@ -819,6 +814,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 				}
 				const usageStr = formatUsageStats(r.usage, r.model);
 				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
+				if (r.herdrNote) text += `\n${theme.fg("dim", r.herdrNote)}`;
 				return new Text(text, 0, 0);
 			}
 
@@ -1009,7 +1005,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 /**
  * Lightweight programmatic entry: run a single subagent to completion and
  * return the final text (used by the `/pi-shepherd <agent> <task>` command).
- * No TUI rendering, no confirmation prompt — just spawn and collect.
+ * Herdr-native: runs in a Herdr tab; no TUI rendering, no confirmation prompt.
  */
 export async function subagentOnce(params: {
 	agent: string;
@@ -1039,7 +1035,8 @@ export async function subagentOnce(params: {
 	const failed = isFailedResult(result);
 	return {
 		ok: !failed,
-		text: failed ? getResultOutput(result) : getFinalOutput(result.messages) || "(no output)",
+		text: (failed ? getResultOutput(result) : getFinalOutput(result.messages) || "(no output)") +
+			(result.herdrNote ? `\n${result.herdrNote}` : ""),
 		stderr: result.stderr,
 	};
 }

@@ -1,7 +1,7 @@
 # pi-shepherd — for agents maintaining this extension
 
-A no-fuss **pi extension** for delegating to **subagents** (isolated pi
-workers) and **herding pi agents inside Herdr** (list / start / prompt).
+A no-fuss **pi extension** for delegating to **subagents** (each running live in
+a **Herdr tab**) and **herding pi agents inside Herdr** (list / start / prompt / close).
 
 For *usage / discovery / security*, see `README.md`. This file is for agents
 that **edit the code**. The implementation roadmap is `PLAN.md`.
@@ -15,15 +15,19 @@ that **edit the code**. The implementation roadmap is `PLAN.md`.
   with YAML frontmatter) and the pi helpers `parseFrontmatter`,
   `CONFIG_DIR_NAME`, `getAgentDir`.
 - The **herd** capability shells out to the **`herdr` CLI** (no js library).
-  Subagents spawn a **`pi` binary** as an isolated subprocess.
+  Subagents run as **pi agents inside Herdr tabs**: pi-shepherd creates a tab
+  labelled with the agent name, runs the delegated `pi` process in it
+  (`herdr pane run`), waits for a completion sidecar, and hands the result
+  back to the parent.
 
 ## Architecture
 
 ```
 index.ts      extension entry: /pi-shepherd command + tool registration
-subagent.ts   pi-subagent tool: isolated pi subprocesses (single/parallel/chain) ✅
+subagent.ts   pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain) ✅
+shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
-herd.ts       herd tool: Herdr CLI wrappers (list/start/prompt/status/read)    ✅
+herd.ts       herd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner ✅
 .pi/agents/   bundled built-in subagents (pi project format)                  ✅
 .agents/agents/  bundled built-in subagents (shared/cross-tool format)        ✅
 prompts/      workflow presets (/implement, /scout-and-plan, ...)             [future]
@@ -53,12 +57,19 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
   pi-package, always present here) registers `subagent`, `subagent_interrupt`,
   `subagents_list`, `subagent_resume`, `herdr_workflow`. Registering our own
   `subagent` would make pi refuse to load any extension.
-  → Our isolated worker tool is **`pi-subagent`**; herd is **`herd`**. Do not
+  → Our delegation tool is **`pi-subagent`**; herd is **`herd`**. Do not
   rename them to `subagent`/`herd` conflicting names.
-- **Herdr safety** (from the Herdr skill): verify `HERDR_ENV=1` first; prefer
-  `--current` / explicit pane IDs; create a **sibling** pane with `--no-focus`
-  unless the user asked for other topology; parse IDs from JSON, never guess;
-  never close panes we didn't create; never kill the Herdr server.
+- **Herdr-native**: pi-shepherd carries no subprocess fallback. Every delegated
+  agent runs in a Herdr tab. From a plain terminal (no `HERDR_ENV`) the
+  referenced headless Herdr server is started/attached automatically and a
+  workspace is resolved for the tab.
+- **Never close panes pi-shepherd didn't create.** Panes it creates (via
+  `pi-subagent` or `herd start`) are recorded in `~/.pi/agent/pi-shepherd/created-panes.json`;
+  `herd close` only closes panes in that registry.
+- **Nothing reads the child session before the child has exited.** The parent
+  waits for the `__SHEPHERD_DONE_` sentinel (printed by the shell after `pi`
+  exits) before parsing the session file and cleaning up temp files; otherwise
+  a still-running child hits ENOENT on its own session file.
 
 ## Conventions
 
@@ -75,7 +86,12 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
   - `pi --mode json -p --no-session "/pi-shepherd list"`
   - Once Phase 1 lands, add tiny fixture agent dirs under a temp cwd to
     exercise discovery precedence across the four locations.
-  - Herd (Phase 4) requires a running Herdr session with `HERDR_ENV=1`.
+  - Herd (Phase 4): verify against a running Herdr server; `herd list`, `start`,
+  `prompt --wait`, `close`. A live `pi-subagent` run creates a tab, signals
+  completion via the sidecar, and (with the default `stayOpen`) the subagent
+  stays alive in the tab for you to keep driving — no `__SHEPHERD_DONE_` exit.
+  With `stayOpen: false` it should exit and show `__SHEPHERD_DONE_0__` with
+  `agent` back to idle.
 
 ## Security
 

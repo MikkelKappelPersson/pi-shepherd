@@ -1,26 +1,29 @@
 # pi-shepherd
 
-A no-fuss **pi extension** for managing your coding agents: delegation to
-**subagents** and herding **pi agents inside Herdr**.
+A no-fuss **Herdr-native** pi extension for managing your coding agents: delegation
+and herding **pi agents inside Herdr**.
 
-> **Philosophy:** bare bones, works out of the box. Drop in agent definitions,
-> spawn them, herd them. No ceremony.
+> **Philosophy:** bare bones, works out of the box. **Every** delegated agent runs in
+> its own real **Herdr tab** — you watch it work live, and the result is handed back
+> to your main pi instance when it completes. No invisible subprocesses.
 
 ```
-you ──► /pi-shepherd ──► subagents (isolated pi workers, self-contained prompts)
-        └────────────► herd   (pi agents running in Herdr panes — list / start / prompt / status)
+you ──► pi-subagent ──► a new Herdr tab (e.g. "scout") runs pi live, completes, hands the result back
+        └────────────► herd   (list / start / prompt / status / read / close)
 ```
 
 Two capabilities, one extension, exposed to the model as two **tools**:
 
-- **`pi-subagent`** — delegate tasks to isolated pi subprocesses so each has its
-  own context window. Ships with functional subagents (`scout`, `planner`,
-  `reviewer`, `worker`) so it works before you write your own. Unlike the
-  `subagent` tool from `pi-herdr-agents`, this needs **no Herdr** — it works in
-  a plain terminal.
-- **`herd`** — manage the pi agents living in your Herdr panes: see what they're
-  doing (`list`), start a sibling agent (`start`), push a prompt (`prompt`),
-  and check status / read output (`status`, `read`).
+- **`pi-subagent`** — delegate a task to a specialized agent (`scout`, `planner`,
+  `reviewer`, `worker`, …). It runs **live in a new Herdr tab labelled with the
+  agent name**, gets the delegated system prompt + tool/model config, and on
+  completion the main instance picks up its final output. Herdr-native from any
+  prompt: even if pi was started from a plain terminal, the referenced headless
+  Herdr server is started/attached automatically.
+- **`herd`** — manage the pi agents living in your Herdr panes: see them
+  (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check
+  status / read output (`status`, `read`), and close panes that pi-shepherd
+  created (`close`). Panes pi-shepherd created are marked `●`.
 
 > **Compatibility:** the tool is named **`pi-subagent`** (not `subagent`) so it
 > coexists with the `pi-herdr-agents` package, whose own `subagent` tool drives
@@ -80,40 +83,53 @@ findings in a concise list. Do not edit files.
 
 ## Usage
 
-### Subagents (isolated workers) — `pi-subagent`
+### Subagents (Herdr tabs) — `pi-subagent`
 
 | Command | Action |
 |---------|--------|
-| `/pi-shepherd <agent> <task>`      | Run one subagent on a task |
+| `/pi-shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
 | `/pi-shepherd list`                | List discovered agents and their source |
 | `/pi-shepherd herd`                | Herd hint (the `herd` tool does the work) |
 
-You can also instruct pi naturally: *"run 2 scouts in parallel — one on auth,
-one on billing"* or *"use review on the last commit"* — the model uses the
-`pi-subagent` tool (single / parallel / chain) to do it.
+You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
+parallel — one on auth, one on billing"* — the model uses the `pi-subagent` tool
+(single / parallel / chain) to do it.
 
-A subagent runs as its own **pi subprocess** with a delegated system prompt and
-its own tool/model config. You get streaming output, per-agent usage stats
-(turns / tokens / cost / context), and Ctrl+C abort that kills the child.
+Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …):
 
-Modes:
+1. a new tab is created in the current (or resolved) workspace;
+2. `pi` starts there with the agent's delegated system prompt, tools and model;
+3. you can watch it work in the tab;
+4. when it finishes (it calls `shepherd_done`, or its turn completes), a
+   completion sidecar is written and its output is handed back to the parent;
+   by default the subagent **stays open** in the tab (it does not exit) so you
+   can keep driving it;
+5. the parent pi instance picks up the final output and reports it back;
+6. the tab is left open for inspection — the subagent may still be running, so
+you can keep prompting it, or close it with `herd close <pane>` (or in Herdr
+directly).
+
+Options: `keepOpen` (default `true` — set `false` to auto-close the tab),
+`stayOpen` (default `true` — keep the subagent's pi **alive** in the tab after
+it completes so you can keep driving it; set `false` to have it exit on done)
+and `timeout` (ms, default 10 min). Modes:
 
 | Mode      | Description                                          |
 |-----------|------------------------------------------------------|
 | Single    | One agent, one task                                  |
-| Parallel  | Up to 8 tasks, 4 concurrent, streamed simultaneously |
+| Parallel  | Up to 8 tasks, 4 concurrent, each in its own tab     |
 | Chain     | Sequential steps; `{previous}` placeholder pipes context |
 
 ### Herd (pi agents in Herdr panes)
 
-pi-shepherd drives Herdr through the `herdr` CLI (Herdr must be running and
-`HERDR_ENV=1`).
+pi-shepherd drives Herdr through the `herdr` CLI (works from inside Herdr *or* a
+plain terminal — the headless server is started/attached automatically).
 
-- **List** — show live pi agents in Herdr, their pane, and `idle`/`working`/`blocked`/`done` state.
-- **Start** — split a sibling pane (right by default, preserving your cwd) and
-  launch a named pi agent in it with `--no-focus`.
+- **List** — show live pi agents in Herdr, their pane, `idle`/`working`/`blocked`/`done` state, and mark `●` the panes pi-shepherd created.
+- **Start** — split a sibling pane (right by default, preserving your cwd) and launch a named pi agent in it with `--no-focus`.
 - **Prompt** — send a task to a named agent across the floor and wait for it to settle.
 - **Status / read** — check lifecycle state and pull recent output from a pane.
+- **Close** — close a pane that pi-shepherd created (by pane id or agent name). It refuses to close panes it didn't create (safety).
 
 Example (what the `herd` tool does under the hood):
 
@@ -157,8 +173,10 @@ Requirements:
 
 - **pi** with the extension loader (extensions dir on disk, no build step —
   edit `.ts` and reload).
-- **Herdr** (for the *herd* capability only) — a running Herdr session,
-  `HERDR_ENV=1`, `herdr` on PATH. Subagents work without Herdr.
+- **Herdr** — pi-shepherd is **Herdr-native**: the `herdr` CLI must be on PATH.
+  When pi runs inside Herdr it uses the current session; when launched from a
+  plain terminal it automatically starts/attaches the referenced headless Herdr
+  server and resolves a workspace for the new tab.
 
 ---
 
@@ -170,6 +188,10 @@ Requirements:
 - **Agent locations** — the four discovery dirs above. User agents always load;
   add files there to extend the built-in set (user agents override built-ins
   with the same name).
+- **`pi-subagent` options** — `keepOpen` (default `true`: leave the tab open for
+  inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
+  subagent's pi process alive after completion so you can keep driving it in the
+  tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
 
 ---
 
@@ -192,11 +214,12 @@ Requirements:
 ~/.pi/agent/extensions/pi-shepherd/
 ├── index.ts          # extension entry: /pi-shepherd command + tool registration
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
-├── subagent.ts       # spawn isolated pi subprocesses; registers the pi-subagent tool
-├── herd.ts           # Herdr CLI wrappers; registers the herd tool (list/start/prompt/status/read)
+├── subagent.ts       # pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain)
+├── herd.ts           # herd tool (list/start/prompt/status/read/close) + herdr agent runner (runAgentInHerdr)
 ├── test/             # verification: fixture tree + test/verify-discovery.mjs
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)
+├── shepherd-done.ts  # in-tab extension: shepherd_done tool + completion sidecar on agent_end
 ├── prompts/          # workflow presets (/implement, /scout-and-plan, ...)  [future]
 ├── README.md         # this file
 └── PLAN.md           # implementation roadmap

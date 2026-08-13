@@ -14,11 +14,15 @@
  *     never kill the Herdr server.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Message } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
@@ -27,7 +31,15 @@ const execFileAsync = promisify(execFile);
 
 /** True when the caller is inside a Herdr session and the CLI is reachable. */
 export function isHerdrAvailable(): boolean {
-	if (process.env.HERDR_ENV !== "1") return false;
+	if (!isHerdrCliPresent()) return false;
+	if (process.env.HERDR_ENV === "1") return true;
+	// Herdr-native: the CLI talks to the headless server over a socket, so we
+	// can drive Herdr from a plain terminal too (as long as the server runs).
+	return isHerdrServerRunning();
+}
+
+/** True when the `herdr` binary is on PATH. */
+export function isHerdrCliPresent(): boolean {
 	try {
 		execFileSync("herdr", ["--version"], { stdio: "ignore", timeout: 3000 });
 		return true;
@@ -36,7 +48,90 @@ export function isHerdrAvailable(): boolean {
 	}
 }
 
-const HERDR_SETUP_HINT = "Start pi inside herdr (run `herdr`, then `pi`), or set HERDR_ENV=1 with herdr on PATH.";
+/** True when the headless Herdr server is currently reachable. */
+export function isHerdrServerRunning(): boolean {
+	try {
+		const stdout = execFileSync("herdr", ["status", "server"], {
+			encoding: "utf8",
+			timeout: 3000,
+		});
+		return /status:\s*running/i.test(stdout);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Ensure a Herdr runtime exists: the CLI is present and the headless server is
+ * running. From a plain terminal (no HERDR_ENV) the server is started in the
+ * background (detached) if needed.
+ */
+export async function ensureHerdrRuntime(
+	options: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+	if (!isHerdrCliPresent()) {
+		throw new Error(
+			"pi-shepherd is Herdr-native and needs the `herdr` CLI on PATH. Install Herdr (herdr.dev), then retry. " +
+				"For isolated subprocess-style runs without Herdr, use the `subagent` tool from the pi-herdr-agents package.",
+		);
+	}
+	if (isHerdrServerRunning()) return;
+	try {
+		const child = spawn("herdr", ["server"], {
+			detached: true,
+			stdio: "ignore",
+		});
+		child.unref();
+	} catch {
+		/* poll below; the server may already be starting */
+	}
+	const timeoutMs = options.timeoutMs ?? 20_000;
+	const intervalMs = options.intervalMs ?? 500;
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		if (isHerdrServerRunning()) return;
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+	throw new Error(
+		"Could not start a Herdr server (herdr server). Start Herdr manually (run `herdr`) and retry.",
+	);
+}
+
+/**
+ * Resolve the workspace a new delegation tab should live in: the current
+ * workspace when inside Herdr, otherwise the focused/first workspace of the
+ * running server, creating one if none exist.
+ */
+export function getHerdrWorkspaceId(): string {
+	const envId = process.env.HERDR_WORKSPACE_ID;
+	if (envId) return envId;
+	const out = herdrExecSync(["workspace", "list"]) as any;
+	const workspaces = out?.result?.workspaces;
+	if (Array.isArray(workspaces) && workspaces.length > 0) {
+		const chosen =
+			workspaces.find((w: any) => w.focused === true) ?? workspaces[0];
+		if (typeof chosen?.workspace_id === "string" && chosen.workspace_id) {
+			return chosen.workspace_id;
+		}
+	}
+	const created = herdrExecSync([
+		"workspace",
+		"create",
+		"--cwd",
+		process.cwd(),
+		"--no-focus",
+	]) as any;
+	const id =
+		created?.result?.workspace_id ?? created?.result?.root_pane?.workspace_id;
+	if (typeof id !== "string" || !id) {
+		throw new Error(
+			`Could not create a Herdr workspace: ${JSON.stringify(created)}`,
+		);
+	}
+	return id;
+}
+
+const HERDR_SETUP_HINT = "Run `herdr` to start/attach Herdr (or ensure the headless server is up), and keep `herdr` on PATH.";
 
 function herdrExecSync(args: string[]): unknown {
 	const stdout = execFileSync("herdr", args, { encoding: "utf8" });
@@ -65,6 +160,7 @@ export interface HerdAgentSummary {
 	workspaceId: string;
 	cwd: string;
 	focused: boolean;
+	shepherd: boolean;
 	terminalTitle: string;
 }
 
@@ -83,6 +179,7 @@ function agentSummaries(listOutput: unknown): HerdAgentSummary[] {
 			workspaceId: typeof rec.workspace_id === "string" ? rec.workspace_id : "?",
 			cwd: typeof rec.foreground_cwd === "string" ? rec.foreground_cwd : "",
 			focused: rec.focused === true,
+			shepherd: typeof rec.pane_id === "string" && isShepherdPane(rec.pane_id),
 			terminalTitle: typeof rec.terminal_title === "string" ? rec.terminal_title : "",
 		});
 	}
@@ -91,12 +188,419 @@ function agentSummaries(listOutput: unknown): HerdAgentSummary[] {
 
 function formatSummary(s: HerdAgentSummary): string {
 	const who = s.focused ? `${s.name} (self/focused)` : s.name;
-	return `• ${who} [${s.state}] pane=${s.paneId}${s.cwd ? ` cwd=${s.cwd}` : ""}`;
+	const mark = s.shepherd ? " ●(shepherd)" : "";
+	return `• ${who}${mark} [${s.state}] pane=${s.paneId}${s.cwd ? ` cwd=${s.cwd}` : ""}`;
 }
 
-// ── Tool schema ────────────────────────────────────────────────────────────
+// ── Shepherd panes registry ───────────────────────────────────────────────
+// Tracks panes/tabs pi-shepherd created so `herd close` only ever closes our
+// own panes (safety invariant: never close panes we didn't create).
 
-const ActionSchema = StringEnum(["list", "start", "prompt", "status", "read"] as const, {
+interface CreatedPane {
+	paneId: string;
+	tabId: string;
+	name: string;
+	cwd: string;
+	createdAt: number;
+}
+
+function registryFile(): string {
+	return path.join(os.homedir(), ".pi", "agent", "pi-shepherd", "created-panes.json");
+}
+
+function loadCreatedPanes(): CreatedPane[] {
+	try {
+		const parsed = JSON.parse(fs.readFileSync(registryFile(), "utf8"));
+		return Array.isArray(parsed) ? (parsed as CreatedPane[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+function saveCreatedPanes(panes: CreatedPane[]): void {
+	const file = registryFile();
+	try {
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify(panes, null, 2));
+	} catch {
+		/* best effort */
+	}
+}
+
+function recordCreatedPane(entry: CreatedPane): void {
+	const panes = loadCreatedPanes();
+	if (!panes.some((p) => p.paneId === entry.paneId)) {
+		panes.push(entry);
+		saveCreatedPanes(panes);
+	}
+}
+
+function forgetCreatedPane(paneId: string): void {
+	saveCreatedPanes(loadCreatedPanes().filter((p) => p.paneId !== paneId));
+}
+
+/** True when this pane id (or the agent name it was created under) belongs to pi-shepherd. */
+function isShepherdPane(idOrName: string): boolean {
+	return loadCreatedPanes().some((p) => p.paneId === idOrName || p.name === idOrName);
+}
+
+// ── Herdr-backed agent runner ────────────────────────────────────────────
+// One-shot delegation for the `pi-subagent` tool: create a new tab labelled
+// after the agent, run pi in it with the delegated system prompt + task, wait
+// for completion, pick up the result, and (optionally) close the tab.
+
+function shellQuote(value: string): string {
+	return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/** Create a new tab in a workspace and return its root pane + tab ids. */
+function createHerdrTab(
+	label: string,
+	cwd: string,
+	workspaceId?: string,
+): { paneId: string; tabId: string } {
+	const args = ["tab", "create", "--label", label, "--cwd", cwd, "--no-focus"];
+	if (workspaceId) args.splice(2, 0, "--workspace", workspaceId);
+	const out = herdrExecSync(args) as any;
+	const result = out?.result;
+	const root = result?.root_pane as Record<string, unknown> | undefined;
+	const paneId =
+		typeof root?.pane_id === "string" && root.pane_id ? root.pane_id : undefined;
+	const tabId =
+		typeof root?.tab_id === "string" && root.tab_id
+			? root.tab_id
+			: (result?.tab?.tab_id as string | undefined);
+	if (!paneId) {
+		throw new Error(`Unexpected herdr tab create output: ${JSON.stringify(out)}`);
+	}
+	try {
+		herdrExecSync(["pane", "rename", paneId, label]);
+	} catch {
+		/* cosmetic */
+	}
+	recordCreatedPane({
+		paneId,
+		tabId: tabId ?? "",
+		name: label,
+		cwd,
+		createdAt: Date.now(),
+	});
+	return { paneId, tabId: tabId ?? "" };
+}
+
+/** Wait until the freshly created pane's foreground shell is at a prompt. */
+async function waitForHerdrShellReady(
+	paneId: string,
+	options: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+	const timeoutMs = options.timeoutMs ?? 15_000;
+	const intervalMs = options.intervalMs ?? 250;
+	const deadline = Date.now() + timeoutMs;
+	let last = "no shell process observed";
+	while (Date.now() <= deadline) {
+		try {
+			const { stdout } = await execFileAsync(
+				"herdr",
+				["pane", "process-info", "--pane", paneId],
+				{ encoding: "utf8" },
+			);
+			const info = (JSON.parse(stdout) as any)?.result?.process_info ?? {};
+			const shellPid =
+				typeof info.shell_pid === "number" ? info.shell_pid : null;
+			const fgpg =
+				typeof info.foreground_process_group_id === "number"
+					? info.foreground_process_group_id
+					: null;
+			if (shellPid != null && fgpg === shellPid) return;
+			last = `pid ${shellPid} fg ${fgpg}`;
+		} catch (error: any) {
+			last = String(error?.message ?? error);
+		}
+		if (Date.now() >= deadline) break;
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+	throw new Error(
+		`Timed out waiting for interactive shell in Herdr pane ${paneId}: ${last}`,
+	);
+}
+
+function sendCommandInHerdr(paneId: string, command: string): void {
+	try {
+		execFileSync("herdr", ["pane", "run", paneId, command], { stdio: "ignore" });
+	} catch (error: any) {
+		throw new Error(
+			`Failed to run command in pane ${paneId}: ${error?.message ?? error}`,
+		);
+	}
+}
+
+function sendEscapeInHerdr(paneId: string): void {
+	try {
+		execFileSync("herdr", ["pane", "send-keys", paneId, "Escape"], {
+			stdio: "ignore",
+		});
+	} catch {
+		/* best effort */
+	}
+}
+
+async function readPaneTail(paneId: string): Promise<string> {
+	try {
+		const { stdout } = await execFileAsync(
+			"herdr",
+			["pane", "read", paneId, "--source", "recent", "--lines", "40"],
+			{ encoding: "utf8" },
+		);
+		return stdout;
+	} catch {
+		return "";
+	}
+}
+
+/** Reconstruct messages/model from the child's JSONL session file. */
+function parseSessionFile(sessionFile: string): {
+	messages: Message[];
+	model?: string;
+} {
+	const messages: Message[] = [];
+	let model: string | undefined;
+	if (!fs.existsSync(sessionFile)) return { messages, model };
+	for (const line of fs.readFileSync(sessionFile, "utf8").split("\n")) {
+		if (!line.trim()) continue;
+		let ev: any;
+		try {
+			ev = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (ev?.type === "model_change" && typeof ev.modelId === "string") {
+			model = ev.modelId;
+		}
+		if (
+			ev?.type === "message" &&
+			ev.message &&
+			typeof ev.message.role === "string"
+		) {
+			messages.push({
+				role: ev.message.role,
+				content: Array.isArray(ev.message.content) ? ev.message.content : [],
+				timestamp: ev.message.timestamp,
+			});
+		}
+	}
+	return { messages, model };
+}
+
+function lastAssistantText(messages: Message[]): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].role !== "assistant") continue;
+		for (const part of messages[i].content) {
+			if (part.type === "text" && part.text) return part.text;
+		}
+	}
+	return "";
+}
+
+const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
+const HERDR_RUN_TIMEOUT = 600_000;
+
+/**
+ * Run one delegated agent to completion in a new Herdr tab, then pick up the
+ * result. The tab is left open unless `keepOpen` is false. When `stayOpen` is
+ * true (default) the child pi does NOT exit on completion — it stays alive in
+ * the tab so the user can keep driving it; the parent picks up the result from
+ * the completion sidecar.
+ */
+export async function runAgentInHerdr(opts: {
+	agentName: string;
+	systemPrompt: string;
+	task: string;
+	cwd: string;
+	model?: string;
+	tools?: string[];
+	label?: string;
+	keepOpen?: boolean;
+	stayOpen?: boolean;
+	timeout?: number;
+	signal?: AbortSignal;
+	onProgress?: (text: string) => void;
+}): Promise<{
+	ok: boolean;
+	exitCode: number;
+	messages: Message[];
+	model?: string;
+	errorMessage?: string;
+	finalText?: string;
+	paneId: string;
+	tabId: string;
+}> {
+	const label = opts.label ?? opts.agentName;
+	const keepOpen = opts.keepOpen ?? true;
+	const stayOpen = opts.stayOpen ?? true;
+	const timeout = opts.timeout ?? HERDR_RUN_TIMEOUT;
+
+	// Herdr-native: make sure a server is up (auto-starting it from a plain
+	// terminal), then resolve a workspace for the new tab.
+	await ensureHerdrRuntime();
+	const workspaceId = getHerdrWorkspaceId();
+	const { paneId, tabId } = createHerdrTab(label, opts.cwd, workspaceId);
+
+	await waitForHerdrShellReady(paneId);
+
+	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-shepherd-"));
+	const safe = opts.agentName.replace(/[^\w.-]+/g, "_") || "agent";
+	const sessionFile = path.join(dir, `session-${safe}.jsonl`);
+	const sysFile = path.join(dir, `sysprompt-${safe}.md`);
+	const taskFile = path.join(dir, `task-${safe}.md`);
+	const scriptFile = path.join(dir, `launch-${safe}.sh`);
+	const doneExt = fileURLToPath(new URL("./shepherd-done.ts", import.meta.url));
+
+	await fs.promises.writeFile(sysFile, opts.systemPrompt, {
+		encoding: "utf8",
+		mode: 0o600,
+	});
+	const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
+	await fs.promises.writeFile(taskFile, task, { encoding: "utf8", mode: 0o600 });
+
+	const args: string[] = [
+		"--session",
+		shellQuote(sessionFile),
+		"-e",
+		shellQuote(doneExt),
+	];
+	if (opts.model) args.push("--model", shellQuote(opts.model));
+	const tools =
+		opts.tools && opts.tools.length > 0
+			? [...opts.tools, "shepherd_done"].join(",")
+			: undefined;
+	if (tools) args.push("--tools", tools);
+	args.push("--append-system-prompt", shellQuote(sysFile));
+	args.push(`'@${taskFile}'`);
+
+	const launchScript = [
+		"#!/bin/bash",
+		`export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
+		"export PI_SHEPHERD_AUTO_EXIT=1",
+		stayOpen ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
+		`pi ${args.join(" ")}; echo '__SHEPHERD_DONE_'$?'__'`,
+	].join("\n");
+	await fs.promises.writeFile(scriptFile, launchScript, { mode: 0o700 });
+
+	let settled = false;
+	let outcome: "done" | "error" | null = null;
+	let errorMessage: string | undefined;
+	const started = Date.now();
+
+	try {
+		sendCommandInHerdr(paneId, `bash ${shellQuote(scriptFile)}`);
+
+		while (Date.now() - started < timeout) {
+			if (opts.signal?.aborted) {
+				sendEscapeInHerdr(paneId);
+				throw new Error("Subagent was aborted");
+			}
+
+			const exitFile = `${sessionFile}.exit`;
+			if (fs.existsSync(exitFile)) {
+				let sidecar: any = null;
+				try {
+					sidecar = JSON.parse(fs.readFileSync(exitFile, "utf8"));
+				} catch {
+					/* retry */
+				}
+				if (sidecar?.type === "done") {
+					outcome = "done";
+					break;
+				}
+				if (sidecar?.type === "error") {
+					outcome = "error";
+					errorMessage =
+						sidecar.errorMessage || "Agent terminated with stopReason=error.";
+					break;
+				}
+			}
+
+			const pickup = parseSessionFile(sessionFile);
+			const tail = await readPaneTail(paneId);
+			const sentinel = tail.match(DONE_SENTINEL);
+			if (sentinel) {
+				const code = Number(sentinel[1]);
+				outcome = code === 0 ? "done" : "error";
+				if (code !== 0)
+					errorMessage = `pi exited with code ${code} (no completion sidecar).`;
+				settled = true;
+				break;
+			}
+
+			opts.onProgress?.(lastAssistantText(pickup.messages) || "(running...)");
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+
+		if (outcome === null) {
+			outcome = "error";
+			errorMessage =
+				`Timed out after ${Math.round((Date.now() - started) / 1000)}s. ` +
+				`The tab "${label}" (pane ${paneId}) is left open with pi still running — ` +
+				`inspect it there, or close with herd close ${paneId}.`;
+		} else if (stayOpen && !settled) {
+			// The child pi stays alive in the tab (completion was signalled via
+			// the sidecar, not a process exit), so there is no exit to wait for.
+			// Keep `settled` false so the temp files are preserved — pi still
+			// owns the session file and would hit ENOENT writing to it if we
+			// removed them.
+		} else if (!settled) {
+			// The completion sidecar is written while the child pi is still
+			// finishing its shutdown. Wait (bounded) for the shell to echo the
+			// sentinel — i.e. for pi to have fully exited — before reading the
+			// session file and cleaning up temp files.
+			const settleDeadline = Date.now() + 20_000;
+			while (Date.now() < settleDeadline) {
+				if (opts.signal?.aborted) break;
+				const tail = await readPaneTail(paneId);
+				if (DONE_SENTINEL.test(tail)) {
+					settled = true;
+					break;
+				}
+				await new Promise((r) => setTimeout(r, 500));
+			}
+		}
+
+		const pickup = parseSessionFile(sessionFile);
+		const finalText =
+			lastAssistantText(pickup.messages) || (await readPaneTail(paneId)).trim();
+
+		if (!keepOpen) {
+			try {
+				herdrExecSync(["pane", "close", paneId]);
+			} catch {
+				/* already gone */
+			}
+			forgetCreatedPane(paneId);
+		}
+
+		return {
+			ok: outcome === "done",
+			exitCode: outcome === "done" ? 0 : 1,
+			messages: pickup.messages,
+			model: pickup.model ?? opts.model,
+			errorMessage: outcome === "done" ? undefined : errorMessage,
+			paneId,
+			tabId: tabId ?? "",
+			...(finalText ? { finalText } : {}),
+		};
+	} finally {
+		// Only remove temp files once pi has actually stopped writing to them.
+		if (settled) {
+			try {
+				fs.rmSync(dir, { recursive: true, force: true });
+			} catch {
+				/* best effort */
+			}
+		}
+	}
+}
+
+const ActionSchema = StringEnum(["list", "start", "prompt", "status", "read", "close"] as const, {
 	description: "Herd action to perform",
 });
 const DirectionSchema = StringEnum(["right", "down"] as const, {
@@ -195,8 +699,10 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 				} catch {
 					/* cosmetic — ignore */
 				}
+				// Track the pane so `herd close` is allowed to close it later.
+				recordCreatedPane({ paneId, tabId: "", name, cwd, createdAt: Date.now() });
 				return textResult(
-					`Started pi agent "${name}" in pane ${paneId}.\nYou can target it with herd (name=${name} or pane=${paneId}).`,
+					`Started pi agent "${name}" in pane ${paneId}.\nYou can target it with herd (name=${name} or pane=${paneId}), or close it with herd close ${paneId}.`,
 					{ paneId, name, started },
 				);
 			} catch (error: any) {
@@ -303,6 +809,39 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 			}
 		}
 
+		case "close": {
+			const target = args.name?.trim();
+			if (!target) return textResult("Provide a pane id or agent name to close (action=close).", {});
+			const created = loadCreatedPanes();
+			const matches = created.filter((p) => p.paneId === target || p.name === target);
+			if (matches.length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Refusing to close "${target}": it is not a pane pi-shepherd created. Close other panes directly in Herdr.`,
+						},
+					],
+					details: { target },
+					isError: true,
+				};
+			}
+			const closed: string[] = [];
+			for (const p of matches) {
+				try {
+					herdrExecSync(["pane", "close", p.paneId]);
+					closed.push(p.paneId);
+				} catch {
+					/* already gone — still forget it */
+				}
+				forgetCreatedPane(p.paneId);
+			}
+			return textResult(
+				`Closed pi-shepherd pane(s): ${closed.join(", ") || target}`,
+				{ closed, target },
+			);
+		}
+
 		default:
 			return textResult(`Unknown herd action: ${action}`, {});
 	}
@@ -313,8 +852,9 @@ export function registerHerdTool(pi: ExtensionAPI) {
 		name: "herd",
 		label: "Herd (Herdr agents)",
 		description: [
-			"Manage pi agents running in Herdr panes: list, start a sibling, prompt, status, read.",
-			`Actions: list | start | prompt | status | read. Requires a running Herdr session (HERDR_ENV=1).`,
+			"Manage pi agents running in Herdr panes: list, start a sibling, prompt, status, read, close.",
+			`Actions: list | start | prompt | status | read | close. Requires a running Herdr session (HERDR_ENV=1).`,
+			`Panes created by pi-shepherd (via this tool or pi-subagent) are marked ● and can be closed with close.`,
 			"For isolated one-shot delegation use the 'pi-subagent' tool instead.",
 		].join(" "),
 		parameters: HerdParams,
