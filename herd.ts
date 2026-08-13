@@ -26,6 +26,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
+import { loadSettings } from "./settings.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -402,7 +403,6 @@ function lastAssistantText(messages: Message[]): string {
 }
 
 const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
-const HERDR_RUN_TIMEOUT = 600_000;
 
 /**
  * Run one delegated agent to completion in a new Herdr tab, then pick up the
@@ -435,9 +435,10 @@ export async function runAgentInHerdr(opts: {
 	tabId: string;
 }> {
 	const label = opts.label ?? opts.agentName;
-	const keepOpen = opts.keepOpen ?? true;
-	const stayOpen = opts.stayOpen ?? true;
-	const timeout = opts.timeout ?? HERDR_RUN_TIMEOUT;
+	const settings = loadSettings();
+	const keepOpen = opts.keepOpen ?? settings.keepOpen;
+	const stayOpen = opts.stayOpen ?? settings.stayOpen;
+	const timeout = opts.timeout ?? settings.timeout;
 
 	// Herdr-native: make sure a server is up (auto-starting it from a plain
 	// terminal), then resolve a workspace for the new tab.

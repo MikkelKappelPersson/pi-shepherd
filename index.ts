@@ -7,6 +7,8 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { discoverAgents, formatAgentList } from "./discovery.ts";
+import { loadSettings } from "./settings.ts";
+import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
 import { registerSubagentTool, subagentOnce } from "./subagent.ts";
 import { registerHerdTool, isHerdrAvailable } from "./herd.ts";
 
@@ -14,16 +16,30 @@ export default function (pi: ExtensionAPI) {
 	// Tools for natural-language use.
 	registerSubagentTool(pi);
 	registerHerdTool(pi);
+	registerSettingsCommand(pi);
 
 	pi.registerCommand("pi-shepherd", {
-		description: "pi-shepherd: list | herd | <agent> <task>",
+		description: "pi-shepherd: list | herd | settings | <agent> <task>",
+		// Native inline autocomplete for the subcommand slot — typing
+		// `/pi-shepherd ` shows list/herd/settings + the built-in agents in the
+		// writing-field menu, arrow-selectable, like pi's own /model command.
+		getArgumentCompletions: (prefix) => {
+			const options = ["list", "herd", "settings", "scout", "planner", "reviewer", "worker"];
+			const filtered = options.filter((s) => s.startsWith(prefix));
+			return filtered.length > 0 ? filtered.map((s) => ({ value: s, label: s })) : null;
+		},
 		handler: async (args, ctx: ExtensionCommandContext) => {
 			const arg = (args ?? "").trim();
 
+			if (arg === "settings") {
+				await openSettings(ctx);
+				return;
+			}
+
 			if (arg === "list" || arg === "agents") {
-				// Default scope: user agents + bundled base. Pass an explicit scope to
-				// include project agents (trust-gated) — see discovery.ts.
-				const { agents, projectDirs } = discoverAgents(ctx.cwd, "user");
+				// Default scope from settings; pass an explicit scope to include
+				// project agents (trust-gated) — see discovery.ts.
+				const { agents, projectDirs } = discoverAgents(ctx.cwd, loadSettings().agentScope);
 				const { text, remaining } = formatAgentList(agents, 20);
 				ctx.ui?.notify(
 					`pi-shepherd agents (user scope, ${agents.length}): ${text}${
@@ -68,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui?.notify(
-				`pi-shepherd: try /pi-shepherd list, /pi-shepherd herd, or /pi-shepherd <agent> <task>` +
+				`pi-shepherd: try /pi-shepherd list, /pi-shepherd herd, /pi-shepherd settings, or /pi-shepherd <agent> <task>` +
 					(arg ? ` (unhandled arg: ${arg})` : ""),
 				"info",
 			);

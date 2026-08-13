@@ -90,6 +90,7 @@ findings in a concise list. Do not edit files.
 | `/pi-shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
 | `/pi-shepherd list`                | List discovered agents and their source |
 | `/pi-shepherd herd`                | Herd hint (the `herd` tool does the work) |
+| `/pi-shepherd settings` (`/pi-shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
 
 You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
 parallel — one on auth, one on billing"* — the model uses the `pi-subagent` tool
@@ -182,13 +183,25 @@ Requirements:
 
 ## Configuration
 
+- **Settings menu** — `/pi-shepherd settings` (or `/pi-shepherd-settings`) opens
+  an **inline** settings list in the writing-field slot, exactly like pi's own
+  `/settings`: arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc
+  closes. Settings are stored at `~/.pi/agent/pi-shepherd/settings.json` and read
+  fresh (no reload needed). Every `pi-subagent`/`herd` run falls back to these
+  values when a call doesn't pass them explicitly. Typing `/pi-shepherd ` also
+  shows `list`/`herd`/`settings`/agents in the native autocomplete menu.
+
+### Persisted settings (`settings.json`)
+
 - **Agent scope** — `agentScope: "user" | "project" | "both"` (default `user`).
   Enabling project agents loads repo-controlled prompts; only do this for repos
   you trust.
+- **Confirm project agents** — `confirmProjectAgents` (default `true`): prompt
+  before running repo-controlled project agents.
 - **Agent locations** — the four discovery dirs above. User agents always load;
   add files there to extend the built-in set (user agents override built-ins
   with the same name).
-- **`pi-subagent` options** — `keepOpen` (default `true`: leave the tab open for
+- **`pi-subagent` defaults** — `keepOpen` (default `true`: leave the tab open for
   inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
   subagent's pi process alive after completion so you can keep driving it in the
   tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
@@ -214,6 +227,8 @@ Requirements:
 ~/.pi/agent/extensions/pi-shepherd/
 ├── index.ts          # extension entry: /pi-shepherd command + tool registration
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
+├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
+├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
 ├── subagent.ts       # pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain)
 ├── herd.ts           # herd tool (list/start/prompt/status/read/close) + herdr agent runner (runAgentInHerdr)
 ├── test/             # verification: fixture tree + test/verify-discovery.mjs

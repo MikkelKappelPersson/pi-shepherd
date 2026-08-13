@@ -29,13 +29,13 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
+import { loadSettings } from "./settings.ts";
 import { runAgentInHerdr } from "./herd.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
-const DEFAULT_HERDR_TIMEOUT = 600_000;
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -289,9 +289,9 @@ async function runSingleAgent(
 		};
 	}
 
-	const keepOpen = opts.keepOpen ?? true;
-	const stayOpen = opts.stayOpen ?? true;
-	const timeout = opts.timeout ?? DEFAULT_HERDR_TIMEOUT;
+	const keepOpen = opts.keepOpen ?? loadSettings().keepOpen;
+	const stayOpen = opts.stayOpen ?? loadSettings().stayOpen;
+	const timeout = opts.timeout ?? loadSettings().timeout;
 	const label = opts.label ?? agentName;
 
 	const progress: SingleResult = {
@@ -434,18 +434,19 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const agentScope: AgentScope = params.agentScope ?? "user";
+			const settings = loadSettings();
+			const agentScope: AgentScope = params.agentScope ?? settings.agentScope;
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
-			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+			const confirmProjectAgents = params.confirmProjectAgents ?? settings.confirmProjectAgents;
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
 			const hasSingle = Boolean(params.agent && params.task);
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-			const keepOpen = params.keepOpen ?? true;
-			const stayOpen = params.stayOpen ?? true;
-			const timeout = params.timeout ?? DEFAULT_HERDR_TIMEOUT;
+			const keepOpen = params.keepOpen ?? settings.keepOpen;
+			const stayOpen = params.stayOpen ?? settings.stayOpen;
+			const timeout = params.timeout ?? settings.timeout;
 
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
@@ -1013,7 +1014,7 @@ export async function subagentOnce(params: {
 	cwd: string;
 	scope?: AgentScope;
 }): Promise<{ ok: boolean; text: string; stderr: string }> {
-	const scope = params.scope ?? "user";
+	const scope = params.scope ?? loadSettings().agentScope;
 	const { agents } = discoverAgents(params.cwd, scope);
 	const makeSingle = (results: SingleResult[]): SubagentDetails => ({
 		mode: "single",
