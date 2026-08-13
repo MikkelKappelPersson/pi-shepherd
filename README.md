@@ -182,8 +182,9 @@ Requirements:
 ~/.pi/agent/extensions/pi-shepherd/
 ├── index.ts          # extension entry: /pi-shepherd command + tool registration
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
-├── subagent.ts       # spawn isolated pi subprocesses (single / parallel / chain)
-├── herd.ts           # Herdr CLI wrappers (list / start / prompt / read)
+├── subagent.ts       # spawn isolated pi subprocesses (single / parallel / chain)  [Phase 2]
+├── herd.ts           # Herdr CLI wrappers (list / start / prompt / read)           [Phase 4]
+├── test/             # verification: fixture tree + test/verify-discovery.mjs
 ├── .pi/agents/       # bundled built-in subagents (pi project format)
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format)
 ├── prompts/          # workflow presets (/implement, /scout-and-plan, ...)

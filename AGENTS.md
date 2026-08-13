@@ -21,7 +21,7 @@ that **edit the code**. The implementation roadmap is `PLAN.md`.
 
 ```
 index.ts      extension entry: /pi-shepherd command + tool registration
-discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable)  [Phase 1]
+discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
 subagent.ts   spawn isolated pi subprocesses (single / parallel / chain)      [Phase 2]
 herd.ts       Herdr CLI wrappers (list / start / prompt / read)               [Phase 4]
 .pi/agents/   bundled built-in subagents (pi project format)                  [Phase 3]

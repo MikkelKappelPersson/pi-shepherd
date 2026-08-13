@@ -52,12 +52,12 @@ Plus the `/pi-shepherd` slash command for listing agents and herding.
 
 ---
 
-## Phase 1 — Agent discovery & parsing (`discovery.ts`)
+## Phase 1 — Agent discovery & parsing (`discovery.ts`) ✅
 
-Port the discovery/gate pattern from pi's `examples/extensions/subagent/agents.ts`,
-extended for the four required locations and VS Code syntax.
+Done in `discovery.ts` (+ `test/` harness). Extends pi's subagent example
+pattern for the external locations + two bundled, with VS Code syntax.
 
-- [ ] **Locations & precedence** (later = more specific, wins on name collision):
+- [x] **Locations & precedence** (later = more specific, wins on name collision):
       1. `~/.pi/agent/agents/` (user)
       2. `~/.agents/agents/` (user)
       3. `<project>/.pi/agents/` (project, nearest ancestor walked up)
@@ -70,21 +70,28 @@ extended for the four required locations and VS Code syntax.
       without touching the package. Resolve precedence as
       `user > project > bundled`, with the `.pi/` vs `.agents/` distinction only
       mattering within the bundled base.
-- [ ] Accept both `.agent.md` and `.md` extensions in each dir.
-- [ ] Parse **VS Code custom-agent frontmatter** via `parseFrontmatter`:
-      `name`, `description`, `tools`, `model`, `user-invocable`,
-      `disable-model-invocation`, `agents`, `handoffs`. Map `tools` to pi tool
-      names; keep unknown fields for diagnostics.
-- [ ] Precedence: project overrides user with same `name`. Built-in agents in
-      `agents/` dirs load from the bundled package dirs and are the
-      lowest-precedence base.
-- [ ] **Trust gating**: `agentScope: "user" | "project" | "both"` (default
-      `user`). Project agents only load when enabled; when interactive, confirm
-      before running a project agent.
-- [ ] Expose `discoverAgents(cwd, scope)` + `formatAgentList()` (pure, unit-free
-      but simple to eyeball).
-- **Accept**: `discoverAgents` returns the correct set/precedence for each of
-  the four locations; `formatAgentList` shows name + source.
+- [x] Accept both `.agent.md` and `.md` extensions in each dir.
+- [x] Parse **VS Code custom-agent frontmatter** via `parseFrontmatter`:
+      `name`, `description`, `tools`, `model` + pass-through `user-invocable`,
+      `disable-model-invocation`, `agents`, `handoffs`. `tools` accepts
+      comma-string or YAML array.
+- [x] Precedence: first location (earlier in the 1-6 order) declaring a name
+      wins; within a dir an earlier file wins. Bundled dirs are the base set.
+- [x] **Trust gating**: `agentScope: "user" | "project" | "both"` (default
+      `user`) in `discoverAgents`. Project agents only load when enabled.
+- [x] Expose `discoverAgents(cwd, scope)` + `formatAgentList()` (pure).
+- [x] `test/verify-discovery.mjs` — fixture tree in `test/fixtures/` exercises
+      all locations + precedence + scope filtering (sets `$HOME` to the
+      fixture home to control user dirs). Run: `npm run discovery:test`.
+
+  > Needs `node_modules/@earendil-works/pi-coding-agent` resolvable for the
+  > standalone `node` test (symlink to the pi install or `npm i`), since pi
+  > itself supplies that resolution at runtime.
+
+- **Accept**: ✅ `discoverAgents` returns the correct set/precedence for each
+  of the four locations + bundled; `formatAgentList` shows name + source.
+  Wired into `/pi-shepherd list`; extension loads cleanly under pi (no
+  `./discovery.ts` resolve error).
 
 ---
 
