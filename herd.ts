@@ -237,6 +237,8 @@ interface CreatedPane {
 	name: string;
 	cwd: string;
 	createdAt: number;
+	/** Temp launch dir (if any) to remove when this pane is closed. */
+	dir?: string;
 }
 
 function registryFile(): string {
@@ -272,6 +274,42 @@ function recordCreatedPane(entry: CreatedPane): void {
 
 function forgetCreatedPane(paneId: string): void {
 	saveCreatedPanes(loadCreatedPanes().filter((p) => p.paneId !== paneId));
+}
+
+/**
+ * Attach (or overwrite) the temp launch dir for an existing pane so that
+ * `herd close` can clean it up. The pane is registered early (for orphan
+ * safety) but its launch dir is only known once pi is booted, so we set it
+ * afterwards.
+ */
+function setCreatedPaneDir(paneId: string, dir: string): void {
+	const panes = loadCreatedPanes();
+	const entry = panes.find((p) => p.paneId === paneId);
+	if (!entry) return;
+	entry.dir = dir;
+	saveCreatedPanes(panes);
+}
+
+/** Best-effort removal of a pane's retained temp launch dir. */
+function removeCreatedPaneDir(paneId: string): void {
+	const entry = loadCreatedPanes().find((p) => p.paneId === paneId);
+	if (!entry?.dir) return;
+	try {
+		fs.rmSync(entry.dir, { recursive: true, force: true });
+	} catch {
+		/* best effort */
+	}
+}
+
+/** True when Herdr still lists a pane with this id. */
+function paneExists(paneId: string): boolean {
+	try {
+		const out = herdrExecSync(["pane", "list"]) as any;
+		const panes = out?.result?.panes as Array<{ pane_id?: unknown }> | undefined;
+		return Array.isArray(panes) && panes.some((p) => p?.pane_id === paneId);
+	} catch {
+		return true; // assume present when we can't check — safer to not delete
+	}
 }
 
 /** True when this pane id (or the agent name it was created under) belongs to pi-shepherd. */
@@ -588,6 +626,10 @@ export async function runAgentInHerdr(opts: {
 		model: opts.model,
 		tools: opts.tools,
 	});
+	// Remind the registry where this pane's temp dir lives so `herd close` can
+	// clean it up if this pane is left open (stayOpen/keepOpen). Harmless when
+	// the run settles and removes the dir itself (force rm of a missing path).
+	setCreatedPaneDir(paneId, dir);
 
 	let settled = false;
 	let outcome: "done" | "error" | null = null;
@@ -804,7 +846,8 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 					/* cosmetic — ignore */
 				}
 
-				launchPiInPane(paneId, { name, task, stayOpen: true });
+				const landing = launchPiInPane(paneId, { name, task, stayOpen: true });
+				setCreatedPaneDir(paneId, landing.dir);
 
 				// Advisory post-start readiness check (never errors — the pane is
 				// visibly open and the launch script ran).
@@ -978,11 +1021,22 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 			}
 			const closed: string[] = [];
 			for (const p of matches) {
+				let gone = false;
 				try {
 					herdrExecSync(["pane", "close", p.paneId]);
-					closed.push(p.paneId);
+					gone = true;
 				} catch {
-					/* already gone — still forget it */
+					// Don't assume failure means "already gone": a transient/CLI/busy
+					// error leaves the pane alive with pi still writing its session
+					// file — deleting the dir then would break the ENOENT invariant.
+					// Only treat it as gone if Herdr no longer lists the pane.
+					gone = !paneExists(p.paneId);
+				}
+				if (gone) {
+					closed.push(p.paneId);
+					// Confirmed closed (or confirmed no longer present) → safe to drop
+					// the pane's retained temp launch dir now that pi is gone.
+					removeCreatedPaneDir(p.paneId);
 				}
 				forgetCreatedPane(p.paneId);
 			}
