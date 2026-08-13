@@ -1,0 +1,12 @@
+{
+  "name": "pi-shepherd",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "No-fuss pi extension: subagents + herding pi agents in Herdr",
+  "scripts": {
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "check": "echo 'nothing to check'"
+  }
+}
