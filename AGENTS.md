@@ -52,7 +52,6 @@ settings.ts   persisted defaults store (~/.pi/agent/pi-shepherd/settings.json, m
 settings-ui.ts  /pi-shepherd settings menu (inline in the editor slot, SettingsList) ✅
 .pi/agents/   bundled built-in subagents (pi project format)                  ✅
 .agents/agents/  bundled built-in subagents (shared/cross-tool format)        ✅
-prompts/      workflow presets (/implement, /scout-and-plan, ...)             [future]
 ```
 
 Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
