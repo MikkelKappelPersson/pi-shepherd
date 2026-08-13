@@ -23,7 +23,7 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "user" | "project" | "bundled";
 	filePath: string;
 	// Pass-through frontmatter (carried as-is when present)
 	userInvocable?: unknown;
@@ -37,7 +37,7 @@ export interface AgentDiscoveryResult {
 	projectDirs: string[];
 }
 
-type Source = "user" | "project";
+type Source = "user" | "project" | "bundled";
 
 /** A candidate directory plus which source bucket it belongs to. */
 interface Location {
@@ -184,8 +184,8 @@ function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[]): 
 	}
 
 	if (scope === "user" || scope === "project" || scope === "both") {
-		locations.push({ dir: bundledPi, source: "project" });
-		locations.push({ dir: bundledAgents, source: "project" });
+		locations.push({ dir: bundledPi, source: "bundled" });
+		locations.push({ dir: bundledAgents, source: "bundled" });
 	}
 
 	return locations;

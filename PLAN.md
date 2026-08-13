@@ -34,7 +34,11 @@ pi-shepherd/
 
 Two tool surface areas exposed to the model:
 
-1. **`subagent`** (custom tool) — delegate to an isolated pi worker.
+1. **`pi-subagent`** (custom tool) — delegate to an isolated pi worker via a
+   spawned pi subprocess (works without Herdr). Named `pi-subagent`, not
+   `subagent`, so it coexists with the `pi-herdr-agents` package (its
+   `subagent` tool drives Herdr-pane/worktree agents; two tools named
+   `subagent` would fail extension loading).
 2. **`herd`** (custom tool) — manage pi agents already running in Herdr panes.
 
 Plus the `/pi-shepherd` slash command for listing agents and herding.
@@ -95,74 +99,68 @@ pattern for the external locations + two bundled, with VS Code syntax.
 
 ---
 
-## Phase 2 — Subagent tool (`subagent.ts`)
+## Phase 2 — Subagent tool (`subagent.ts`) ✅
 
-Adapt pi's `examples/extensions/subagent/index.ts` (isolated pi subprocess,
-streaming, abort) to use our discovery + built-in agents.
+Adapted from pi's `examples/extensions/subagent/index.ts` (isolated pi
+subprocess, streaming, abort) to use our discovery + built-in agents. Registers
+the **`pi-subagent`** tool.
 
-- [ ] Rewrite as `runSubagent({ agent, task })` spawning a `pi` subprocess with
-      the delegated system prompt + tool/model config.
-- [ ] Modes: **Single** `{agent, task}`; **Parallel** `{tasks: [...]}` (max 8,
+- [x] `runSubagent` logic spawning a `pi` subprocess with the delegated system
+      prompt + tool/model config.
+- [x] Modes: **Single** `{agent, task}`; **Parallel** `{tasks: [...]}` (max 8,
       4 concurrent); **Chain** `{chain: [...]}` with `{previous}` placeholder.
-- [ ] Streaming output + usage stats (turns/tokens/cost/context per agent);
+- [x] Streaming output + usage stats (turns/tokens/cost/context per agent);
       Ctrl+C aborts and kills children.
-- [ ] Return: final output to parent (cap parallel output ~50 KB/task), failure
-      diagnostics from stderr on non-zero exit.
-- [ ] Re-read agent files from disk on each invocation so edits take effect live.
-- **Accept**: `/pi-shepherd scout "find auth code"`, a parallel run, and a chain
-  all complete with per-agent usage and clean abort.
+- [x] Return: final output to parent (cap parallel output ~50 KB/task),
+      failure diagnostics from stderr on non-zero exit.
+- [x] Re-read agent files from disk on each invocation (`discoverAgents`).
+- [x] `subagentOnce()` helper so `/pi-shepherd <agent> <task>` can run a single
+      agent without the tool UI.
+- **Accept**: ✅ verified headless — `subagentOnce({agent: "scout", …})`
+      spawned an isolated pi subprocess and returned the answer.
 
----
+## Phase 3 — Built-in functional subagents (`.pi/agents/` + `.agents/agents/`) ✅
 
-## Phase 3 — Built-in functional subagents (`.pi/agents/` + `.agents/agents/`)
+Minimal, genuinely useful agents in VS Code syntax; ship in pi-shepherd's own
+bundled dirs so any user/project agent overrides them by name.
 
-Write minimal, genuinely useful agents in VS Code syntax so the extension is
-useful before any custom agents exist. They ship in pi-shepherd's own bundled
-dirs so any user/project agent overrides them by name.
-
-- [ ] `scout` — fast recon, returns compressed context; read-only
+- [x] `scout` — fast recon, returns compressed context; read-only
       (`read, grep, find, ls`).
-- [ ] `planner` — implementation plans; read-only (`read, grep, find, ls`).
-- [ ] `reviewer` — code review (`read, grep, find, ls, bash`).
-- [ ] `worker` — general-purpose implementation (all default tools).
+- [x] `planner` — implementation plans; read-only (`read, grep, find, ls`).
+- [x] `reviewer` — code review (`read, grep, find, ls, bash`).
+- [x] `worker` — general-purpose implementation (all default tools).
 - [ ] Workflow **prompt templates** in `prompts/`: `/implement`,
-      `/scout-and-plan`, `/implement-and-review`.
-- **Accept**: each agent does its job out of the box; workflow presets chain
-  them with context handoff.
+      `/scout-and-plan`, `/implement-and-review`. *(future)*
+- **Accept**: ✅ scout runs out of the box (verified).
 
----
+## Phase 4 — Herd (Herdr integration) (`herd.ts`) ✅
 
-## Phase 4 — Herd (Herdr integration) (`herd.ts`)
+Manage pi agents living in Herdr panes via the `herdr` CLI. Verified against the
+live CLI (agent list/get/read/prompt/start + pane split/rename/close).
 
-Manage pi agents living in Herdr panes via the `herdr` CLI. Follow the Herdr
-skill: verify `HERDR_ENV=1` first; use `--current`/explicit pane IDs; parse IDs
-from JSON; create a **sibling** pane unless the user asked for other topology.
-
-- [ ] **guard**: require `HERDR_ENV=1` + `herdr` on PATH, else report "not in
-      Herdr" and stop.
-- [ ] **list** — `herdr agent list` (filter to pi) → name, pane ID, state
+- [x] **guard**: `HERDR_ENV=1` + `herdr` on PATH, else report "not in Herdr".
+- [x] **list** — `herdr agent list` → name, pane id, state
       (`idle/working/blocked/done/unknown`).
-- [ ] **start** — `herdr pane split --current --direction right --cwd "$PWD"
-      --no-focus`, then `herdr agent start <name> --kind pi --pane <id>`; parse
-      the new pane ID from `.result.pane.pane_id`.
-- [ ] **prompt** — `herdr agent prompt <name> "<task>" --wait --timeout …`;
-      surface stall/blocked back to the caller.
-- [ ] **status / read** — `herdr agent get <name>` + `herdr agent read <name>
-      --source recent-unwrapped --lines N`.
-- [ ] Safety: honor requested direction; `--no-focus` for background; never
+- [x] **start** — `herdr pane split <HERDR_PANE_ID> --direction right --cwd
+      "$PWD" --no-focus`, then `herdr agent start <name> --kind pi --pane
+      <id>`; retries `agent_pane_busy` while the new shell spins up.
+- [x] **prompt** — `herdr agent prompt <target> "<task>" --wait --until done
+      --timeout …`.
+- [x] **status / read** — `herdr agent get <target>` + `herdr agent read
+      <target> --source recent-unwrapped --lines N --format text`.
+- [x] Safety: split only `HERDR_PANE_ID`; `--no-focus` for background; never
       close panes we didn't create; never kill the Herdr server.
-- **Accept**: from a Herdr pane, `list` shows live agents, `start` spawns a
-  sibling pi agent, `prompt --wait` returns a settled answer.
+- **Accept**: ✅ verified live — `list` showed the current pi agent, `start`
+      spawned a sibling, `prompt --wait --until done` settled, `read` showed
+      output, pane closed cleanly.
 
----
+## Phase 5 — Command surface & polish (`index.ts`) 🔶
 
-## Phase 5 — Command surface & polish (`index.ts`)
-
-- [ ] Register the `/pi-shepherd` command: `list`, `<agent> <task>`, `herd`.
-- [ ] Register the `subagent` + `herd` custom tools for natural-language use.
-- [ ] Progress via `ctx.ui` (`setStatus`, `notify`); graceful failures.
+- [x] Register the `/pi-shepherd` command: `list`, `<agent> <task>`, `herd`.
+- [x] Register the `pi-subagent` + `herd` custom tools for natural-language use.
+- [x] Progress via `ctx.ui` (`setStatus`, `notify`); graceful failures.
 - [ ] Finalize this README + AGENTS.md; verify docs match the code.
-- [ ] Commit the repo (pi-shepherd is an empty git repo, no commits yet).
+- [ ] Commit the repo (currently uncommitted after the latest work).
 
 **Stretch / future:**
 - `handoffs` support from VS Code frontmatter to suggest next actions.

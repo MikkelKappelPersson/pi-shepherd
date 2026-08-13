@@ -11,13 +11,21 @@ you ──► /pi-shepherd ──► subagents (isolated pi workers, self-contai
         └────────────► herd   (pi agents running in Herdr panes — list / start / prompt / status)
 ```
 
-Two capabilities, one extension:
+Two capabilities, one extension, exposed to the model as two **tools**:
 
-- **Subagents** — delegate tasks to isolated pi subprocesses so each has its own
-  context window. Ships with a small set of functional subagents (`scout`,
-  `planner`, `reviewer`, `worker`) so it works before you write your own.
-- **Herd** — manage the pi agents living in your Herdr panes: see what they're
-  doing, start a sibling agent, push a prompt, wait for an answer.
+- **`pi-subagent`** — delegate tasks to isolated pi subprocesses so each has its
+  own context window. Ships with functional subagents (`scout`, `planner`,
+  `reviewer`, `worker`) so it works before you write your own. Unlike the
+  `subagent` tool from `pi-herdr-agents`, this needs **no Herdr** — it works in
+  a plain terminal.
+- **`herd`** — manage the pi agents living in your Herdr panes: see what they're
+  doing (`list`), start a sibling agent (`start`), push a prompt (`prompt`),
+  and check status / read output (`status`, `read`).
+
+> **Compatibility:** the tool is named **`pi-subagent`** (not `subagent`) so it
+> coexists with the `pi-herdr-agents` package, whose own `subagent` tool drives
+> same-name Herdr-pane/worktree agents. Registering two tools called `subagent`
+> would make pi fail to load any extension.
 
 Agent definitions are loaded from plain Markdown files using the
 [standard VS Code custom-agent syntax](https://code.visualstudio.com/docs/agent-customization/custom-agents)
@@ -72,16 +80,17 @@ findings in a concise list. Do not edit files.
 
 ## Usage
 
-### Subagents (isolated workers)
+### Subagents (isolated workers) — `pi-subagent`
 
 | Command | Action |
 |---------|--------|
 | `/pi-shepherd <agent> <task>`      | Run one subagent on a task |
 | `/pi-shepherd list`                | List discovered agents and their source |
-| `/pi-shepherd herd`                | List pi agents currently running in Herdr panes |
+| `/pi-shepherd herd`                | Herd hint (the `herd` tool does the work) |
 
 You can also instruct pi naturally: *"run 2 scouts in parallel — one on auth,
-one on billing"* or *"use review on the last commit"*.
+one on billing"* or *"use review on the last commit"* — the model uses the
+`pi-subagent` tool (single / parallel / chain) to do it.
 
 A subagent runs as its own **pi subprocess** with a delegated system prompt and
 its own tool/model config. You get streaming output, per-agent usage stats
@@ -106,13 +115,14 @@ pi-shepherd drives Herdr through the `herdr` CLI (Herdr must be running and
 - **Prompt** — send a task to a named agent across the floor and wait for it to settle.
 - **Status / read** — check lifecycle state and pull recent output from a pane.
 
-Example:
+Example (what the `herd` tool does under the hood):
 
 ```bash
-# under the hood — start a reviewer agent as a right-hand sibling
-herdr pane split --current --direction right --cwd "$PWD" --no-focus
-herdr agent start reviewer --kind pi --pane <pane-id>
-herdr agent prompt reviewer "Review the current diff." --wait --timeout 120000
+# start a reviewer agent as a right-hand sibling of the current pane
+herdr pane split "$HERDR_PANE_ID" --direction right --cwd "$PWD" --no-focus
+herdr agent start reviewer --kind pi --pane <pane-id>   # may need a retry while the shell spins up
+herdr agent prompt <pane-id> "Review the current diff." --wait --until done --timeout 120000
+herdr agent read <pane-id> --source recent-unwrapped --lines 40 --format text
 ```
 
 ---
@@ -182,12 +192,12 @@ Requirements:
 ~/.pi/agent/extensions/pi-shepherd/
 ├── index.ts          # extension entry: /pi-shepherd command + tool registration
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
-├── subagent.ts       # spawn isolated pi subprocesses (single / parallel / chain)  [Phase 2]
-├── herd.ts           # Herdr CLI wrappers (list / start / prompt / read)           [Phase 4]
+├── subagent.ts       # spawn isolated pi subprocesses; registers the pi-subagent tool
+├── herd.ts           # Herdr CLI wrappers; registers the herd tool (list/start/prompt/status/read)
 ├── test/             # verification: fixture tree + test/verify-discovery.mjs
-├── .pi/agents/       # bundled built-in subagents (pi project format)
-├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format)
-├── prompts/          # workflow presets (/implement, /scout-and-plan, ...)
+├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
+├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)
+├── prompts/          # workflow presets (/implement, /scout-and-plan, ...)  [future]
 ├── README.md         # this file
 └── PLAN.md           # implementation roadmap
 ```

@@ -21,12 +21,12 @@ that **edit the code**. The implementation roadmap is `PLAN.md`.
 
 ```
 index.ts      extension entry: /pi-shepherd command + tool registration
+subagent.ts   pi-subagent tool: isolated pi subprocesses (single/parallel/chain) ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
-subagent.ts   spawn isolated pi subprocesses (single / parallel / chain)      [Phase 2]
-herd.ts       Herdr CLI wrappers (list / start / prompt / read)               [Phase 4]
-.pi/agents/   bundled built-in subagents (pi project format)                  [Phase 3]
-.agents/agents/  bundled built-in subagents (shared/cross-tool format)        [Phase 3]
-prompts/      workflow presets (/implement, /scout-and-plan, ...)             [Phase 3]
+herd.ts       herd tool: Herdr CLI wrappers (list/start/prompt/status/read)    ✅
+.pi/agents/   bundled built-in subagents (pi project format)                  ✅
+.agents/agents/  bundled built-in subagents (shared/cross-tool format)        ✅
+prompts/      workflow presets (/implement, /scout-and-plan, ...)             [future]
 ```
 
 Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
@@ -49,6 +49,12 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
   run repo-controlled prompts by default.
 - **Agent files are read fresh from disk every invocation** — never cache, so
   edits take effect live.
+- **Tool names must not collide with `pi-herdr-agents`.** That package (an npm
+  pi-package, always present here) registers `subagent`, `subagent_interrupt`,
+  `subagents_list`, `subagent_resume`, `herdr_workflow`. Registering our own
+  `subagent` would make pi refuse to load any extension.
+  → Our isolated worker tool is **`pi-subagent`**; herd is **`herd`**. Do not
+  rename them to `subagent`/`herd` conflicting names.
 - **Herdr safety** (from the Herdr skill): verify `HERDR_ENV=1` first; prefer
   `--current` / explicit pane IDs; create a **sibling** pane with `--no-focus`
   unless the user asked for other topology; parse IDs from JSON, never guess;
