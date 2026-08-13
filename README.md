@@ -132,15 +132,18 @@ plain terminal — the headless server is started/attached automatically).
 - **Status / read** — check lifecycle state and pull recent output from a pane.
 - **Close** — close a pane that pi-shepherd created (by pane id or agent name). It refuses to close panes it didn't create (safety).
 
-Example (what the `herd` tool does under the hood):
+Example (what the `herd` tool does under the hood — the task is delivered at launch via the same pane-run launch script the delegation path uses, so it lands reliably instead of relying on flaky `herdr agent start`/prompt keystroke timing):
 
 ```bash
-# start a reviewer agent as a right-hand sibling of the current pane
+# start a reviewer agent as a right-hand sibling of the current pane, task baked in
 herdr pane split "$HERDR_PANE_ID" --direction right --cwd "$PWD" --no-focus
-herdr agent start reviewer --kind pi --pane <pane-id>   # may need a retry while the shell spins up
-herdr agent prompt <pane-id> "Review the current diff." --wait --until done --timeout 120000
+# wait for its shell, then boot pi with the launch script (session + @task file)
+herdr pane run <pane-id> 'bash /tmp/pi-shepherd-*/launch-reviewer.sh'
 herdr agent read <pane-id> --source recent-unwrapped --lines 40 --format text
 ```
+
+A `herd start` with no `task` boots a bare pi you drive later with `herd prompt`; a
+`task` given to `start` is delivered at launch.
 
 ---
 

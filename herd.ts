@@ -379,6 +379,104 @@ function sendEscapeInHerdr(paneId: string): void {
 	}
 }
 
+/**
+ * One sharable implementation of the launch files used to start a pi in a
+ * Herdr pane, used by both `runAgentInHerdr` (one-shot delegation) and
+ * `herd start` (persistent sibling). Writing is heredoc-safe: execFile
+ * arrays plus a `'@taskFile'` argument that bash unquotes.
+ *
+ * When `task` is undefined a *bare* pi is launched (no sysprompt/task/model/
+ * tools) so the pane is a plain agent the user drives later with `prompt`.
+ * The shepherd-done extension + env vars are always wired in, so the pane
+ * participates in the same completion sidecar lifecycle as delegated runs.
+ */
+function writePiLaunchFiles(opts: {
+	name: string;
+	task?: string;
+	systemPrompt?: string;
+	stayOpen: boolean;
+	model?: string;
+	tools?: string[];
+}): { dir: string; sessionFile: string; scriptFile: string } {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shepherd-"));
+	const safe = opts.name.replace(/[^\w.-]+/g, "_") || "agent";
+	const sessionFile = path.join(dir, `session-${safe}.jsonl`);
+	const scriptFile = path.join(dir, `launch-${safe}.sh`);
+	const doneExt = fileURLToPath(new URL("./shepherd-done.ts", import.meta.url));
+
+	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
+	if (opts.model) args.push("--model", shellQuote(opts.model));
+	const tools =
+		opts.tools && opts.tools.length > 0
+			? [...opts.tools, "shepherd_done"].join(",")
+			: undefined;
+	if (tools) args.push("--tools", tools);
+
+	if (opts.task !== undefined) {
+		const sysFile = path.join(dir, `sysprompt-${safe}.md`);
+		const taskFile = path.join(dir, `task-${safe}.md`);
+		fs.writeFileSync(sysFile, opts.systemPrompt ?? "", { encoding: "utf8", mode: 0o600 });
+		const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
+		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600 });
+		args.push("--append-system-prompt", shellQuote(sysFile));
+		args.push(`'@${taskFile}'`);
+	}
+
+	const launchScript = [
+		"#!/bin/bash",
+		`export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
+		"export PI_SHEPHERD_AUTO_EXIT=1",
+		opts.stayOpen ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
+		`pi ${args.join(" ")}; echo '__SHEPHERD_DONE_'$?'__'`,
+	].join("\n");
+	fs.writeFileSync(scriptFile, launchScript, { mode: 0o700 });
+	return { dir, sessionFile, scriptFile };
+}
+
+/**
+ * Boot pi in an existing pane via the launch script (same mechanism as the
+ * one-shot delegation path). The temp dir is intentionally RETAINED while the
+ * pane's pi is alive — removing it would make the still-running pi hit ENOENT
+ * on its own session file (AGENTS.md invariant).
+ */
+function launchPiInPane(
+	paneId: string,
+	opts: { name: string; task?: string; stayOpen: boolean },
+): { dir: string; sessionFile: string; scriptFile: string } {
+	const files = writePiLaunchFiles(opts);
+	sendCommandInHerdr(paneId, `bash ${shellQuote(files.scriptFile)}`);
+	return files;
+}
+
+/**
+ * Poll until Herdr has detected the agent session for the pane (or timeout).
+ * Used as the post-start readiness check and the pre-prompt gate.
+ */
+async function waitForHerdrAgentDetected(
+	paneId: string,
+	options: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<{ detected: boolean; state?: string }> {
+	const timeoutMs = options.timeoutMs ?? 20_000;
+	const intervalMs = options.intervalMs ?? 500;
+	const deadline = Date.now() + timeoutMs;
+	let state: string | undefined;
+	while (Date.now() <= deadline) {
+		try {
+			const out = herdrExecSync(["agent", "get", paneId]);
+			const rec = (out as any)?.result?.agent as Record<string, unknown> | undefined;
+			if (rec && rec.pane_id === paneId) {
+				state = typeof rec.agent_status === "string" ? rec.agent_status : undefined;
+				return { detected: true, state };
+			}
+		} catch {
+			/* not yet detected */
+		}
+		if (Date.now() >= deadline) break;
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+	return { detected: false, state };
+}
+
 async function readPaneTail(paneId: string): Promise<string> {
 	try {
 		const { stdout } = await execFileAsync(
@@ -482,44 +580,14 @@ export async function runAgentInHerdr(opts: {
 
 	await waitForHerdrShellReady(paneId);
 
-	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-shepherd-"));
-	const safe = opts.agentName.replace(/[^\w.-]+/g, "_") || "agent";
-	const sessionFile = path.join(dir, `session-${safe}.jsonl`);
-	const sysFile = path.join(dir, `sysprompt-${safe}.md`);
-	const taskFile = path.join(dir, `task-${safe}.md`);
-	const scriptFile = path.join(dir, `launch-${safe}.sh`);
-	const doneExt = fileURLToPath(new URL("./shepherd-done.ts", import.meta.url));
-
-	await fs.promises.writeFile(sysFile, opts.systemPrompt, {
-		encoding: "utf8",
-		mode: 0o600,
+	const { dir, sessionFile, scriptFile } = writePiLaunchFiles({
+		name: opts.agentName,
+		task: opts.task,
+		systemPrompt: opts.systemPrompt,
+		stayOpen,
+		model: opts.model,
+		tools: opts.tools,
 	});
-	const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
-	await fs.promises.writeFile(taskFile, task, { encoding: "utf8", mode: 0o600 });
-
-	const args: string[] = [
-		"--session",
-		shellQuote(sessionFile),
-		"-e",
-		shellQuote(doneExt),
-	];
-	if (opts.model) args.push("--model", shellQuote(opts.model));
-	const tools =
-		opts.tools && opts.tools.length > 0
-			? [...opts.tools, "shepherd_done"].join(",")
-			: undefined;
-	if (tools) args.push("--tools", tools);
-	args.push("--append-system-prompt", shellQuote(sysFile));
-	args.push(`'@${taskFile}'`);
-
-	const launchScript = [
-		"#!/bin/bash",
-		`export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
-		"export PI_SHEPHERD_AUTO_EXIT=1",
-		stayOpen ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
-		`pi ${args.join(" ")}; echo '__SHEPHERD_DONE_'$?'__'`,
-	].join("\n");
-	await fs.promises.writeFile(scriptFile, launchScript, { mode: 0o700 });
 
 	let settled = false;
 	let outcome: "done" | "error" | null = null;
@@ -652,10 +720,10 @@ const HerdParams = Type.Object({
 	name: Type.Optional(
 		Type.String({
 			description:
-				"Agent name or pane id target. For start: the label for the new sibling agent.",
+				"Agent name or pane id target; also the label used for the new pane on start.",
 		}),
 	),
-	task: Type.Optional(Type.String({ description: "Prompt to submit (action=prompt)" })),
+	task: Type.Optional(Type.String({ description: "Prompt to submit (action=prompt). When given with action=start, the task is delivered to the new sibling at launch." })),
 	direction: Type.Optional(DirectionSchema),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane (action=start)" })),
 	timeout: Type.Optional(
@@ -693,52 +761,63 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 			const name = args.name?.trim();
 			if (!name) return textResult("Provide a name for the new agent (action=start).", {});
 			const cwd = args.cwd ?? ctx.cwd ?? process.cwd();
-			const parentPane = process.env.HERDR_PANE_ID;
-			if (!parentPane)
-				return textResult("Cannot start: HERDR_PANE_ID is not set (not in a Herdr pane).", {});
 			const direction = args.direction ?? "right";
+			const task = args.task?.trim() || undefined;
 
-			// Split our own pane to create a sibling; reference target output.
-			const splitOut = herdrExecSync([
-				"pane", "split", parentPane,
-				"--direction", direction,
-				"--cwd", cwd,
-				"--no-focus",
-			]);
-			const paneId = paneIdOf(splitOut, "pane split");
+			let paneId: string;
+			let tabId = "";
+			const parentPane = process.env.HERDR_PANE_ID;
+			if (parentPane) {
+				// Split our own pane to create a sibling; reference target output.
+				const splitOut = herdrExecSync([
+					"pane", "split", parentPane,
+					"--direction", direction,
+					"--cwd", cwd,
+					"--no-focus",
+				]);
+				paneId = paneIdOf(splitOut, "pane split");
+			} else {
+				// From a plain terminal there is no pane to split — fall back to a
+				// fresh tab in the resolved workspace (reuses the delegation helpers).
+				const created = createHerdrTab(name, cwd, getHerdrWorkspaceId());
+				paneId = created.paneId;
+				tabId = created.tabId;
+			}
+
+			// Track the pane as soon as it exists (BEFORE any await) so that even a
+			// shell-ready timeout or failed launch leaves a pane `herd close` may
+			// close — never a closable orphan. Idempotent, so the later launch path
+			// is unaffected.
+			recordCreatedPane({ paneId, tabId, name, cwd, createdAt: Date.now() });
+
 			try {
-				// `herdr agent start` only accepts a pane that is at an idle shell
-				// prompt. A freshly split pane can briefly report agent_pane_busy
-				// while its shell spins up — retry with backoff.
-				const start = async (): Promise<unknown> =>
-					herdrExec(["agent", "start", name, "--kind", "pi", "--pane", paneId, "--timeout", "30000"]);
-
-				let started: unknown;
-				let lastError: unknown = null;
-				for (let attempt = 0; attempt < 10; attempt++) {
-					try {
-						started = await start();
-						lastError = null;
-						break;
-					} catch (error: any) {
-						lastError = error;
-						const raw = String(error?.stderr || error?.message || error);
-						if (!raw.includes("agent_pane_busy")) throw error;
-						await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
-					}
-				}
-				if (lastError) throw lastError;
+				// The flaky `herdr agent start` lifecycle is intentionally skipped:
+				// it injected no task and its keystroke prompt timing silently ate
+				// tasks on never-focused panes. Instead wait for the shell, boot pi
+				// via the trusted launch script (task baked in at launch), and let
+				// Herdr auto-detect the session (same as delegation panes do).
+				await waitForHerdrShellReady(paneId);
 
 				try {
 					herdrExecSync(["pane", "rename", paneId, name]);
 				} catch {
 					/* cosmetic — ignore */
 				}
-				// Track the pane so `herd close` is allowed to close it later.
-				recordCreatedPane({ paneId, tabId: "", name, cwd, createdAt: Date.now() });
+
+				launchPiInPane(paneId, { name, task, stayOpen: true });
+
+				// Advisory post-start readiness check (never errors — the pane is
+				// visibly open and the launch script ran).
+				const det = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
+				const delivered = task !== undefined ? "task delivered" : "no task";
+				const advisory = det.detected
+					? ` (agent state: ${det.state ?? "unknown"})`
+					: "\npi is booting — verify with herd status " + paneId + ".";
 				return textResult(
-					`Started pi agent "${name}" in pane ${paneId}.\nYou can target it with herd (name=${name} or pane=${paneId}), or close it with herd close ${paneId}.`,
-					{ paneId, name, started },
+					`Started pi agent "${name}" in pane ${paneId} [${delivered}].` +
+						advisory +
+						`\nDrive it with herd prompt ${paneId} ..., or close with herd close ${paneId}.`,
+					{ paneId, name, taskDelivered: task !== undefined, agentState: det.state },
 				);
 			} catch (error: any) {
 				// If start failed, the sibling pane still exists — leave it so the
@@ -749,7 +828,7 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 							type: "text",
 							text: `Created pane ${paneId} but failed to start pi agent "${name}": ${
 								error?.message ?? String(error)
-							}\nThe pane is left open for inspection.`,
+						}\nThe pane is left open for inspection.`,
 						},
 					],
 					details: { paneId, name, error: String(error?.message ?? error) },
@@ -757,30 +836,67 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 				};
 			}
 		}
-
 		case "prompt": {
 			const target = args.name?.trim();
 			const task = args.task?.trim() || "";
 			if (!target || !task)
 				return textResult("Provide a name/pane target and a task (action=prompt).", {});
 			const timeout = args.timeout ?? 120_000;
-			try {
-				const out = await herdrExec([
-					"agent", "prompt", target, task,
-					"--wait", "--until", "done",
-					"--timeout", String(timeout),
-				]);
-				return textResult(`Prompt returned (${JSON.stringify((out as any)?.result ?? out)}).`, {
-					name: target,
-					result: out,
-				});
-			} catch (error: any) {
-				const raw = error?.stderr || error?.stdout || String(error?.message ?? error);
+			// Resolve a shepherd pane by its recorded paneId or label — a bare
+			// label like "worker" isn't directly addressable by Herdr.
+			const created = loadCreatedPanes();
+			const match = created.find((p) => p.paneId === target || p.name === target);
+			const resolved = match?.paneId ?? target;
+			// Readiness gate — never send a task to a pane Herdr hasn't detected
+			// (the old code could silently eat tasks this way). Nothing is sent
+			// if the agent isn't confirmed present.
+			const det = await waitForHerdrAgentDetected(resolved, {
+				timeoutMs: Math.min(timeout, 15_000),
+			});
+			if (!det.detected) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Prompt to "${target}" did not settle: ${raw}`.slice(0, 4000),
+							text: `Agent "${target}" was not detected in Herdr — nothing was sent. Confirm the pane is running pi (herd status/read), then retry.`,
+						},
+					],
+					details: { name: target, pane: resolved, error: "agent not detected" },
+					isError: true,
+				};
+			}
+			const preTail = await readPaneTail(resolved);
+			try {
+				const out = await herdrExec([
+					"agent", "prompt", resolved, task,
+					"--wait", "--until", "done",
+					"--timeout", String(timeout),
+				]);
+				const postTail = await readPaneTail(resolved);
+				const after = await waitForHerdrAgentDetected(resolved, { timeoutMs: 5000 });
+				// Post-check: if the screen never changed and no agent state is
+				// visible at all, the task may not have been received. Demoted to a
+				// non-blocking note — a legitimately instant task legitimately ends
+				// idle with no screen change, so we must not hard-fail on it.
+				const unchanged = preTail === postTail && after.state === undefined;
+				return textResult(
+					`Prompt returned (${JSON.stringify((out as any)?.result ?? out)}).` +
+						(unchanged
+							? `\nNo screen change observed and no agent state visible — the task may not have been received. Inspect pane ${resolved} and retry if needed.`
+							: ""),
+					{ name: target, result: out },
+				);
+			} catch (error: any) {
+				const raw = error?.stderr || error?.stdout || String(error?.message ?? error);
+				const hang = /agent_prompt_stalled|agent not found/i.test(raw);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Prompt to "${target}" did not settle: ${raw}`.slice(0, 4000) +
+								(hang
+									? "\nNothing was sent to the agent. Retry after herd-status confirms it is at its input prompt."
+									: ""),
 						},
 					],
 					details: { name: target, error: raw },
@@ -788,7 +904,6 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 				};
 			}
 		}
-
 		case "status": {
 			const target = args.name?.trim();
 			if (!target) return textResult("Provide a name/pane target (action=status).", {});
