@@ -8,28 +8,30 @@ and herding **pi agents inside Herdr**.
 > to your main pi instance when it completes. No invisible subprocesses.
 
 ```
-you ──► pi-subagent ──► a new Herdr tab (e.g. "scout") runs pi live, completes, hands the result back
-        └────────────► herd   (list / start / prompt / status / read / close / gc)
+you ──► sheepdog ──► a new Herdr tab (e.g. "scout") runs pi live, completes, hands the result back
+        └────────────► shepherd   (list / start / prompt / status / read / close / gc)
 ```
 
-Two capabilities, one extension, exposed to the model as two **tools**:
+Two capabilities, one extension, exposed to the model as two **tools**. The
+naming is thematic: the **shepherd manages the herd**; the **sheepdog** is the
+laborer you send out to fetch one result and bring it back.
 
-- **`pi-subagent`** — delegate a task to a specialized agent (`scout`, `planner`,
+- **`sheepdog`** — delegate a task to a specialized agent (`scout`, `planner`,
   `reviewer`, `worker`, …). It runs **live in a new Herdr tab labelled with the
   agent name**, gets the delegated system prompt + tool/model config, and on
   completion the main instance picks up its final output. Herdr-native from any
   prompt: even if pi was started from a plain terminal, the referenced headless
   Herdr server is started/attached automatically.
-- **`herd`** — manage the pi agents living in your Herdr panes: see them
+- **`shepherd`** — manage the pi agents living in your Herdr panes: see them
   (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check
   status / read output (`status`, `read`), and close panes that pi-shepherd
   created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes
   stale registry entries (panes that no longer exist) and cleans their temp dirs.
 
-> **Compatibility:** the tool is named **`pi-subagent`** (not `subagent`) so it
-> coexists with the `pi-herdr-agents` package, whose own `subagent` tool drives
-> same-name Herdr-pane/worktree agents. Registering two tools called `subagent`
-> would make pi fail to load any extension.
+> **Compatibility:** the delegation tool is named **`sheepdog`** (not
+> `subagent`) so it coexists with the `pi-herdr-agents` package, whose own
+> `subagent` tool drives same-name Herdr-pane/worktree agents. Registering two
+> tools called `subagent` would make pi fail to load any extension.
 
 Agent definitions are loaded from plain Markdown files using the
 [standard VS Code custom-agent syntax](https://code.visualstudio.com/docs/agent-customization/custom-agents)
@@ -84,17 +86,17 @@ findings in a concise list. Do not edit files.
 
 ## Usage
 
-### Subagents (Herdr tabs) — `pi-subagent`
+### Delegation (Herdr tabs) — `sheepdog`
 
 | Command | Action |
 |---------|--------|
 | `/pi-shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
 | `/pi-shepherd list`                | List discovered agents and their source |
-| `/pi-shepherd herd`                | Herd hint (the `herd` tool does the work) |
+| `/pi-shepherd herd`                | Herd hint (the `shepherd` tool does the work) |
 | `/pi-shepherd settings` (`/pi-shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
 
 You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
-parallel — one on auth, one on billing"* — the model uses the `pi-subagent` tool
+parallel — one on auth, one on billing"* — the model uses the `sheepdog` tool
 (single / parallel / chain) to do it.
 
 Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …):
@@ -108,7 +110,7 @@ Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …)
    can keep driving it;
 5. the parent pi instance picks up the final output and reports it back;
 6. the tab is left open for inspection — the subagent may still be running, so
-you can keep prompting it, or close it with `herd close <pane>` (or in Herdr
+you can keep prompting it, or close it with `shepherd close <pane>` (or in Herdr
 directly).
 
 Options: `keepOpen` (default `true` — set `false` to auto-close the tab),
@@ -122,7 +124,7 @@ and `timeout` (ms, default 10 min). Modes:
 | Parallel  | Up to 8 tasks, 4 concurrent, each in its own tab     |
 | Chain     | Sequential steps; `{previous}` placeholder pipes context |
 
-### Herd (pi agents in Herdr panes)
+### Shepherd (pi agents in Herdr panes)
 
 pi-shepherd drives Herdr through the `herdr` CLI (works from inside Herdr *or* a
 plain terminal — the headless server is started/attached automatically).
@@ -133,7 +135,7 @@ plain terminal — the headless server is started/attached automatically).
 - **Status / read** — check lifecycle state and pull recent output from a pane.
 - **Close** — close a pane that pi-shepherd created (by pane id or agent name). It refuses to close panes it didn't create (safety).
 
-Example (what the `herd` tool does under the hood — the task is delivered at launch via the same pane-run launch script the delegation path uses, so it lands reliably instead of relying on flaky `herdr agent start`/prompt keystroke timing):
+Example (what the `shepherd` tool does under the hood — the task is delivered at launch via the same pane-run launch script the delegation path uses, so it lands reliably instead of relying on flaky `herdr agent start`/prompt keystroke timing):
 
 ```bash
 # start a reviewer agent as a right-hand sibling of the current pane, task baked in
@@ -143,8 +145,8 @@ herdr pane run <pane-id> 'bash /tmp/pi-shepherd-*/launch-reviewer.sh'
 herdr agent read <pane-id> --source recent-unwrapped --lines 40 --format text
 ```
 
-A `herd start` with no `task` boots a bare pi you drive later with `herd prompt`; a
-`task` given to `start` is delivered at launch.
+A `shepherd start` with no `task` boots a bare pi you drive later with
+`shepherd prompt`; a `task` given to `start` is delivered at launch.
 
 ---
 
@@ -191,7 +193,7 @@ Requirements:
   an **inline** settings list in the writing-field slot, exactly like pi's own
   `/settings`: arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc
   closes. Settings are stored at `~/.pi/agent/pi-shepherd/settings.json` and read
-  fresh (no reload needed). Every `pi-subagent`/`herd` run falls back to these
+  fresh (no reload needed). Every `sheepdog`/`shepherd` run falls back to these
   values when a call doesn't pass them explicitly. Typing `/pi-shepherd ` also
   shows `list`/`herd`/`settings`/agents in the native autocomplete menu.
 
@@ -205,7 +207,7 @@ Requirements:
 - **Agent locations** — the four discovery dirs above. User agents always load;
   add files there to extend the built-in set (user agents override built-ins
   with the same name).
-- **`pi-subagent` defaults** — `keepOpen` (default `true`: leave the tab open for
+- **`sheepdog` defaults** — `keepOpen` (default `true`: leave the tab open for
   inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
   subagent's pi process alive after completion so you can keep driving it in the
   tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
@@ -233,8 +235,8 @@ Requirements:
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
 ├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
 ├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
-├── subagent.ts       # pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain)
-├── herd.ts           # herd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
+├── subagent.ts       # sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
+├── herd.ts           # shepherd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
 ├── test/             # verification: fixture tree + test/verify-discovery.mjs
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)

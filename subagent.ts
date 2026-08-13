@@ -419,10 +419,10 @@ const SubagentParams = Type.Object({
 	),
 });
 
-export function registerSubagentTool(pi: ExtensionAPI) {
+export function registerSheepdogTool(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "pi-subagent",
-		label: "Subagent (herdr tab)",
+		name: "sheepdog",
+		label: "Sheepdog (delegation)",
 		description: [
 			"Delegate tasks to specialized subagents. Each runs live in its own Herdr tab (labelled with the agent name), so you can watch it work; the result is handed back when it completes.",
 			"Herdr-native: works from a plain terminal too — the referenced headless Herdr server is started/attached automatically. Requires the herdr CLI.",
@@ -692,7 +692,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 			const scope: AgentScope = args.agentScope ?? "user";
 			if (args.chain && args.chain.length > 0) {
 				let text =
-					theme.fg("toolTitle", theme.bold("subagent ")) +
+					theme.fg("toolTitle", theme.bold("sheepdog ")) +
 					theme.fg("accent", `chain (${args.chain.length} steps)`) +
 					theme.fg("muted", ` [${scope}]`);
 				for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
@@ -711,7 +711,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 			}
 			if (args.tasks && args.tasks.length > 0) {
 				let text =
-					theme.fg("toolTitle", theme.bold("subagent ")) +
+					theme.fg("toolTitle", theme.bold("sheepdog ")) +
 					theme.fg("accent", `parallel (${args.tasks.length} tasks)`) +
 					theme.fg("muted", ` [${scope}]`);
 				for (const t of args.tasks.slice(0, 3)) {
@@ -724,7 +724,7 @@ export function registerSubagentTool(pi: ExtensionAPI) {
 			const agentName = args.agent || "...";
 			const preview = args.task ? (args.task.length > 60 ? `${args.task.slice(0, 60)}...` : args.task) : "...";
 			let text =
-				theme.fg("toolTitle", theme.bold("subagent ")) +
+				theme.fg("toolTitle", theme.bold("sheepdog ")) +
 				theme.fg("accent", agentName) +
 				theme.fg("muted", ` [${scope}]`);
 			text += `\n  ${theme.fg("dim", preview)}`;

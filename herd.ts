@@ -334,7 +334,7 @@ function isShepherdPane(idOrName: string): boolean {
 }
 
 // ── Herdr-backed agent runner ────────────────────────────────────────────
-// One-shot delegation for the `pi-subagent` tool: create a new tab labelled
+// One-shot delegation for the `sheepdog` tool: create a new tab labelled
 // after the agent, run pi in it with the delegated system prompt + task, wait
 // for completion, pick up the result, and (optionally) close the tab.
 
@@ -1081,16 +1081,16 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 	}
 }
 
-export function registerHerdTool(pi: ExtensionAPI) {
+export function registerShepherdTool(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "herd",
-		label: "Herd (Herdr agents)",
+		name: "shepherd",
+		label: "Shepherd (manage Herdr agents)",
 		description: [
 			"Manage pi agents running in Herdr panes: list, start a sibling, prompt, status, read, close.",
 			`Actions: list | start | prompt | status | read | close | gc. Requires a running Herdr session (HERDR_ENV=1).`,
-			`Panes created by pi-shepherd (via this tool or pi-subagent) are marked ● and can be closed with close.`,
+			`Panes created by pi-shepherd (via this tool or sheepdog) are marked ● and can be closed with close.`,
 			"gc prunes stale pi-shepherd pane registrations (panes that no longer exist) and cleans their temp dirs.",
-			"For isolated one-shot delegation use the 'pi-subagent' tool instead.",
+			"For isolated one-shot delegation use the 'sheepdog' tool instead.",
 		].join(" "),
 		parameters: HerdParams,
 
@@ -1117,7 +1117,7 @@ export function registerHerdTool(pi: ExtensionAPI) {
 					? ` "…${((args.task ?? "").length > 40 ? (args.task ?? "").slice(0, 40) + "…" : args.task ?? "")}"`
 					: "";
 			return new Text(
-				theme.fg("toolTitle", theme.bold("herd ")) +
+				theme.fg("toolTitle", theme.bold("shepherd ")) +
 					theme.fg("accent", action) +
 					theme.fg("dim", `${target}${extra}`),
 				0,

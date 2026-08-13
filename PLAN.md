@@ -23,7 +23,7 @@ Stack mirrors `pi-ops`:
 pi-shepherd/
 ├── index.ts          extension entry: registers tools + /pi-shepherd command
 ├── discovery.ts      agent discovery + VS Code frontmatter parsing (pure, testable)
-├── subagent.ts       pi-subagent tool: run each agent live in a Herdr tab (single/parallel/chain)
+├── subagent.ts       sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
 ├── herd.ts           herd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner
 ├── shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end
 ├── .pi/agents/       built-in subagents (pi project format)
@@ -35,15 +35,15 @@ pi-shepherd/
 
 Two tool surface areas exposed to the model:
 
-1. **`pi-subagent`** (custom tool) — delegate to an agent that runs **live in a
+1. **`sheepdog`** (custom tool) — delegate to an agent that runs **live in a
    new Herdr tab** (labelled with the agent name), works there, and reports its
    final output back on completion. **Herdr-native**: no subprocess fallback —
    from a plain terminal the referenced headless Herdr server is
-   started/attached automatically. Named `pi-subagent`, not `subagent`, so it
+   started/attached automatically. Named `sheepdog`, not `subagent`, so it
    coexists with the `pi-herdr-agents` package (its `subagent` tool drives
    Herdr-pane/worktree agents; two tools named `subagent` would fail extension
    loading).
-2. **`herd`** (custom tool) — manage pi agents already running in Herdr panes
+2. **`shepherd`** (custom tool) — manage pi agents already running in Herdr panes
    (list/start/prompt/status/read/close).
 
 Plus the `/pi-shepherd` slash command for listing agents and herding.
@@ -150,7 +150,7 @@ bundled dirs so any user/project agent overrides them by name.
 ## Phase 4 — Herd (Herdr integration) (`herd.ts`) ✅
 
 Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
-**herdr agent runner** (`runAgentInHerdr`) used by `pi-subagent`, and is now
+**herdr agent runner** (`runAgentInHerdr`) used by `sheepdog`, and is now
 **herdr-native from any terminal**. Verified against the live CLI.
 
 - [x] **guard**: `herdr` CLI on PATH + (inside Herdr OR a reachable/startable
@@ -182,9 +182,9 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 ## Phase 5 — Command surface & polish (`index.ts`) 🔶
 
 - [x] Register the `/pi-shepherd` command: `list`, `<agent> <task>`, `herd`.
-- [x] Register the `pi-subagent` + `herd` custom tools for natural-language use.
+- [x] Register the `sheepdog` + `shepherd` custom tools for natural-language use.
 - [x] Progress via `ctx.ui` (`setStatus`, `notify`); graceful failures.
-- [x] Herdr-native pivot: removed the subprocess fallback; `pi-subagent` always
+- [x] Herdr-native pivot: removed the subprocess fallback; `sheepdog` always
       runs a Herdr tab (auto-starting the server from a plain terminal).
 - [x] Docs updated (README, AGENTS.md, PLAN.md) to match the code.
 - [ ] Commit the repo (currently uncommitted after the latest work).
@@ -210,8 +210,8 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 - No unit suite; verify interactively like pi-ops:
   - `pi --mode json -p --no-session "/pi-shepherd list"`
   - `/pi-shepherd scout "…"` — expect a `scout` tab that runs pi, finishes with
-    `__SHEPHERD_DONE_0__`, and leaves the tab open; then `herd close <pane>`.
-  - Herd: `list` (look for the `●` marker), `start`, `prompt --wait`, `close`.
+    `__SHEPHERD_DONE_0__`, and leaves the tab open; then `shepherd close <pane>`.
+  - Shepherd: `list` (look for the `●` marker), `start`, `prompt --wait`, `close`.
 - Add tiny fixture agent dirs under a temp cwd to exercise discovery precedence.
 
 ## Security posture
