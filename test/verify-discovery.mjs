@@ -56,6 +56,12 @@ assert(!!descOf(user, "only-user"), "user scope: includes only-user");
 assert(!!descOf(user, "shared-only"), "user scope: includes shared-only (user2)");
 assert(!descOf(user, "project-pi"), "user scope: excludes project-pi");
 assert(!descOf(user, "proj-shared"), "user scope: excludes proj-shared");
+const omitTrue = user.agents.find((a) => a.name === "omit-true");
+const omitFalse = user.agents.find((a) => a.name === "omit-false");
+const omitInvalid = user.agents.find((a) => a.name === "omit-invalid");
+assert(omitTrue?.omitSystemPrompt === true, "frontmatter: strict true is retained");
+assert(omitFalse?.omitSystemPrompt === false, "frontmatter: strict false is retained");
+assert(omitInvalid?.omitSystemPrompt === undefined, "frontmatter: quoted true is ignored");
 
 // --- project scope: only project agents ------------------------------------
 const project = discoverAgents(proj, "project");

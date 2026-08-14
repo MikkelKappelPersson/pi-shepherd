@@ -92,6 +92,11 @@ pattern for the external locations + two bundled, with VS Code syntax.
 - [x] `test/verify-discovery.mjs` — fixture tree in `test/fixtures/` exercises
       all locations + precedence + scope filtering (sets `$HOME` to the
       fixture home to control user dirs). Run: `npm run discovery:test`.
+- [x] Strict-boolean `omit-system-prompt` frontmatter is carried on
+      `AgentConfig`; delegated resolution is explicit option > frontmatter >
+      `false` across single, parallel, chain, and slash-command runs. The
+      setting controls whether pi's built-in default prompt is appended to the
+      agent Markdown body; project context files remain available.
 
   > Needs `node_modules/@earendil-works/pi-coding-agent` resolvable for the
   > standalone `node` test (symlink to the pi install or `npm i`), since pi

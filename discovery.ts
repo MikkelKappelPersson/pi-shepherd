@@ -22,6 +22,8 @@ export interface AgentConfig {
 	description: string;
 	tools?: string[];
 	model?: string;
+	/** Omit pi's built-in default system prompt when delegating this agent. */
+	omitSystemPrompt?: boolean;
 	systemPrompt: string;
 	source: "user" | "project" | "bundled";
 	filePath: string;
@@ -136,6 +138,11 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
 			systemPrompt: body,
 			source,
 			filePath,
+			// Only the YAML boolean is accepted; malformed values are ignored.
+			omitSystemPrompt:
+				typeof frontmatter["omit-system-prompt"] === "boolean"
+					? frontmatter["omit-system-prompt"]
+					: undefined,
 			// Pass-through fields, carried as-is when present.
 			userInvocable: frontmatter["user-invocable"],
 			disableModelInvocation: frontmatter["disable-model-invocation"],

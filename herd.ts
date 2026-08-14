@@ -444,10 +444,11 @@ function sendEscapeInHerdr(paneId: string): void {
  * The shepherd-done extension + env vars are always wired in, so the pane
  * participates in the same completion sidecar lifecycle as delegated runs.
  */
-function writePiLaunchFiles(opts: {
+export function writePiLaunchFiles(opts: {
 	name: string;
 	task?: string;
 	systemPrompt?: string;
+	omitSystemPrompt?: boolean;
 	stayOpen: boolean;
 	model?: string;
 	tools?: string[];
@@ -467,12 +468,15 @@ function writePiLaunchFiles(opts: {
 	if (tools) args.push("--tools", tools);
 
 	if (opts.task !== undefined) {
-		const sysFile = path.join(dir, `sysprompt-${safe}.md`);
 		const taskFile = path.join(dir, `task-${safe}.md`);
-		fs.writeFileSync(sysFile, opts.systemPrompt ?? "", { encoding: "utf8", mode: 0o600 });
 		const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
 		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600 });
-		args.push("--append-system-prompt", shellQuote(sysFile));
+		const sysFile = path.join(dir, `sysprompt-${safe}.md`);
+		fs.writeFileSync(sysFile, opts.systemPrompt ?? "", { encoding: "utf8", mode: 0o600 });
+		args.push(
+			opts.omitSystemPrompt ? "--system-prompt" : "--append-system-prompt",
+			shellQuote(sysFile),
+		);
 		args.push(`'@${taskFile}'`);
 	}
 
@@ -600,6 +604,7 @@ const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
 export async function runAgentInHerdr(opts: {
 	agentName: string;
 	systemPrompt: string;
+	omitSystemPrompt?: boolean;
 	task: string;
 	cwd: string;
 	model?: string;
@@ -638,6 +643,7 @@ export async function runAgentInHerdr(opts: {
 		name: opts.agentName,
 		task: opts.task,
 		systemPrompt: opts.systemPrompt,
+		omitSystemPrompt: opts.omitSystemPrompt,
 		stayOpen,
 		model: opts.model,
 		tools: opts.tools,

@@ -271,6 +271,7 @@ async function runSingleAgent(
 		stayOpen?: boolean;
 		timeout?: number;
 		label?: string;
+		omitSystemPrompt?: boolean;
 	} = {},
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
@@ -292,6 +293,8 @@ async function runSingleAgent(
 	const keepOpen = opts.keepOpen ?? loadSettings().keepOpen;
 	const stayOpen = opts.stayOpen ?? loadSettings().stayOpen;
 	const timeout = opts.timeout ?? loadSettings().timeout;
+	// Preserve undefined so precedence is explicit option > frontmatter > false.
+	const omitSystemPrompt = opts.omitSystemPrompt ?? agent.omitSystemPrompt ?? false;
 	const label = opts.label ?? agentName;
 
 	const progress: SingleResult = {
@@ -321,6 +324,7 @@ async function runSingleAgent(
 		run = await runAgentInHerdr({
 			agentName,
 			systemPrompt: agent.systemPrompt,
+			omitSystemPrompt,
 			task,
 			cwd: cwd ?? defaultCwd,
 			model: agent.model,
@@ -417,6 +421,12 @@ const SubagentParams = Type.Object({
 			default: 600_000,
 		}),
 	),
+	omitSystemPrompt: Type.Optional(
+		Type.Boolean({
+			description:
+				"Override the selected agent's omit-system-prompt frontmatter. When omitted, use the agent setting; otherwise false.",
+		}),
+	),
 });
 
 export function registerSheepdogTool(pi: ExtensionAPI) {
@@ -447,6 +457,7 @@ export function registerSheepdogTool(pi: ExtensionAPI) {
 			const keepOpen = params.keepOpen ?? settings.keepOpen;
 			const stayOpen = params.stayOpen ?? settings.stayOpen;
 			const timeout = params.timeout ?? settings.timeout;
+			// Preserve undefined: runSingleAgent resolves explicit > frontmatter > false.
 
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
@@ -526,7 +537,7 @@ export function registerSheepdogTool(pi: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
-						{ keepOpen, stayOpen, timeout, label: `${step.agent}-${i + 1}` },
+						{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
 					);
 					results.push(result);
 
@@ -615,7 +626,7 @@ export function registerSheepdogTool(pi: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
-						{ keepOpen, stayOpen, timeout, label: `${t.agent}-${index + 1}` },
+						{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -652,7 +663,7 @@ export function registerSheepdogTool(pi: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
-					{ keepOpen, stayOpen, timeout, label: params.agent },
+					{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
 				);
 				const isError = isFailedResult(result);
 				if (isError) {
