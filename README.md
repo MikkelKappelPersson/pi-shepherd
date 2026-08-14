@@ -41,8 +41,8 @@ Agent definitions are loaded from plain Markdown files using the
 
 ## Agent discovery
 
-Agents are discovered from these locations, in order (later/**project**/closer
-wins over earlier ones with the same name):
+Agents are discovered from these locations, in order (earlier/higher-precedence
+locations win over later ones with the same name):
 
 | Scope       | Location                         | Notes                          |
 |-------------|----------------------------------|--------------------------------|
@@ -61,8 +61,8 @@ wins over earlier ones with the same name):
 
 - Files may use the `.agent.md` or `.md` extension. Both are parsed the same way.
 - All four locations support the **VS Code custom-agent format** — YAML
-  frontmatter (`name`, `description`, `tools`, `model`, …) plus a Markdown body
-  used as the system prompt.
+  frontmatter (`name`, `description`, `tools`, `model`, `omit-system-prompt`, …)
+  plus a Markdown body used as the system prompt.
 - **Project agents are gated by trust.** By default only user-level agents load.
   Enable project agents with `agentScope: "project" | "both"` (and confirm on
   each run when interactive). This mirrors the security posture of pi's built-in
@@ -76,6 +76,8 @@ name: my-reviewer
 description: Reviews diffs for bugs, security, and readability
 tools: read, grep, find, ls, bash
 model: claude-sonnet-4-5
+# Set true to replace pi's built-in default with the Markdown body.
+omit-system-prompt: false
 ---
 You are a code reviewer. Read the provided diff/context, identify bugs,
 security issues, and readability problems, and report only actionable
@@ -115,14 +117,51 @@ directly).
 
 Options: `keepOpen` (default `true` — set `false` to auto-close the tab),
 `stayOpen` (default `true` — keep the subagent's pi **alive** in the tab after
-it completes so you can keep driving it; set `false` to have it exit on done)
-and `timeout` (ms, default 10 min). Modes:
+it completes so you can keep driving it; set `false` to have it exit on done),
+`timeout` (ms, default 10 min), and the optional `omitSystemPrompt` override.
+When supplied, it overrides the selected agent's `omit-system-prompt`
+frontmatter (including an explicit `false`). When the override and frontmatter
+are both absent, the effective value is `false`. When enabled, the agent
+Markdown body is passed as a replacement system prompt via `--system-prompt`:
+this omits only pi's built-in default system prompt. The task and completion
+instructions are still passed as input. In
+both modes, pi's project context—including `AGENTS.md` and other context
+files—is retained, as are the selected tools and permissions. Modes:
 
 | Mode      | Description                                          |
 |-----------|------------------------------------------------------|
 | Single    | One agent, one task                                  |
 | Parallel  | Up to 8 tasks, 4 concurrent, each in its own tab     |
 | Chain     | Sequential steps; `{previous}` placeholder pipes context |
+
+#### Delegated input context
+
+Every `sheepdog` invocation starts a fresh child pi session in a Herdr tab. In
+normal mode (`omitSystemPrompt: false`), the child receives pi's built-in
+default system prompt plus the discovered agent definition's Markdown body as
+an appended system prompt. In replacement mode (`omitSystemPrompt: true`), the
+child receives the agent Markdown body as its system prompt instead, omitting
+only pi's built-in default. In both modes, pi's project context—including
+`AGENTS.md` and other context files—remains available. The child also receives
+the delegated `task` as user input, followed by autonomous shepherd
+instructions to complete the task and call `shepherd_done`; those instructions
+are retained in both modes. It runs with the requested agent's `cwd`, `model`,
+and `tools` (plus the completion tool), rather than inheriting the parent's
+conversation. In a chain, `{previous}` in the next step's task is replaced
+with the prior step's returned output. Parallel tasks start independent fresh
+sessions.
+
+`omitSystemPrompt: true` is a per-call sheepdog option that selects the
+replacement behavior above. `false` (including the default) combines pi's
+built-in default with the agent body; `true` replaces the built-in default with
+the agent body. Neither mode omits project `AGENTS.md`/context files, the task,
+completion instructions, model, cwd, or tools. Resolution is explicit call
+option (including explicit `false`), then the selected agent's
+`omit-system-prompt` frontmatter, then `false`. The frontmatter value must be a
+YAML boolean (`true` or `false`); other types are ignored. The option is
+available on the `sheepdog` tool; `/pi-shepherd <agent> <task>` has no separate
+option and therefore uses the agent frontmatter/default behavior. Likewise,
+`shepherd start` keeps its existing launch behavior.
 
 ### Shepherd (pi agents in Herdr panes)
 
@@ -211,6 +250,13 @@ Requirements:
   inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
   subagent's pi process alive after completion so you can keep driving it in the
   tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
+  `omitSystemPrompt` is an optional per-call `sheepdog` boolean, not a persisted
+  setting. Resolution is explicit call option > agent frontmatter
+  `omit-system-prompt` (strict YAML boolean) > `false`. When `false`, pi's
+  built-in default and the discovered agent Markdown body are combined; when
+  `true`, the body replaces only pi's built-in default. Project `AGENTS.md` and
+  other context files, plus the fresh-session task/completion input, cwd, model,
+  and tools, remain in both modes.
 
 ---
 
@@ -237,7 +283,7 @@ Requirements:
 ├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
 ├── subagent.ts       # sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
 ├── herd.ts           # shepherd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
-├── test/             # verification: fixture tree + test/verify-discovery.mjs
+├── test/             # verification: discovery fixtures + Herdr-independent launch checks
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)
 ├── shepherd-done.ts  # in-tab extension: shepherd_done tool + completion sidecar on agent_end
