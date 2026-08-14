@@ -10,6 +10,7 @@
     "check": "echo 'nothing to check'",
     "discovery:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-discovery.mjs",
     "launch:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-launch.mjs",
-    "test": "npm run discovery:test && npm run launch:test"
+    "sentinel:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-sentinel.mjs",
+    "test": "npm run discovery:test && npm run launch:test && npm run sentinel:test"
   }
 }

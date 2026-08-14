@@ -9,7 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { discoverAgents, formatAgentList } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
-import { registerSheepdogTool, subagentOnce } from "./subagent.ts";
+import { subagentOnce } from "./subagent.ts";
 import {
 	registerShepherdTool,
 	isHerdrAvailable,
@@ -74,7 +74,6 @@ function renderWorkingLine(
 
 export default function (pi: ExtensionAPI) {
 	// Tools for natural-language use.
-	registerSheepdogTool(pi);
 	registerShepherdTool(pi);
 	registerSettingsCommand(pi);
 	registerSubagentStatusWidget(pi);

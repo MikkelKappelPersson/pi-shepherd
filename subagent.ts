@@ -31,6 +31,8 @@ import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { runAgentInHerdr } from "./herd.ts";
+import { TaskItem, ChainItem, AgentScopeSchema, SubagentParams } from "./types.ts";
+export { TaskItem, ChainItem, AgentScopeSchema, SubagentParams };
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -354,10 +356,10 @@ async function runSingleAgent(
 	const ltLive = stayOpen
 		? `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}). ` +
 			`The subagent is still running there — ` +
-			`drive it further or close it with herd close ${run.paneId}.`
+			`drive it further or close it with shepherd close ${run.paneId}.`
 		: keepOpen
 			? `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}). ` +
-				`The tab is left open for inspection — close it with herd close ${run.paneId}.`
+				`The tab is left open for inspection — close it with shepherd close ${run.paneId}.`
 			: `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}) and was closed after pickup.`;
 
 	return {
@@ -375,644 +377,270 @@ async function runSingleAgent(
 	};
 }
 
-const TaskItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task to delegate to the agent" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-});
 
-const ChainItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-});
 
-const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
-	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
-	default: "user",
-});
+export async function executeDelegation(
+	params: Static<typeof SubagentParams>,
+	signal: AbortSignal | undefined,
+	onUpdate: OnUpdateCallback | undefined,
+	ctx: { cwd: string; hasUI?: boolean; ui?: any },
+): Promise<AgentToolResult<Record<string, unknown>>> {
+	const settings = loadSettings();
+	const agentScope: AgentScope = params.agentScope ?? settings.agentScope;
+	const discovery = discoverAgents(ctx.cwd, agentScope);
+	const agents = discovery.agents;
+	const confirmProjectAgents = params.confirmProjectAgents ?? settings.confirmProjectAgents;
 
-const SubagentParams = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
-	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
-	agentScope: Type.Optional(AgentScopeSchema),
-	confirmProjectAgents: Type.Optional(
-		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
-	),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
-	keepOpen: Type.Optional(
-		Type.Boolean({
-			description: "Keep the Herdr tab open after completion for inspection. Default: true.",
-			default: true,
-		}),
-	),
-	stayOpen: Type.Optional(
-		Type.Boolean({
-			description:
-				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
-			default: true,
-		}),
-	),
-	timeout: Type.Optional(
-		Type.Integer({
-			description: "Time limit (ms) for the Herdr run before it is reported timed-out. Default: 600000 (10 min).",
-			default: 600_000,
-		}),
-	),
-	omitSystemPrompt: Type.Optional(
-		Type.Boolean({
-			description:
-				"Override the selected agent's omit-system-prompt frontmatter. When omitted, use the agent setting; otherwise false.",
-		}),
-	),
-});
+	const hasChain = (params.chain?.length ?? 0) > 0;
+	const hasTasks = (params.tasks?.length ?? 0) > 0;
+	const hasSingle = Boolean(params.agent && params.task);
+	const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+	const keepOpen = params.keepOpen ?? settings.keepOpen;
+	const stayOpen = params.stayOpen ?? settings.stayOpen;
+	const timeout = params.timeout ?? settings.timeout;
+	// Preserve undefined: runSingleAgent resolves explicit > frontmatter > false.
 
-export function registerSheepdogTool(pi: ExtensionAPI) {
-	pi.registerTool({
-		name: "sheepdog",
-		label: "Sheepdog (delegation)",
-		description: [
-			"Delegate tasks to specialized subagents. Each runs live in its own Herdr tab (labelled with the agent name), so you can watch it work; the result is handed back when it completes.",
-			"Herdr-native: works from a plain terminal too — the referenced headless Herdr server is started/attached automatically. Requires the herdr CLI.",
-			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			`Built-in agents: scout, planner, reviewer, worker.`,
-			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
-			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
-		].join(" "),
-		parameters: SubagentParams,
+	const makeDetails =
+		(mode: "single" | "parallel" | "chain") =>
+		(results: SingleResult[]): SubagentDetails => ({
+			mode,
+			agentScope,
+			projectAgentsDir: discovery.projectDirs[0] ?? null,
+			results,
+		});
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const settings = loadSettings();
-			const agentScope: AgentScope = params.agentScope ?? settings.agentScope;
-			const discovery = discoverAgents(ctx.cwd, agentScope);
-			const agents = discovery.agents;
-			const confirmProjectAgents = params.confirmProjectAgents ?? settings.confirmProjectAgents;
+	if (modeCount !== 1) {
+		const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}`,
+				},
+			],
+			details: makeDetails("single")([]),
+		};
+	}
 
-			const hasChain = (params.chain?.length ?? 0) > 0;
-			const hasTasks = (params.tasks?.length ?? 0) > 0;
-			const hasSingle = Boolean(params.agent && params.task);
-			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-			const keepOpen = params.keepOpen ?? settings.keepOpen;
-			const stayOpen = params.stayOpen ?? settings.stayOpen;
-			const timeout = params.timeout ?? settings.timeout;
-			// Preserve undefined: runSingleAgent resolves explicit > frontmatter > false.
+	if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
+		const requestedAgentNames = new Set<string>();
+		if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
+		if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
+		if (params.agent) requestedAgentNames.add(params.agent);
 
-			const makeDetails =
-				(mode: "single" | "parallel" | "chain") =>
-				(results: SingleResult[]): SubagentDetails => ({
-					mode,
-					agentScope,
-					projectAgentsDir: discovery.projectDirs[0] ?? null,
-					results,
-				});
+		const projectAgentsRequested = Array.from(requestedAgentNames)
+			.map((name) => agents.find((a) => a.name === name))
+			.filter((a): a is AgentConfig => a?.source === "project");
 
-			if (modeCount !== 1) {
-				const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+		if (projectAgentsRequested.length > 0) {
+			const names = projectAgentsRequested.map((a) => a.name).join(", ");
+			const dir = discovery.projectDirs[0] ?? "(unknown)";
+			const ok = await ctx.ui.confirm(
+				"Run project-local agents?",
+				`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
+			);
+			if (!ok)
 				return {
-					content: [
-						{
-							type: "text",
-							text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}`,
-						},
-					],
-					details: makeDetails("single")([]),
+					content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
+					details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
 				};
-			}
+		}
+	}
 
-			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
-				const requestedAgentNames = new Set<string>();
-				if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
-				if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
-				if (params.agent) requestedAgentNames.add(params.agent);
+	if (params.chain && params.chain.length > 0) {
+		const results: SingleResult[] = [];
+		let previousOutput = "";
 
-				const projectAgentsRequested = Array.from(requestedAgentNames)
-					.map((name) => agents.find((a) => a.name === name))
-					.filter((a): a is AgentConfig => a?.source === "project");
+		for (let i = 0; i < params.chain.length; i++) {
+			const step = params.chain[i];
+			const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
 
-				if (projectAgentsRequested.length > 0) {
-					const names = projectAgentsRequested.map((a) => a.name).join(", ");
-					const dir = discovery.projectDirs[0] ?? "(unknown)";
-					const ok = await ctx.ui.confirm(
-						"Run project-local agents?",
-						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
-					);
-					if (!ok)
-						return {
-							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
-						};
-				}
-			}
-
-			if (params.chain && params.chain.length > 0) {
-				const results: SingleResult[] = [];
-				let previousOutput = "";
-
-				for (let i = 0; i < params.chain.length; i++) {
-					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
-
-					const chainUpdate: OnUpdateCallback | undefined = onUpdate
-						? (partial) => {
-								const currentResult = partial.details?.results[0];
-								if (currentResult) {
-									const allResults = [...results, currentResult];
-									onUpdate({
-										content: partial.content,
-										details: makeDetails("chain")(allResults),
-									});
-								}
-							}
-						: undefined;
-
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						step.agent,
-						taskWithContext,
-						step.cwd,
-						i + 1,
-						signal,
-						chainUpdate,
-						makeDetails("chain"),
-						{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
-					);
-					results.push(result);
-
-					const isError = isFailedResult(result);
-					if (isError) {
-						const errorMsg = getResultOutput(result);
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
-								},
-							],
-							details: makeDetails("chain")(results),
-							isError: true,
-						};
+			const chainUpdate: OnUpdateCallback | undefined = onUpdate
+				? (partial) => {
+						const currentResult = partial.details?.results[0];
+						if (currentResult) {
+							const allResults = [...results, currentResult];
+							onUpdate({
+								content: partial.content,
+								details: makeDetails("chain")(allResults),
+							});
+						}
 					}
-					previousOutput = getFinalOutput(result.messages);
-				}
-				const last = results[results.length - 1];
+				: undefined;
+
+			const result = await runSingleAgent(
+				ctx.cwd,
+				agents,
+				step.agent,
+				taskWithContext,
+				step.cwd,
+				i + 1,
+				signal,
+				chainUpdate,
+				makeDetails("chain"),
+				{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
+			);
+			results.push(result);
+
+			const isError = isFailedResult(result);
+			if (isError) {
+				const errorMsg = getResultOutput(result);
 				return {
 					content: [
 						{
 							type: "text",
-							text:
-								(getFinalOutput(last.messages) || "(no output)") +
-								(last.herdrNote ? `\n${last.herdrNote}` : ""),
+							text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
 						},
 					],
 					details: makeDetails("chain")(results),
+					isError: true,
 				};
 			}
+			previousOutput = getFinalOutput(result.messages);
+		}
+		const last = results[results.length - 1];
+		return {
+			content: [
+				{
+					type: "text",
+					text:
+						(getFinalOutput(last.messages) || "(no output)") +
+						(last.herdrNote ? `\n${last.herdrNote}` : ""),
+				},
+			],
+			details: makeDetails("chain")(results),
+		};
+	}
 
-			if (params.tasks && params.tasks.length > 0) {
-				if (params.tasks.length > MAX_PARALLEL_TASKS)
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-							},
-						],
-						details: makeDetails("parallel")([]),
-					};
-
-				const allResults: SingleResult[] = new Array(params.tasks.length);
-
-				for (let i = 0; i < params.tasks.length; i++) {
-					allResults[i] = {
-						agent: params.tasks[i].agent,
-						agentSource: "unknown",
-						task: params.tasks[i].task,
-						exitCode: -1,
-						messages: [],
-						stderr: "",
-						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-					};
-				}
-
-				const emitParallelUpdate = () => {
-					if (onUpdate) {
-						const running = allResults.filter((r) => r.exitCode === -1).length;
-						const done = allResults.filter((r) => r.exitCode !== -1).length;
-						onUpdate({
-							content: [
-								{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
-							],
-							details: makeDetails("parallel")([...allResults]),
-						});
-					}
-				};
-
-				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						t.agent,
-						t.task,
-						t.cwd,
-						undefined,
-						signal,
-						(partial) => {
-							if (partial.details?.results[0]) {
-								allResults[index] = partial.details.results[0];
-								emitParallelUpdate();
-							}
-						},
-						makeDetails("parallel"),
-						{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
-					);
-					allResults[index] = result;
-					emitParallelUpdate();
-					return result;
-				});
-
-				const successCount = results.filter((r) => !isFailedResult(r)).length;
-				const summaries = results.map((r) => {
-					const output = truncateParallelOutput(getResultOutput(r));
-					const status = isFailedResult(r)
-						? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
-						: "completed";
-					return `### [${r.agent}] ${status}\n\n${output}${r.herdrNote ? `\n\n${r.herdrNote}` : ""}`;
-				});
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
-						},
-					],
-					details: makeDetails("parallel")(results),
-				};
-			}
-
-			if (params.agent && params.task) {
-				const result = await runSingleAgent(
-					ctx.cwd,
-					agents,
-					params.agent,
-					params.task,
-					params.cwd,
-					undefined,
-					signal,
-					onUpdate,
-					makeDetails("single"),
-					{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
-				);
-				const isError = isFailedResult(result);
-				if (isError) {
-					const errorMsg = getResultOutput(result);
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Agent ${result.stopReason || "failed"}: ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
-							},
-						],
-						details: makeDetails("single")([result]),
-						isError: true,
-					};
-				}
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								(getFinalOutput(result.messages) || "(no output)") +
-								(result.herdrNote ? `\n${result.herdrNote}` : ""),
-						},
-					],
-					details: makeDetails("single")([result]),
-				};
-			}
-
-			const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+	if (params.tasks && params.tasks.length > 0) {
+		if (params.tasks.length > MAX_PARALLEL_TASKS)
 			return {
-				content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
-				details: makeDetails("single")([]),
-			};
-		},
-
-		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? "user";
-			if (args.chain && args.chain.length > 0) {
-				let text =
-					theme.fg("toolTitle", theme.bold("sheepdog ")) +
-					theme.fg("accent", `chain (${args.chain.length} steps)`) +
-					theme.fg("muted", ` [${scope}]`);
-				for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
-					const step = args.chain[i];
-					const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
-					const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
-					text +=
-						"\n  " +
-						theme.fg("muted", `${i + 1}.`) +
-						" " +
-						theme.fg("accent", step.agent) +
-						theme.fg("dim", ` ${preview}`);
-				}
-				if (args.chain.length > 3) text += `\n  ${theme.fg("muted", `... +${args.chain.length - 3} more`)}`;
-				return new Text(text, 0, 0);
-			}
-			if (args.tasks && args.tasks.length > 0) {
-				let text =
-					theme.fg("toolTitle", theme.bold("sheepdog ")) +
-					theme.fg("accent", `parallel (${args.tasks.length} tasks)`) +
-					theme.fg("muted", ` [${scope}]`);
-				for (const t of args.tasks.slice(0, 3)) {
-					const preview = t.task.length > 40 ? `${t.task.slice(0, 40)}...` : t.task;
-					text += `\n  ${theme.fg("accent", t.agent)}${theme.fg("dim", ` ${preview}`)}`;
-				}
-				if (args.tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${args.tasks.length - 3} more`)}`;
-				return new Text(text, 0, 0);
-			}
-			const agentName = args.agent || "...";
-			const preview = args.task ? (args.task.length > 60 ? `${args.task.slice(0, 60)}...` : args.task) : "...";
-			let text =
-				theme.fg("toolTitle", theme.bold("sheepdog ")) +
-				theme.fg("accent", agentName) +
-				theme.fg("muted", ` [${scope}]`);
-			text += `\n  ${theme.fg("dim", preview)}`;
-			return new Text(text, 0, 0);
-		},
-
-		renderResult(result, { expanded }, theme, _context) {
-			const details = result.details as SubagentDetails | undefined;
-			if (!details || details.results.length === 0) {
-				const text = result.content[0];
-				return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
-			}
-
-			const mdTheme = getMarkdownTheme();
-
-			const renderDisplayItems = (items: DisplayItem[], limit?: number) => {
-				const toShow = limit ? items.slice(-limit) : items;
-				const skipped = limit && items.length > limit ? items.length - limit : 0;
-				let text = "";
-				if (skipped > 0) text += theme.fg("muted", `... ${skipped} earlier items\n`);
-				for (const item of toShow) {
-					if (item.type === "text") {
-						const preview = expanded ? item.text : item.text.split("\n").slice(0, 3).join("\n");
-						text += `${theme.fg("toolOutput", preview)}\n`;
-					} else {
-						text += `${theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
-					}
-				}
-				return text.trimEnd();
+				content: [
+					{
+						type: "text",
+						text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
+					},
+				],
+				details: makeDetails("parallel")([]),
 			};
 
-			if (details.mode === "single" && details.results.length === 1) {
-				const r = details.results[0];
-				const isError = isFailedResult(r);
-				const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-				const displayItems = getDisplayItems(r.messages);
-				const finalOutput = getFinalOutput(r.messages);
+		const allResults: SingleResult[] = new Array(params.tasks.length);
 
-				if (expanded) {
-					const container = new Container();
-					let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
-					if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
-					container.addChild(new Text(header, 0, 0));
-					if (isError && r.errorMessage)
-						container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
-					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
-					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
-					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
-					if (displayItems.length === 0 && !finalOutput) {
-						container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
-					} else {
-						for (const item of displayItems) {
-							if (item.type === "toolCall")
-								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
-								);
-						}
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-						}
-					}
-					const usageStr = formatUsageStats(r.usage, r.model);
-					if (usageStr) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
-					}
-					if (r.herdrNote) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", r.herdrNote), 0, 0));
-					}
-					return container;
-				}
-
-				let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
-				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
-				if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-				else if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
-				else {
-					text += `\n${renderDisplayItems(displayItems, COLLAPSED_ITEM_COUNT)}`;
-					if (displayItems.length > COLLAPSED_ITEM_COUNT) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-				}
-				const usageStr = formatUsageStats(r.usage, r.model);
-				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
-				if (r.herdrNote) text += `\n${theme.fg("dim", r.herdrNote)}`;
-				return new Text(text, 0, 0);
-			}
-
-			const aggregateUsage = (results: SingleResult[]) => {
-				const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
-				for (const r of results) {
-					total.input += r.usage.input;
-					total.output += r.usage.output;
-					total.cacheRead += r.usage.cacheRead;
-					total.cacheWrite += r.usage.cacheWrite;
-					total.cost += r.usage.cost;
-					total.turns += r.usage.turns;
-				}
-				return total;
+		for (let i = 0; i < params.tasks.length; i++) {
+			allResults[i] = {
+				agent: params.tasks[i].agent,
+				agentSource: "unknown",
+				task: params.tasks[i].task,
+				exitCode: -1,
+				messages: [],
+				stderr: "",
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 			};
+		}
 
-			if (details.mode === "chain") {
-				const successCount = details.results.filter((r) => r.exitCode === 0).length;
-				const icon = successCount === details.results.length ? theme.fg("success", "✓") : theme.fg("error", "✗");
-
-				if (expanded) {
-					const container = new Container();
-					container.addChild(
-						new Text(
-							icon +
-								" " +
-								theme.fg("toolTitle", theme.bold("chain ")) +
-								theme.fg("accent", `${successCount}/${details.results.length} steps`),
-							0,
-							0,
-						),
-					);
-
-					for (const r of details.results) {
-						const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
-						const displayItems = getDisplayItems(r.messages);
-						const finalOutput = getFinalOutput(r.messages);
-
-						container.addChild(new Spacer(1));
-						container.addChild(
-							new Text(
-								`${theme.fg("muted", `─── Step ${r.step}: `) + theme.fg("accent", r.agent)} ${rIcon}`,
-								0,
-								0,
-							),
-						);
-						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
-
-						for (const item of displayItems) {
-							if (item.type === "toolCall") {
-								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
-								);
-							}
-						}
-
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-						}
-
-						const stepUsage = formatUsageStats(r.usage, r.model);
-						if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
-					}
-
-					const usageStr = formatUsageStats(aggregateUsage(details.results));
-					if (usageStr) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
-					}
-					return container;
-				}
-
-				let text =
-					icon +
-					" " +
-					theme.fg("toolTitle", theme.bold("chain ")) +
-					theme.fg("accent", `${successCount}/${details.results.length} steps`);
-				for (const r of details.results) {
-					const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
-					const displayItems = getDisplayItems(r.messages);
-					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
-					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
-					else text += `\n${renderDisplayItems(displayItems, 5)}`;
-				}
-				const usageStr = formatUsageStats(aggregateUsage(details.results));
-				if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-				text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-				return new Text(text, 0, 0);
+		const emitParallelUpdate = () => {
+			if (onUpdate) {
+				const running = allResults.filter((r) => r.exitCode === -1).length;
+				const done = allResults.filter((r) => r.exitCode !== -1).length;
+				onUpdate({
+					content: [
+						{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
+					],
+					details: makeDetails("parallel")([...allResults]),
+				});
 			}
+		};
 
-			if (details.mode === "parallel") {
-				const running = details.results.filter((r) => r.exitCode === -1).length;
-				const successCount = details.results.filter((r) => r.exitCode !== -1 && !isFailedResult(r)).length;
-				const failCount = details.results.filter((r) => r.exitCode !== -1 && isFailedResult(r)).length;
-				const isRunning = running > 0;
-				const icon = isRunning
-					? theme.fg("warning", "⏳")
-					: failCount > 0
-						? theme.fg("warning", "◐")
-						: theme.fg("success", "✓");
-				const status = isRunning
-					? `${successCount + failCount}/${details.results.length} done, ${running} running`
-					: `${successCount}/${details.results.length} tasks`;
-
-				if (expanded && !isRunning) {
-					const container = new Container();
-					container.addChild(
-						new Text(
-							`${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`,
-							0,
-							0,
-						),
-					);
-
-					for (const r of details.results) {
-						const rIcon = isFailedResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
-						const displayItems = getDisplayItems(r.messages);
-						const finalOutput = getFinalOutput(r.messages);
-
-						container.addChild(new Spacer(1));
-						container.addChild(
-							new Text(`${theme.fg("muted", "─── ") + theme.fg("accent", r.agent)} ${rIcon}`, 0, 0),
-						);
-						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
-
-						for (const item of displayItems) {
-							if (item.type === "toolCall") {
-								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
-								);
-							}
-						}
-
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-						}
-
-						const taskUsage = formatUsageStats(r.usage, r.model);
-						if (taskUsage) container.addChild(new Text(theme.fg("dim", taskUsage), 0, 0));
+		const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
+			const result = await runSingleAgent(
+				ctx.cwd,
+				agents,
+				t.agent,
+				t.task,
+				t.cwd,
+				undefined,
+				signal,
+				(partial) => {
+					if (partial.details?.results[0]) {
+						allResults[index] = partial.details.results[0];
+						emitParallelUpdate();
 					}
+				},
+				makeDetails("parallel"),
+				{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
+			);
+			allResults[index] = result;
+			emitParallelUpdate();
+			return result;
+		});
 
-					const usageStr = formatUsageStats(aggregateUsage(details.results));
-					if (usageStr) {
-						container.addChild(new Spacer(1));
-						container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
-					}
-					return container;
-				}
+		const successCount = results.filter((r) => !isFailedResult(r)).length;
+		const summaries = results.map((r) => {
+			const output = truncateParallelOutput(getResultOutput(r));
+			const status = isFailedResult(r)
+				? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
+				: "completed";
+			return `### [${r.agent}] ${status}\n\n${output}${r.herdrNote ? `\n\n${r.herdrNote}` : ""}`;
+		});
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
+				},
+			],
+			details: makeDetails("parallel")(results),
+		};
+	}
 
-				let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`;
-				for (const r of details.results) {
-					const rIcon =
-						r.exitCode === -1
-							? theme.fg("warning", "⏳")
-							: isFailedResult(r)
-								? theme.fg("error", "✗")
-								: theme.fg("success", "✓");
-					const displayItems = getDisplayItems(r.messages);
-					text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.agent)} ${rIcon}`;
-					if (displayItems.length === 0)
-						text += `\n${theme.fg("muted", r.exitCode === -1 ? "(running...)" : "(no output)")}`;
-					else text += `\n${renderDisplayItems(displayItems, 5)}`;
-				}
-				if (!isRunning) {
-					const usageStr = formatUsageStats(aggregateUsage(details.results));
-					if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-				}
-				if (!expanded) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-				return new Text(text, 0, 0);
-			}
+	if (params.agent && params.task) {
+		const result = await runSingleAgent(
+			ctx.cwd,
+			agents,
+			params.agent,
+			params.task,
+			params.cwd,
+			undefined,
+			signal,
+			onUpdate,
+			makeDetails("single"),
+			{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
+		);
+		const isError = isFailedResult(result);
+		if (isError) {
+			const errorMsg = getResultOutput(result);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Agent ${result.stopReason || "failed"}: ${errorMsg}${result.herdrNote ? `\n${result.herdrNote}` : ""}`,
+					},
+				],
+				details: makeDetails("single")([result]),
+				isError: true,
+			};
+		}
+		return {
+			content: [
+				{
+					type: "text",
+					text:
+						(getFinalOutput(result.messages) || "(no output)") +
+						(result.herdrNote ? `\n${result.herdrNote}` : ""),
+				},
+			],
+			details: makeDetails("single")([result]),
+		};
+	}
 
-			const text = result.content[0];
-			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
-		},
-	});
+	const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+	return {
+		content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
+		details: makeDetails("single")([]),
+	};
 }
+
+
 
 /**
  * Lightweight programmatic entry: run a single subagent to completion and

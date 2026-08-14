@@ -8,30 +8,15 @@ and herding **pi agents inside Herdr**.
 > to your main pi instance when it completes. No invisible subprocesses.
 
 ```
-you ──► sheepdog ──► a new Herdr tab (e.g. "scout") runs pi live, completes, hands the result back
-        └────────────► shepherd   (list / start / prompt / status / read / close / gc)
+you ──► shepherd (action: delegate | list | start | prompt | status | read | close | gc)
 ```
 
-Two capabilities, one extension, exposed to the model as two **tools**. The
-naming is thematic: the **shepherd manages the herd**; the **sheepdog** is the
-laborer you send out to fetch one result and bring it back.
+The extension exposes its unified capability as the **`shepherd`** tool:
 
-- **`sheepdog`** — delegate a task to a specialized agent (`scout`, `planner`,
-  `reviewer`, `worker`, …). It runs **live in a new Herdr tab labelled with the
-  agent name**, gets the delegated system prompt + tool/model config, and on
-  completion the main instance picks up its final output. Herdr-native from any
-  prompt: even if pi was started from a plain terminal, the referenced headless
-  Herdr server is started/attached automatically.
-- **`shepherd`** — manage the pi agents living in your Herdr panes: see them
-  (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check
-  status / read output (`status`, `read`), and close panes that pi-shepherd
-  created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes
-  stale registry entries (panes that no longer exist) and cleans their temp dirs.
+- **`shepherd` (action: `delegate`)** — delegate a task to a specialized agent (`scout`, `planner`, `reviewer`, `worker`, …). It runs **live in a new Herdr tab labelled with the agent name**, gets the delegated system prompt + tool/model config, and on completion the main instance picks up its final output.
+- **`shepherd` (action: `list` | `start` | `prompt` | `status` | `read` | `close` | `gc`)** — manage pi agents living in your Herdr panes: see them (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check status / read output (`status`, `read`), and close panes that pi-shepherd created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes stale registry entries.
 
-> **Compatibility:** the delegation tool is named **`sheepdog`** (not
-> `subagent`) so it coexists with the `pi-herdr-agents` package, whose own
-> `subagent` tool drives same-name Herdr-pane/worktree agents. Registering two
-> tools called `subagent` would make pi fail to load any extension.
+
 
 Agent definitions are loaded from plain Markdown files using the
 [standard VS Code custom-agent syntax](https://code.visualstudio.com/docs/agent-customization/custom-agents)

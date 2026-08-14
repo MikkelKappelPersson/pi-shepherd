@@ -27,6 +27,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { loadSettings } from "./settings.ts";
+import { TaskItem, ChainItem, AgentScopeSchema } from "./types.ts";
+import { executeDelegation } from "./subagent.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -595,6 +597,59 @@ function lastAssistantText(messages: Message[]): string {
 const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
 
 /**
+ * True when no `pi` process is running in the pane (the launch script has
+ * finished and echoed its sentinel). Used to confirm a sentinel match is the
+ * shell's real completion echo and not arbitrary subagent output.
+ */
+async function piProcessGone(paneId: string): Promise<boolean> {
+	try {
+		const { stdout } = await execFileAsync(
+			"herdr",
+			["pane", "process-info", "--pane", paneId],
+			{ encoding: "utf8" },
+		);
+		const fg =
+			(JSON.parse(stdout) as any)?.result?.process_info?.foreground_processes ?? [];
+		return !Array.isArray(fg) || fg.every((p: any) => !p?.argv?.includes?.("pi"));
+	} catch {
+		return false; // assume still running when we can't check — safer
+	}
+}
+
+/**
+ * Read the completion sentinel, but ONLY when pi has actually exited.
+ *
+ * The launch script's `echo '__SHEPHERD_DONE_$?__'` runs after pi exits, so a
+ * real sentinel always sits at the very end of the pane tail (a following
+ * shell prompt may land after it) with no pi process left. Matching anywhere
+ * in the tail is unsafe: a subagent's own output can legitimately contain the
+ * literal marker (e.g. grep over this repo's PLAN.md, which documents the
+ * sentinel), and during the 1s poll window that output can be the tail's last
+ * line while pi is still running. Trusting it then makes the parent declare
+ * the run done, delete the child's session dir mid-run (ENOENT, corrupted
+ * run, "(no output)" pickup) and return before the subagent finished.
+ */
+async function doneSentinelInTail(paneId: string): Promise<number | null> {
+	const tail = await readPaneTail(paneId);
+	const nonEmpty = tail
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+	let code: number | null = null;
+	for (let i = nonEmpty.length - 1; i >= Math.max(0, nonEmpty.length - 3); i--) {
+		const m = nonEmpty[i].match(DONE_SENTINEL);
+		if (m) {
+			code = Number(m[1]);
+			break;
+		}
+	}
+	if (code === null) return null;
+	// Sentinel text alone is not proof (see above) — require pi to be gone.
+	if (!(await piProcessGone(paneId))) return null;
+	return code;
+}
+
+/**
  * Run one delegated agent to completion in a new Herdr tab, then pick up the
  * result. The tab is left open unless `keepOpen` is false. When `stayOpen` is
  * true (default) the child pi does NOT exit on completion — it stays alive in
@@ -688,10 +743,8 @@ export async function runAgentInHerdr(opts: {
 			}
 
 			const pickup = parseSessionFile(sessionFile);
-			const tail = await readPaneTail(paneId);
-			const sentinel = tail.match(DONE_SENTINEL);
-			if (sentinel) {
-				const code = Number(sentinel[1]);
+			const code = await doneSentinelInTail(paneId);
+			if (code !== null) {
 				outcome = code === 0 ? "done" : "error";
 				if (code !== 0)
 					errorMessage = `pi exited with code ${code} (no completion sidecar).`;
@@ -708,7 +761,7 @@ export async function runAgentInHerdr(opts: {
 			errorMessage =
 				`Timed out after ${Math.round((Date.now() - started) / 1000)}s. ` +
 				`The tab "${label}" (pane ${paneId}) is left open with pi still running — ` +
-				`inspect it there, or close with herd close ${paneId}.`;
+				`inspect it there, or close with shepherd close ${paneId}.`;
 		} else if (stayOpen && !settled) {
 			// The child pi stays alive in the tab (completion was signalled via
 			// the sidecar, not a process exit), so there is no exit to wait for.
@@ -723,8 +776,7 @@ export async function runAgentInHerdr(opts: {
 			const settleDeadline = Date.now() + 20_000;
 			while (Date.now() < settleDeadline) {
 				if (opts.signal?.aborted) break;
-				const tail = await readPaneTail(paneId);
-				if (DONE_SENTINEL.test(tail)) {
+				if ((await doneSentinelInTail(paneId)) !== null) {
 					settled = true;
 					break;
 				}
@@ -767,8 +819,8 @@ export async function runAgentInHerdr(opts: {
 	}
 }
 
-const ActionSchema = StringEnum(["list", "start", "prompt", "status", "read", "close", "gc"] as const, {
-	description: "Herd action to perform",
+const ActionSchema = StringEnum(["delegate", "list", "start", "prompt", "status", "read", "close", "gc"] as const, {
+	description: "Herd action to perform (delegate | list | start | prompt | status | read | close | gc)",
 });
 const DirectionSchema = StringEnum(["right", "down"] as const, {
 	description: "Split direction for a new sibling pane (start)",
@@ -787,11 +839,43 @@ const HerdParams = Type.Object({
 				"Agent name or pane id target; also the label used for the new pane on start.",
 		}),
 	),
-	task: Type.Optional(Type.String({ description: "Prompt to submit (action=prompt). When given with action=start, the task is delivered to the new sibling at launch." })),
+	agent: Type.Optional(
+		Type.String({ description: "Agent name for action=delegate (e.g. scout, worker, reviewer)" }),
+	),
+	task: Type.Optional(Type.String({ description: "Task to delegate (action=delegate) or prompt to submit (action=prompt/start)." })),
+	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel delegation (action=delegate)" })),
+	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential delegation (action=delegate)" })),
+	mode: Type.Optional(
+		StringEnum(["single", "parallel", "chain"] as const, {
+			description: "Delegation mode for action=delegate (default: single)",
+		}),
+	),
 	direction: Type.Optional(DirectionSchema),
-	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane (action=start)" })),
+	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane or delegated task" })),
+	agentScope: Type.Optional(AgentScopeSchema),
+	confirmProjectAgents: Type.Optional(
+		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
+	),
+	keepOpen: Type.Optional(
+		Type.Boolean({
+			description: "Keep the Herdr tab open after completion for inspection. Default: true.",
+			default: true,
+		}),
+	),
+	stayOpen: Type.Optional(
+		Type.Boolean({
+			description:
+				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
+			default: true,
+		}),
+	),
+	omitSystemPrompt: Type.Optional(
+		Type.Boolean({
+			description: "Override the selected agent's omit-system-prompt frontmatter.",
+		}),
+	),
 	timeout: Type.Optional(
-		Type.Integer({ description: "Wait timeout (ms) for prompt settle (default 120000)", default: 120000 }),
+		Type.Integer({ description: "Wait timeout (ms) for prompt settle or delegation run (default 120000)", default: 120000 }),
 	),
 	lines: Type.Optional(Type.Integer({ description: "Number of recent lines for read (default 40)", default: 40 })),
 	source: Type.Optional(SourceSchema),
@@ -811,8 +895,32 @@ function textResult(text: string, details: Record<string, unknown>): AgentToolRe
 	return { content: [{ type: "text" as const, text }], details };
 }
 
-async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+async function doAction(
+	action: string,
+	args: HerdArgs,
+	ctx: { cwd: string; hasUI?: boolean; ui?: any },
+	signal?: AbortSignal,
+	onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void,
+): Promise<AgentToolResult<Record<string, unknown>>> {
 	switch (action) {
+		case "delegate": {
+			const agentName = args.agent ?? args.name;
+			const params = {
+				agent: agentName,
+				task: args.task,
+				tasks: args.tasks,
+				chain: args.chain,
+				agentScope: args.agentScope,
+				confirmProjectAgents: args.confirmProjectAgents,
+				cwd: args.cwd,
+				keepOpen: args.keepOpen,
+				stayOpen: args.stayOpen,
+				timeout: args.timeout,
+				omitSystemPrompt: args.omitSystemPrompt,
+			};
+			return executeDelegation(params, signal, onUpdate as any, ctx);
+		}
+
 		case "list": {
 			// Silently drop registrations for panes that no longer exist so a
 			// long-lived session doesn't accumulate stale entries.
@@ -884,7 +992,7 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 				return textResult(
 					`Started pi agent "${name}" in pane ${paneId} [${delivered}].` +
 						advisory +
-						`\nDrive it with herd prompt ${paneId} ..., or close with herd close ${paneId}.`,
+						`\nDrive it with shepherd prompt ${paneId} ..., or close with shepherd close ${paneId}.`,
 					{ paneId, name, taskDelivered: task !== undefined, agentState: det.state },
 				);
 			} catch (error: any) {
@@ -975,8 +1083,13 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 		case "status": {
 			const target = args.name?.trim();
 			if (!target) return textResult("Provide a name/pane target (action=status).", {});
+			// Resolve a shepherd pane by its recorded paneId or label (same as
+			// prompt/close) so `status scout` works after a delegate/start.
+			const created = loadCreatedPanes();
+			const match = created.find((p) => p.paneId === target || p.name === target);
+			const resolved = match?.paneId ?? target;
 			try {
-				const out = herdrExecSync(["agent", "get", target]);
+				const out = herdrExecSync(["agent", "get", resolved]);
 				const rec = (out as any)?.result?.agent as Record<string, unknown> | undefined;
 				if (!rec) return textResult(`No status for "${target}".`, { target });
 				const lines = [
@@ -1006,24 +1119,40 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 			if (!target) return textResult("Provide a name/pane target (action=read).", {});
 			const lines = args.lines ?? 40;
 			const source = args.source ?? "recent-unwrapped";
+			// Resolve a shepherd pane by its recorded paneId or label (same as
+			// prompt/close) so `read scout` works after a delegate/start.
+			const created = loadCreatedPanes();
+			const match = created.find((p) => p.paneId === target || p.name === target);
+			const resolved = match?.paneId ?? target;
 			try {
 				const { stdout } = await execFileAsync(
 					"herdr",
-					["agent", "read", target, "--source", source, "--lines", String(lines), "--format", "text"],
+					["agent", "read", resolved, "--source", source, "--lines", String(lines), "--format", "text"],
 					{ encoding: "utf8" },
 				);
 				return textResult(stdout.trim() || "(no terminal output)", { target, lines, source });
-			} catch (error: any) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Could not read "${target}": ${error?.message ?? String(error)}`,
-						},
-					],
-					details: { target, error: String(error?.message ?? error) },
-					isError: true,
-				};
+			} catch {
+				// Agent detection is dropped once the pane's pi exited — fall back
+				// to a plain terminal read so finished runs stay inspectable.
+				try {
+					const { stdout } = await execFileAsync(
+						"herdr",
+						["pane", "read", resolved, "--source", source, "--lines", String(lines), "--format", "text"],
+						{ encoding: "utf8" },
+					);
+					return textResult(stdout.trim() || "(no terminal output)", { target, lines, source, fallback: true });
+				} catch (error: any) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Could not read "${target}": ${error?.message ?? String(error)}`,
+							},
+						],
+						details: { target, error: String(error?.message ?? error) },
+						isError: true,
+					};
+				}
 			}
 		}
 
@@ -1090,20 +1219,20 @@ async function doAction(action: string, args: HerdArgs, ctx): Promise<AgentToolR
 export function registerShepherdTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "shepherd",
-		label: "Shepherd (manage Herdr agents)",
+		label: "Shepherd (delegate & manage Herdr agents)",
 		description: [
-			"Manage pi agents running in Herdr panes: list, start a sibling, prompt, status, read, close.",
-			`Actions: list | start | prompt | status | read | close | gc. Requires a running Herdr session (HERDR_ENV=1).`,
-			`Panes created by pi-shepherd (via this tool or sheepdog) are marked ● and can be closed with close.`,
-			"gc prunes stale pi-shepherd pane registrations (panes that no longer exist) and cleans their temp dirs.",
-			"For isolated one-shot delegation use the 'sheepdog' tool instead.",
+			"Unifying tool to delegate tasks to subagents or manage agents in Herdr panes.",
+			"Actions: delegate | list | start | prompt | status | read | close | gc.",
+			"For delegation (action=delegate): pass agent and task (or tasks array for parallel, or chain array for sequential steps).",
+			"For fleet management: list active agent panes, start sibling panes, prompt, status, read, or close panes.",
+			"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
 		].join(" "),
 		parameters: HerdParams,
 
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!isHerdrAvailable()) return unavailableResult();
 			try {
-				return await doAction(params.action, params as HerdArgs, ctx);
+				return await doAction(params.action, params as HerdArgs, ctx, signal, onUpdate);
 			} catch (error: any) {
 				return {
 					content: [
@@ -1117,9 +1246,9 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 
 		renderCall(args, theme) {
 			const action = args.action ?? "list";
-			const target = args.name ? ` ${args.name}` : "";
+			const target = args.agent || args.name ? ` ${args.agent || args.name}` : "";
 			const extra =
-				action === "prompt"
+				action === "prompt" || action === "delegate"
 					? ` "…${((args.task ?? "").length > 40 ? (args.task ?? "").slice(0, 40) + "…" : args.task ?? "")}"`
 					: "";
 			return new Text(
