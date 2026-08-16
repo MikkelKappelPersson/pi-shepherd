@@ -47,7 +47,7 @@ index.ts      extension entry: /pi-shepherd command + tool registration
 subagent.ts   sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain) ✅
 shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
-herd.ts       shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner ✅
+herdr.ts       shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner ✅
 settings.ts   persisted defaults store (~/.pi/agent/pi-shepherd/settings.json, mtime-cached) ✅
 settings-ui.ts  /pi-shepherd settings menu (inline in the editor slot, SettingsList) ✅
 .pi/agents/   bundled built-in subagents (pi project format)                  ✅

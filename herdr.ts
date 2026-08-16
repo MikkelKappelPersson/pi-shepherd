@@ -146,7 +146,7 @@ function herdrExecSync(args: string[]): unknown {
  * status widget every second or so. Returns [] when Herdr isn't reachable.
  * The result is never cached (live view reflects the current state).
  */
-export function listHerdrAgents(): HerdAgentSummary[] {
+export function listHerdrAgents(): HerdrAgentSummary[] {
 	if (!isHerdrAvailable()) return [];
 	try {
 		return agentSummaries(herdrExecSync(["agent", "list"]));
@@ -160,7 +160,7 @@ export function listHerdrAgents(): HerdAgentSummary[] {
  * agent is not idle (working, waiting on input, errored, …). Used for the
  * persistent "below the editor" status line.
  */
-export function workingSubagents(): HerdAgentSummary[] {
+export function workingSubagents(): HerdrAgentSummary[] {
 	// `rec.agent` in `herdr agent list` is always the program name (“pi”),
 	// not the agent kind. For shepherd panes the agent kind (scout/worker/…)
 	// is what we recorded when the tab was created — use that for the label.
@@ -189,7 +189,7 @@ function paneIdOf(output: unknown, context: string): string {
 	return paneId;
 }
 
-export interface HerdAgentSummary {
+export interface HerdrAgentSummary {
 	name: string;
 	state: string;
 	paneId: string;
@@ -201,11 +201,11 @@ export interface HerdAgentSummary {
 	terminalTitle: string;
 }
 
-function agentSummaries(listOutput: unknown): HerdAgentSummary[] {
+function agentSummaries(listOutput: unknown): HerdrAgentSummary[] {
 	const agents = (listOutput as { result?: { agents?: unknown[] } })?.result
 		?.agents;
 	if (!Array.isArray(agents)) return [];
-	const out: HerdAgentSummary[] = [];
+	const out: HerdrAgentSummary[] = [];
 	for (const a of agents) {
 		const rec = a as Record<string, unknown>;
 		out.push({
@@ -223,14 +223,14 @@ function agentSummaries(listOutput: unknown): HerdAgentSummary[] {
 	return out;
 }
 
-function formatSummary(s: HerdAgentSummary): string {
+function formatSummary(s: HerdrAgentSummary): string {
 	const who = s.focused ? `${s.name} (self/focused)` : s.name;
 	const mark = s.shepherd ? " ●(shepherd)" : "";
 	return `• ${who}${mark} [${s.state}] pane=${s.paneId}${s.cwd ? ` cwd=${s.cwd}` : ""}`;
 }
 
 // ── Shepherd panes registry ───────────────────────────────────────────────
-// Tracks panes/tabs pi-shepherd created so `herd close` only ever closes our
+// Tracks panes/tabs pi-shepherd created so `shepherd close` only ever closes our
 // own panes (safety invariant: never close panes we didn't create).
 
 interface CreatedPane {
@@ -280,7 +280,7 @@ function forgetCreatedPane(paneId: string): void {
 
 /**
  * Attach (or overwrite) the temp launch dir for an existing pane so that
- * `herd close` can clean it up. The pane is registered early (for orphan
+ * `shepherd close` can clean it up. The pane is registered early (for orphan
  * safety) but its launch dir is only known once pi is booted, so we set it
  * afterwards.
  */
@@ -336,7 +336,7 @@ function isShepherdPane(idOrName: string): boolean {
 }
 
 // ── Herdr-backed agent runner ────────────────────────────────────────────
-// One-shot delegation for the `sheepdog` tool: create a new tab labelled
+// One-shot delegation (shepherd action=delegate): create a new tab labelled
 // after the agent, run pi in it with the delegated system prompt + task, wait
 // for completion, pick up the result, and (optionally) close the tab.
 
@@ -438,7 +438,7 @@ function sendEscapeInHerdr(paneId: string): void {
 /**
  * One sharable implementation of the launch files used to start a pi in a
  * Herdr pane, used by both `runAgentInHerdr` (one-shot delegation) and
- * `herd start` (persistent sibling). Writing is heredoc-safe: execFile
+ * `shepherd start` (persistent sibling). Writing is heredoc-safe: execFile
  * arrays plus a `'@taskFile'` argument that bash unquotes.
  *
  * When `task` is undefined a *bare* pi is launched (no sysprompt/task/model/
@@ -703,7 +703,7 @@ export async function runAgentInHerdr(opts: {
 		model: opts.model,
 		tools: opts.tools,
 	});
-	// Remind the registry where this pane's temp dir lives so `herd close` can
+	// Remind the registry where this pane's temp dir lives so `shepherd close` can
 	// clean it up if this pane is left open (stayOpen/keepOpen). Harmless when
 	// the run settles and removes the dir itself (force rm of a missing path).
 	setCreatedPaneDir(paneId, dir);
@@ -831,7 +831,7 @@ const SourceSchema = StringEnum(["visible", "recent", "recent-unwrapped", "detec
 	default: "recent-unwrapped",
 });
 
-const HerdParams = Type.Object({
+const ShepherdParams = Type.Object({
 	action: ActionSchema,
 	name: Type.Optional(
 		Type.String({
@@ -881,7 +881,7 @@ const HerdParams = Type.Object({
 	source: Type.Optional(SourceSchema),
 });
 
-type HerdArgs = Static<typeof HerdParams>;
+type ShepherdArgs = Static<typeof ShepherdParams>;
 
 function unavailableResult(): AgentToolResult<{ error: string }> {
 	return {
@@ -897,7 +897,7 @@ function textResult(text: string, details: Record<string, unknown>): AgentToolRe
 
 async function doAction(
 	action: string,
-	args: HerdArgs,
+	args: ShepherdArgs,
 	ctx: { cwd: string; hasUI?: boolean; ui?: any },
 	signal?: AbortSignal,
 	onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void,
@@ -960,7 +960,7 @@ async function doAction(
 			}
 
 			// Track the pane as soon as it exists (BEFORE any await) so that even a
-			// shell-ready timeout or failed launch leaves a pane `herd close` may
+			// shell-ready timeout or failed launch leaves a pane `shepherd close` may
 			// close — never a closable orphan. Idempotent, so the later launch path
 			// is unaffected.
 			recordCreatedPane({ paneId, tabId, name, cwd, createdAt: Date.now() });
@@ -988,7 +988,7 @@ async function doAction(
 				const delivered = task !== undefined ? "task delivered" : "no task";
 				const advisory = det.detected
 					? ` (agent state: ${det.state ?? "unknown"})`
-					: "\npi is booting — verify with herd status " + paneId + ".";
+					: "\npi is booting — verify with shepherd status " + paneId + ".";
 				return textResult(
 					`Started pi agent "${name}" in pane ${paneId} [${delivered}].` +
 						advisory +
@@ -1034,7 +1034,7 @@ async function doAction(
 					content: [
 						{
 							type: "text",
-							text: `Agent "${target}" was not detected in Herdr — nothing was sent. Confirm the pane is running pi (herd status/read), then retry.`,
+							text: `Agent "${target}" was not detected in Herdr — nothing was sent. Confirm the pane is running pi (shepherd status/read), then retry.`,
 						},
 					],
 					details: { name: target, pane: resolved, error: "agent not detected" },
@@ -1227,12 +1227,12 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 			"For fleet management: list active agent panes, start sibling panes, prompt, status, read, or close panes.",
 			"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
 		].join(" "),
-		parameters: HerdParams,
+		parameters: ShepherdParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!isHerdrAvailable()) return unavailableResult();
 			try {
-				return await doAction(params.action, params as HerdArgs, ctx, signal, onUpdate);
+				return await doAction(params.action, params as ShepherdArgs, ctx, signal, onUpdate);
 			} catch (error: any) {
 				return {
 					content: [

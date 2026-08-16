@@ -30,7 +30,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
-import { runAgentInHerdr } from "./herd.ts";
+import { runAgentInHerdr } from "./herdr.ts";
 import { TaskItem, ChainItem, AgentScopeSchema, SubagentParams } from "./types.ts";
 export { TaskItem, ChainItem, AgentScopeSchema, SubagentParams };
 

@@ -13,13 +13,13 @@
  * This test delegates a task whose first step is exactly such a grep, then
  * requires the run to complete normally with the subagent's real output.
  */
-import { runAgentInHerdr } from "../herd.ts";
+import { runAgentInHerdr } from "../herdr.ts";
 
 const task = [
 	"Step 1: run this shell command and show the result:",
-	"  grep -rn SHEPHERD_DONE /home/mikkelkp/.pi/agent/extensions/pi-shepherd/PLAN.md /home/mikkelkp/.pi/agent/extensions/pi-shepherd/herd.ts | head -5",
+	"  grep -rn SHEPHERD_DONE /home/mikkelkp/.pi/agent/extensions/pi-shepherd/PLAN.md /home/mikkelkp/.pi/agent/extensions/pi-shepherd/herdr.ts | head -5",
 	"Step 2: list the top-level files of /home/mikkelkp/.pi/agent/extensions/pi-shepherd.",
-	"Step 3: reply with exactly one line: the summary line 'SENTINEL-TEST-OK' followed by what herd.ts does in a few words.",
+	"Step 3: reply with exactly one line: the summary line 'SENTINEL-TEST-OK' followed by what herdr.ts does in a few words.",
 ].join("\n");
 
 const started = Date.now();

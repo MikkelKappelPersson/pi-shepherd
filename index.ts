@@ -2,7 +2,7 @@
  * pi-shepherd — no-fuss pi extension: subagents + herding pi agents in Herdr.
  *
  * Phases 1-4: agent discovery (discovery.ts), isolated subagents
- * (subagent.ts), built-in agents (.pi/agents), and Herdr herding (herd.ts).
+ * (subagent.ts), built-in agents (.pi/agents), and Herdr herding (herdr.ts).
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -14,12 +14,12 @@ import {
 	registerShepherdTool,
 	isHerdrAvailable,
 	workingSubagents,
-	type HerdAgentSummary,
-} from "./herd.ts";
+	type HerdrAgentSummary,
+} from "./herdr.ts";
 
 /**
  * Persistent "below the editor" status line listing the subagents currently
- * working (see tui.md Pattern 5 / widget-placement.ts). Polls `herd list`
+ * working (see tui.md Pattern 5 / widget-placement.ts). Polls `shepherd list`
  * every ~1s and re-renders on change. Safe no-op when Herdr isn't reachable.
  */
 function registerSubagentStatusWidget(pi: ExtensionAPI): void {
@@ -55,7 +55,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
 }
 
 function renderWorkingLine(
-	agents: HerdAgentSummary[],
+	agents: HerdrAgentSummary[],
 	theme: {
 		fg(color: string, text: string): string;
 		dim(text: string): string;

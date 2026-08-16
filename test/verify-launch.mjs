@@ -2,7 +2,7 @@
 /** Herdr-independent verification of delegated pi launch argument construction. */
 import * as fs from "node:fs";
 
-const { writePiLaunchFiles } = await import("../herd.ts");
+const { writePiLaunchFiles } = await import("../herdr.ts");
 let failures = 0;
 function assert(condition, label) {
   if (condition) console.log(`PASS  ${label}`);

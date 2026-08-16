@@ -24,7 +24,7 @@ pi-shepherd/
 ├── index.ts          extension entry: registers tools + /pi-shepherd command
 ├── discovery.ts      agent discovery + VS Code frontmatter parsing (pure, testable)
 ├── subagent.ts       sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
-├── herd.ts           herd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner
+├── herdr.ts           shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner
 ├── shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end
 ├── .pi/agents/       built-in subagents (pi project format)
 ├── .agents/agents/   built-in subagents (shared/cross-tool format)
@@ -114,7 +114,7 @@ pattern for the external locations + two bundled, with VS Code syntax.
 Originally adapted pi's `examples/extensions/subagent` isolated-subprocess
 runner. Per the “no invisible subprocesses” direction, that subprocess fallback
 was **removed**: every delegated agent now runs **live in a Herdr tab**. The
-unit of work is `runSingleAgent`, which routes to the herdr runner in `herd.ts`.
+unit of work is `runSingleAgent`, which routes to the herdr runner in `herdr.ts`.
 
 - [x] `runSingleAgent` (herdr runtime): `runAgentInHerdr` → create a tab,
       run pi with the delegated system prompt + tool/model config, wait for a
@@ -152,7 +152,7 @@ bundled dirs so any user/project agent overrides them by name.
       `/scout-and-plan`, `/implement-and-review`. *(future)*
 - **Accept**: ✅ scout runs out of the box (verified).
 
-## Phase 4 — Herd (Herdr integration) (`herd.ts`) ✅
+## Phase 4 — Herd (Herdr integration) (`herdr.ts`) ✅
 
 Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 **herdr agent runner** (`runAgentInHerdr`) used by `sheepdog`, and is now
@@ -204,7 +204,7 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 
 ## Conventions (enforced from Phase 0)
 
-- `.ts` imports use explicit filename with extension (`from "./herd.ts"`).
+- `.ts` imports use explicit filename with extension (`from "./herdr.ts"`).
 - `discovery.ts` stays **pure** — no pi AI calls; testable from a script.
 - Agent prompt files are read fresh from disk each run — never cache.
 - Mirror `pi-ops`/`AGENTS.md` structure: runtime / architecture / invariants /
