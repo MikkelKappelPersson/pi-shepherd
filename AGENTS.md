@@ -45,9 +45,10 @@ their tool permissions match yours.
 ```
 index.ts      extension entry: /pi-shepherd command + tool registration
 subagent.ts   delegation runner: runSingleAgent / executeDelegation (single/parallel/chain) ✅
+shepherd.ts   the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts) ✅
 shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
-herdr.ts       shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner ✅
+herdr.ts       Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry ✅
 settings.ts   persisted defaults store (~/.pi/agent/pi-shepherd/settings.json, mtime-cached) ✅
 settings-ui.ts  /pi-shepherd settings menu (inline in the editor slot, SettingsList) ✅
 .pi/agents/   bundled built-in subagents (pi project format)                  ✅

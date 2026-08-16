@@ -1,10 +1,14 @@
 /**
- * Phase 4 — Herd tool: manage pi agents living in Herdr panes.
+ * Herdr runtime — the Herdr integration layer for pi-shepherd.
  *
- * Depends only on the `herdr` CLI (no JS library). Requires a running Herdr
- * session with `HERDR_ENV=1`. This is the "herd" capability — driving
- * agents that are actually running in Herdr panes (as opposed to the
- * `subagent` tool, which spawns isolated pi subprocesses).
+ * Shells out to the `herdr` CLI (no JS library) and provides the building
+ * blocks both sides of the extension depend on: the Herdr session guard
+ * (isHerdrAvailable), pane/tab creation (createHerdrTab), the launch-script
+ * writer (writePiLaunchFiles / launchPiInPane), the delegation runner
+ * (runAgentInHerdr, used by subagent.ts), the created-panes registry, and
+ * agent listing (listHerdrAgents / workingSubagents, used by the status
+ * widget). The model-facing `shepherd` tool lives in shepherd.ts and imports
+ * from here; the in-tab completion extension is shepherd-done.ts.
  *
  * Safety rules (from the Herdr skill):
  *   - Verify HERDR_ENV=1 first; fail cleanly otherwise.
@@ -20,15 +24,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { StringEnum } from "@earendil-works/pi-ai";
-import { Type, type Static } from "typebox";
 import { loadSettings } from "./settings.ts";
-import { TaskItem, ChainItem, AgentScopeSchema } from "./types.ts";
-import { executeDelegation } from "./subagent.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -134,9 +132,9 @@ export function getHerdrWorkspaceId(): string {
 	return id;
 }
 
-const HERDR_SETUP_HINT = "Run `herdr` to start/attach Herdr (or ensure the headless server is up), and keep `herdr` on PATH.";
+export const HERDR_SETUP_HINT = "Run `herdr` to start/attach Herdr (or ensure the headless server is up), and keep `herdr` on PATH.";
 
-function herdrExecSync(args: string[]): unknown {
+export function herdrExecSync(args: string[]): unknown {
 	const stdout = execFileSync("herdr", args, { encoding: "utf8" });
 	return JSON.parse(stdout);
 }
@@ -175,12 +173,12 @@ export function workingSubagents(): HerdrAgentSummary[] {
 		});
 }
 
-async function herdrExec(args: string[]): Promise<unknown> {
+export async function herdrExec(args: string[]): Promise<unknown> {
 	const { stdout } = await execFileAsync("herdr", args, { encoding: "utf8" });
 	return JSON.parse(stdout);
 }
 
-function paneIdOf(output: unknown, context: string): string {
+export function paneIdOf(output: unknown, context: string): string {
 	const paneId = (output as { result?: { pane?: { pane_id?: unknown } } })?.result
 		?.pane?.pane_id;
 	if (typeof paneId !== "string" || !paneId) {
@@ -201,7 +199,7 @@ export interface HerdrAgentSummary {
 	terminalTitle: string;
 }
 
-function agentSummaries(listOutput: unknown): HerdrAgentSummary[] {
+export function agentSummaries(listOutput: unknown): HerdrAgentSummary[] {
 	const agents = (listOutput as { result?: { agents?: unknown[] } })?.result
 		?.agents;
 	if (!Array.isArray(agents)) return [];
@@ -223,7 +221,7 @@ function agentSummaries(listOutput: unknown): HerdrAgentSummary[] {
 	return out;
 }
 
-function formatSummary(s: HerdrAgentSummary): string {
+export function formatSummary(s: HerdrAgentSummary): string {
 	const who = s.focused ? `${s.name} (self/focused)` : s.name;
 	const mark = s.shepherd ? " ●(shepherd)" : "";
 	return `• ${who}${mark} [${s.state}] pane=${s.paneId}${s.cwd ? ` cwd=${s.cwd}` : ""}`;
@@ -247,7 +245,7 @@ function registryFile(): string {
 	return path.join(os.homedir(), ".pi", "agent", "pi-shepherd", "created-panes.json");
 }
 
-function loadCreatedPanes(): CreatedPane[] {
+export function loadCreatedPanes(): CreatedPane[] {
 	try {
 		const parsed = JSON.parse(fs.readFileSync(registryFile(), "utf8"));
 		return Array.isArray(parsed) ? (parsed as CreatedPane[]) : [];
@@ -266,7 +264,7 @@ function saveCreatedPanes(panes: CreatedPane[]): void {
 	}
 }
 
-function recordCreatedPane(entry: CreatedPane): void {
+export function recordCreatedPane(entry: CreatedPane): void {
 	const panes = loadCreatedPanes();
 	if (!panes.some((p) => p.paneId === entry.paneId)) {
 		panes.push(entry);
@@ -284,7 +282,7 @@ function forgetCreatedPane(paneId: string): void {
  * safety) but its launch dir is only known once pi is booted, so we set it
  * afterwards.
  */
-function setCreatedPaneDir(paneId: string, dir: string): void {
+export function setCreatedPaneDir(paneId: string, dir: string): void {
 	const panes = loadCreatedPanes();
 	const entry = panes.find((p) => p.paneId === paneId);
 	if (!entry) return;
@@ -293,7 +291,7 @@ function setCreatedPaneDir(paneId: string, dir: string): void {
 }
 
 /** Best-effort removal of a pane's retained temp launch dir. */
-function removeCreatedPaneDir(paneId: string): void {
+export function removeCreatedPaneDir(paneId: string): void {
 	const entry = loadCreatedPanes().find((p) => p.paneId === paneId);
 	if (!entry?.dir) return;
 	try {
@@ -304,7 +302,7 @@ function removeCreatedPaneDir(paneId: string): void {
 }
 
 /** True when Herdr still lists a pane with this id. */
-function paneExists(paneId: string): boolean {
+export function paneExists(paneId: string): boolean {
 	try {
 		const out = herdrExecSync(["pane", "list"]) as any;
 		const panes = out?.result?.panes as Array<{ pane_id?: unknown }> | undefined;
@@ -320,7 +318,7 @@ function paneExists(paneId: string): boolean {
  * check itself fails, so we never prune a pane we can't confirm is gone.
  * Returns how many stale entries were pruned.
  */
-function pruneStaleCreatedPanes(): number {
+export function pruneStaleCreatedPanes(): number {
 	const panes = loadCreatedPanes();
 	if (panes.length === 0) return 0;
 	const stale = panes.filter((p) => !paneExists(p.paneId));
@@ -345,7 +343,7 @@ function shellQuote(value: string): string {
 }
 
 /** Create a new tab in a workspace and return its root pane + tab ids. */
-function createHerdrTab(
+export function createHerdrTab(
 	label: string,
 	cwd: string,
 	workspaceId?: string,
@@ -380,7 +378,7 @@ function createHerdrTab(
 }
 
 /** Wait until the freshly created pane's foreground shell is at a prompt. */
-async function waitForHerdrShellReady(
+export async function waitForHerdrShellReady(
 	paneId: string,
 	options: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<void> {
@@ -499,7 +497,7 @@ export function writePiLaunchFiles(opts: {
  * pane's pi is alive — removing it would make the still-running pi hit ENOENT
  * on its own session file (AGENTS.md invariant).
  */
-function launchPiInPane(
+export function launchPiInPane(
 	paneId: string,
 	opts: { name: string; task?: string; stayOpen: boolean },
 ): { dir: string; sessionFile: string; scriptFile: string } {
@@ -512,7 +510,7 @@ function launchPiInPane(
  * Poll until Herdr has detected the agent session for the pane (or timeout).
  * Used as the post-start readiness check and the pre-prompt gate.
  */
-async function waitForHerdrAgentDetected(
+export async function waitForHerdrAgentDetected(
 	paneId: string,
 	options: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<{ detected: boolean; state?: string }> {
@@ -537,7 +535,7 @@ async function waitForHerdrAgentDetected(
 	return { detected: false, state };
 }
 
-async function readPaneTail(paneId: string): Promise<string> {
+export async function readPaneTail(paneId: string): Promise<string> {
 	try {
 		const { stdout } = await execFileAsync(
 			"herdr",
@@ -819,460 +817,3 @@ export async function runAgentInHerdr(opts: {
 	}
 }
 
-const ActionSchema = StringEnum(["delegate", "list", "start", "prompt", "status", "read", "close", "gc"] as const, {
-	description: "Herd action to perform (delegate | list | start | prompt | status | read | close | gc)",
-});
-const DirectionSchema = StringEnum(["right", "down"] as const, {
-	description: "Split direction for a new sibling pane (start)",
-	default: "right",
-});
-const SourceSchema = StringEnum(["visible", "recent", "recent-unwrapped", "detection"] as const, {
-	description: "Terminal snapshot source for read",
-	default: "recent-unwrapped",
-});
-
-const ShepherdParams = Type.Object({
-	action: ActionSchema,
-	name: Type.Optional(
-		Type.String({
-			description:
-				"Agent name or pane id target; also the label used for the new pane on start.",
-		}),
-	),
-	agent: Type.Optional(
-		Type.String({ description: "Agent name for action=delegate (e.g. scout, worker, reviewer)" }),
-	),
-	task: Type.Optional(Type.String({ description: "Task to delegate (action=delegate) or prompt to submit (action=prompt/start)." })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel delegation (action=delegate)" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential delegation (action=delegate)" })),
-	mode: Type.Optional(
-		StringEnum(["single", "parallel", "chain"] as const, {
-			description: "Delegation mode for action=delegate (default: single)",
-		}),
-	),
-	direction: Type.Optional(DirectionSchema),
-	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane or delegated task" })),
-	agentScope: Type.Optional(AgentScopeSchema),
-	confirmProjectAgents: Type.Optional(
-		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
-	),
-	keepOpen: Type.Optional(
-		Type.Boolean({
-			description: "Keep the Herdr tab open after completion for inspection. Default: true.",
-			default: true,
-		}),
-	),
-	stayOpen: Type.Optional(
-		Type.Boolean({
-			description:
-				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
-			default: true,
-		}),
-	),
-	omitSystemPrompt: Type.Optional(
-		Type.Boolean({
-			description: "Override the selected agent's omit-system-prompt frontmatter.",
-		}),
-	),
-	timeout: Type.Optional(
-		Type.Integer({ description: "Wait timeout (ms) for prompt settle or delegation run (default 120000)", default: 120000 }),
-	),
-	lines: Type.Optional(Type.Integer({ description: "Number of recent lines for read (default 40)", default: 40 })),
-	source: Type.Optional(SourceSchema),
-});
-
-type ShepherdArgs = Static<typeof ShepherdParams>;
-
-function unavailableResult(): AgentToolResult<{ error: string }> {
-	return {
-		content: [{ type: "text", text: `Herd requires a running Herdr session.\n${HERDR_SETUP_HINT}` }],
-		details: { error: "herdr not available" },
-		isError: true,
-	};
-}
-
-function textResult(text: string, details: Record<string, unknown>): AgentToolResult<Record<string, unknown>> {
-	return { content: [{ type: "text" as const, text }], details };
-}
-
-async function doAction(
-	action: string,
-	args: ShepherdArgs,
-	ctx: { cwd: string; hasUI?: boolean; ui?: any },
-	signal?: AbortSignal,
-	onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void,
-): Promise<AgentToolResult<Record<string, unknown>>> {
-	switch (action) {
-		case "delegate": {
-			const agentName = args.agent ?? args.name;
-			const params = {
-				agent: agentName,
-				task: args.task,
-				tasks: args.tasks,
-				chain: args.chain,
-				agentScope: args.agentScope,
-				confirmProjectAgents: args.confirmProjectAgents,
-				cwd: args.cwd,
-				keepOpen: args.keepOpen,
-				stayOpen: args.stayOpen,
-				timeout: args.timeout,
-				omitSystemPrompt: args.omitSystemPrompt,
-			};
-			return executeDelegation(params, signal, onUpdate as any, ctx);
-		}
-
-		case "list": {
-			// Silently drop registrations for panes that no longer exist so a
-			// long-lived session doesn't accumulate stale entries.
-			pruneStaleCreatedPanes();
-			const out = herdrExecSync(["agent", "list"]);
-			const agents = agentSummaries(out);
-			if (agents.length === 0)
-				return textResult("No agents detected in Herdr.", { agents });
-			return textResult(agents.map(formatSummary).join("\n"), { agents });
-		}
-
-		case "start": {
-			const name = args.name?.trim();
-			if (!name) return textResult("Provide a name for the new agent (action=start).", {});
-			const cwd = args.cwd ?? ctx.cwd ?? process.cwd();
-			const direction = args.direction ?? "right";
-			const task = args.task?.trim() || undefined;
-
-			let paneId: string;
-			let tabId = "";
-			const parentPane = process.env.HERDR_PANE_ID;
-			if (parentPane) {
-				// Split our own pane to create a sibling; reference target output.
-				const splitOut = herdrExecSync([
-					"pane", "split", parentPane,
-					"--direction", direction,
-					"--cwd", cwd,
-					"--no-focus",
-				]);
-				paneId = paneIdOf(splitOut, "pane split");
-			} else {
-				// From a plain terminal there is no pane to split — fall back to a
-				// fresh tab in the resolved workspace (reuses the delegation helpers).
-				const created = createHerdrTab(name, cwd, getHerdrWorkspaceId());
-				paneId = created.paneId;
-				tabId = created.tabId;
-			}
-
-			// Track the pane as soon as it exists (BEFORE any await) so that even a
-			// shell-ready timeout or failed launch leaves a pane `shepherd close` may
-			// close — never a closable orphan. Idempotent, so the later launch path
-			// is unaffected.
-			recordCreatedPane({ paneId, tabId, name, cwd, createdAt: Date.now() });
-
-			try {
-				// The flaky `herdr agent start` lifecycle is intentionally skipped:
-				// it injected no task and its keystroke prompt timing silently ate
-				// tasks on never-focused panes. Instead wait for the shell, boot pi
-				// via the trusted launch script (task baked in at launch), and let
-				// Herdr auto-detect the session (same as delegation panes do).
-				await waitForHerdrShellReady(paneId);
-
-				try {
-					herdrExecSync(["pane", "rename", paneId, name]);
-				} catch {
-					/* cosmetic — ignore */
-				}
-
-				const landing = launchPiInPane(paneId, { name, task, stayOpen: true });
-				setCreatedPaneDir(paneId, landing.dir);
-
-				// Advisory post-start readiness check (never errors — the pane is
-				// visibly open and the launch script ran).
-				const det = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
-				const delivered = task !== undefined ? "task delivered" : "no task";
-				const advisory = det.detected
-					? ` (agent state: ${det.state ?? "unknown"})`
-					: "\npi is booting — verify with shepherd status " + paneId + ".";
-				return textResult(
-					`Started pi agent "${name}" in pane ${paneId} [${delivered}].` +
-						advisory +
-						`\nDrive it with shepherd prompt ${paneId} ..., or close with shepherd close ${paneId}.`,
-					{ paneId, name, taskDelivered: task !== undefined, agentState: det.state },
-				);
-			} catch (error: any) {
-				// If start failed, the sibling pane still exists — leave it so the
-				// user can inspect/start manually, but report plainly.
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Created pane ${paneId} but failed to start pi agent "${name}": ${
-								error?.message ?? String(error)
-						}\nThe pane is left open for inspection.`,
-						},
-					],
-					details: { paneId, name, error: String(error?.message ?? error) },
-					isError: true,
-				};
-			}
-		}
-		case "prompt": {
-			const target = args.name?.trim();
-			const task = args.task?.trim() || "";
-			if (!target || !task)
-				return textResult("Provide a name/pane target and a task (action=prompt).", {});
-			const timeout = args.timeout ?? 120_000;
-			// Resolve a shepherd pane by its recorded paneId or label — a bare
-			// label like "worker" isn't directly addressable by Herdr.
-			const created = loadCreatedPanes();
-			const match = created.find((p) => p.paneId === target || p.name === target);
-			const resolved = match?.paneId ?? target;
-			// Readiness gate — never send a task to a pane Herdr hasn't detected
-			// (the old code could silently eat tasks this way). Nothing is sent
-			// if the agent isn't confirmed present.
-			const det = await waitForHerdrAgentDetected(resolved, {
-				timeoutMs: Math.min(timeout, 15_000),
-			});
-			if (!det.detected) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Agent "${target}" was not detected in Herdr — nothing was sent. Confirm the pane is running pi (shepherd status/read), then retry.`,
-						},
-					],
-					details: { name: target, pane: resolved, error: "agent not detected" },
-					isError: true,
-				};
-			}
-			const preTail = await readPaneTail(resolved);
-			try {
-				const out = await herdrExec([
-					"agent", "prompt", resolved, task,
-					"--wait", "--until", "done",
-					"--timeout", String(timeout),
-				]);
-				const postTail = await readPaneTail(resolved);
-				const after = await waitForHerdrAgentDetected(resolved, { timeoutMs: 5000 });
-				// Post-check: if the screen never changed and no agent state is
-				// visible at all, the task may not have been received. Demoted to a
-				// non-blocking note — a legitimately instant task legitimately ends
-				// idle with no screen change, so we must not hard-fail on it.
-				const unchanged = preTail === postTail && after.state === undefined;
-				return textResult(
-					`Prompt returned (${JSON.stringify((out as any)?.result ?? out)}).` +
-						(unchanged
-							? `\nNo screen change observed and no agent state visible — the task may not have been received. Inspect pane ${resolved} and retry if needed.`
-							: ""),
-					{ name: target, result: out },
-				);
-			} catch (error: any) {
-				const raw = error?.stderr || error?.stdout || String(error?.message ?? error);
-				const hang = /agent_prompt_stalled|agent not found/i.test(raw);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Prompt to "${target}" did not settle: ${raw}`.slice(0, 4000) +
-								(hang
-									? "\nNothing was sent to the agent. Retry after herd-status confirms it is at its input prompt."
-									: ""),
-						},
-					],
-					details: { name: target, error: raw },
-					isError: true,
-				};
-			}
-		}
-		case "status": {
-			const target = args.name?.trim();
-			if (!target) return textResult("Provide a name/pane target (action=status).", {});
-			// Resolve a shepherd pane by its recorded paneId or label (same as
-			// prompt/close) so `status scout` works after a delegate/start.
-			const created = loadCreatedPanes();
-			const match = created.find((p) => p.paneId === target || p.name === target);
-			const resolved = match?.paneId ?? target;
-			try {
-				const out = herdrExecSync(["agent", "get", resolved]);
-				const rec = (out as any)?.result?.agent as Record<string, unknown> | undefined;
-				if (!rec) return textResult(`No status for "${target}".`, { target });
-				const lines = [
-					`Agent: ${rec.agent ?? "?"}`,
-					`State: ${rec.agent_status ?? "unknown"}`,
-					`Pane: ${rec.pane_id ?? "?"}  Tab: ${rec.tab_id ?? "?"}  Workspace: ${rec.workspace_id ?? "?"}`,
-					`Cwd: ${rec.foreground_cwd ?? rec.cwd ?? ""}`,
-					`Focused: ${rec.focused === true ? "yes" : "no"}`,
-				];
-				return textResult(lines.join("\n"), { target, agent: rec });
-			} catch (error: any) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `No agent "${target}": ${error?.message ?? String(error)}`,
-						},
-					],
-					details: { target, error: String(error?.message ?? error) },
-					isError: true,
-				};
-			}
-		}
-
-		case "read": {
-			const target = args.name?.trim();
-			if (!target) return textResult("Provide a name/pane target (action=read).", {});
-			const lines = args.lines ?? 40;
-			const source = args.source ?? "recent-unwrapped";
-			// Resolve a shepherd pane by its recorded paneId or label (same as
-			// prompt/close) so `read scout` works after a delegate/start.
-			const created = loadCreatedPanes();
-			const match = created.find((p) => p.paneId === target || p.name === target);
-			const resolved = match?.paneId ?? target;
-			try {
-				const { stdout } = await execFileAsync(
-					"herdr",
-					["agent", "read", resolved, "--source", source, "--lines", String(lines), "--format", "text"],
-					{ encoding: "utf8" },
-				);
-				return textResult(stdout.trim() || "(no terminal output)", { target, lines, source });
-			} catch {
-				// Agent detection is dropped once the pane's pi exited — fall back
-				// to a plain terminal read so finished runs stay inspectable.
-				try {
-					const { stdout } = await execFileAsync(
-						"herdr",
-						["pane", "read", resolved, "--source", source, "--lines", String(lines), "--format", "text"],
-						{ encoding: "utf8" },
-					);
-					return textResult(stdout.trim() || "(no terminal output)", { target, lines, source, fallback: true });
-				} catch (error: any) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Could not read "${target}": ${error?.message ?? String(error)}`,
-							},
-						],
-						details: { target, error: String(error?.message ?? error) },
-						isError: true,
-					};
-				}
-			}
-		}
-
-		case "close": {
-			const target = args.name?.trim();
-			if (!target) return textResult("Provide a pane id or agent name to close (action=close).", {});
-			const created = loadCreatedPanes();
-			const matches = created.filter((p) => p.paneId === target || p.name === target);
-			if (matches.length === 0) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Refusing to close "${target}": it is not a pane pi-shepherd created. Close other panes directly in Herdr.`,
-						},
-					],
-					details: { target },
-					isError: true,
-				};
-			}
-			const closed: string[] = [];
-			for (const p of matches) {
-				let gone = false;
-				try {
-					herdrExecSync(["pane", "close", p.paneId]);
-					gone = true;
-				} catch {
-					// Don't assume failure means "already gone": a transient/CLI/busy
-					// error leaves the pane alive with pi still writing its session
-					// file — deleting the dir then would break the ENOENT invariant.
-					// Only treat it as gone if Herdr no longer lists the pane.
-					gone = !paneExists(p.paneId);
-				}
-				if (gone) {
-					closed.push(p.paneId);
-					// Confirmed closed (or confirmed no longer present) → safe to drop
-					// the pane's retained temp launch dir now that pi is gone.
-					removeCreatedPaneDir(p.paneId);
-				}
-				forgetCreatedPane(p.paneId);
-			}
-			return textResult(
-				`Closed pi-shepherd pane(s): ${closed.join(", ") || target}`,
-				{ closed, target },
-			);
-		}
-
-		case "gc": {
-			const pruned = pruneStaleCreatedPanes();
-			const remaining = loadCreatedPanes().length;
-			return textResult(
-				pruned === 0
-					? `No stale pi-shepherd panes to prune (${remaining} registered).`
-					: `Pruned ${pruned} stale pane registration(s); ${remaining} remain.`,
-				{ pruned, remaining },
-			);
-		}
-
-		default:
-			return textResult(`Unknown herd action: ${action}`, {});
-	}
-}
-
-export function registerShepherdTool(pi: ExtensionAPI) {
-	pi.registerTool({
-		name: "shepherd",
-		label: "Shepherd (delegate & manage Herdr agents)",
-		description: [
-			"Unifying tool to delegate tasks to subagents or manage agents in Herdr panes.",
-			"Actions: delegate | list | start | prompt | status | read | close | gc.",
-			"For delegation (action=delegate): pass agent and task (or tasks array for parallel, or chain array for sequential steps).",
-			"For fleet management: list active agent panes, start sibling panes, prompt, status, read, or close panes.",
-			"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
-		].join(" "),
-		parameters: ShepherdParams,
-
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!isHerdrAvailable()) return unavailableResult();
-			try {
-				return await doAction(params.action, params as ShepherdArgs, ctx, signal, onUpdate);
-			} catch (error: any) {
-				return {
-					content: [
-						{ type: "text", text: `Herd ${params.action} failed: ${error?.message ?? String(error)}` },
-					],
-					details: { action: params.action, error: String(error?.message ?? error) },
-					isError: true,
-				};
-			}
-		},
-
-		renderCall(args, theme) {
-			const action = args.action ?? "list";
-			const target = args.agent || args.name ? ` ${args.agent || args.name}` : "";
-			const extra =
-				action === "prompt" || action === "delegate"
-					? ` "…${((args.task ?? "").length > 40 ? (args.task ?? "").slice(0, 40) + "…" : args.task ?? "")}"`
-					: "";
-			return new Text(
-				theme.fg("toolTitle", theme.bold("shepherd ")) +
-					theme.fg("accent", action) +
-					theme.fg("dim", `${target}${extra}`),
-				0,
-				0,
-			);
-		},
-
-		renderResult(result, { expanded }, theme) {
-			const text = result.content[0];
-			const body = text?.type === "text" ? (text.text ?? "") : "";
-			if (!expanded && body.includes("\n")) {
-				const firstLine = body.split("\n")[0];
-				return new Text(
-					theme.fg("accent", firstLine) +
-						`\n${theme.fg("muted", `… +${body.split("\n").length - 1} more lines (Ctrl+O to expand)`)}`,
-					0,
-					0,
-				);
-			}
-			return new Text(theme.fg("toolOutput", body || "(no output)"), 0, 0);
-		},
-	});
-}

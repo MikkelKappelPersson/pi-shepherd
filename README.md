@@ -267,7 +267,8 @@ Requirements:
 ├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
 ├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
 ├── subagent.ts       # delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
-├── herdr.ts           # shepherd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
+├── shepherd.ts       # the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts)
+├── herdr.ts           # Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry
 ├── test/             # verification: discovery fixtures + Herdr-independent launch checks
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
 ├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)

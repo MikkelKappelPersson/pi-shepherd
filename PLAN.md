@@ -24,7 +24,8 @@ pi-shepherd/
 ├── index.ts          extension entry: registers tools + /pi-shepherd command
 ├── discovery.ts      agent discovery + VS Code frontmatter parsing (pure, testable)
 ├── subagent.ts       delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
-├── herdr.ts           shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner
+├── shepherd.ts       the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts)
+├── herdr.ts           Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry
 ├── shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end
 ├── .pi/agents/       built-in subagents (pi project format)
 ├── .agents/agents/   built-in subagents (shared/cross-tool format)

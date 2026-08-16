@@ -10,12 +10,8 @@ import { discoverAgents, formatAgentList } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
 import { subagentOnce } from "./subagent.ts";
-import {
-	registerShepherdTool,
-	isHerdrAvailable,
-	workingSubagents,
-	type HerdrAgentSummary,
-} from "./herdr.ts";
+import { registerShepherdTool } from "./shepherd.ts";
+import { isHerdrAvailable, workingSubagents, type HerdrAgentSummary } from "./herdr.ts";
 
 /**
  * Persistent "below the editor" status line listing the subagents currently
