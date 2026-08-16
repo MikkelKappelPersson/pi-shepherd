@@ -9,9 +9,9 @@ that **edit the code**. The implementation roadmap is `PLAN.md`.
 ## Default workflow — dogfood the extension's own subagents
 
 When making changes to this repo, **default to delegating to the bundled
-subagents** (via `sheepdog`) rather than doing everything inline:
+subagents** (via `shepherd action=delegate`) rather than doing everything inline:
 
-- **scout** — recon the repo first (`sheepdog` → `scout`) to survey the
+- **scout** — recon the repo first (`shepherd delegate` → `scout`) to survey the
   relevant code before editing, or ask it to scout changes when context runs
   thin.
 - **planner** — for non-trivial work, have a **planner** turn the scout's
@@ -44,7 +44,7 @@ their tool permissions match yours.
 
 ```
 index.ts      extension entry: /pi-shepherd command + tool registration
-subagent.ts   sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain) ✅
+subagent.ts   delegation runner: runSingleAgent / executeDelegation (single/parallel/chain) ✅
 shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
 herdr.ts       shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner ✅
@@ -78,16 +78,17 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
   pi-package, always present here) registers `subagent`, `subagent_interrupt`,
   `subagents_list`, `subagent_resume`, `herdr_workflow`. Registering our own
   `subagent` would make pi refuse to load any extension.
-  → Our delegation tool is **`sheepdog`**; the fleet-management tool is
-  **`shepherd`** (mapping: the shepherd manages the herd; the sheepdog is sent
-  out to fetch one result and bring it back). Do not rename them to
-  `subagent`/`herd`-conflicting names.
+  → Delegation is **`shepherd action=delegate`**; the fleet-management actions
+  (list/start/prompt/status/read/close/gc) live on the same **`shepherd`** tool
+  (mapping: the shepherd manages the herd). Do not register tools named
+  `subagent`, `subagent_interrupt`, `subagents_list`, `subagent_resume`, or
+  `herdr_workflow` — those belong to `pi-herdr-agents`.
 - **Herdr-native**: pi-shepherd carries no subprocess fallback. Every delegated
   agent runs in a Herdr tab. From a plain terminal (no `HERDR_ENV`) the
   referenced headless Herdr server is started/attached automatically and a
   workspace is resolved for the tab.
 - **Never close panes pi-shepherd didn't create.** Panes it creates (via
-  `sheepdog` or `shepherd start`) are recorded in `~/.pi/agent/pi-shepherd/created-panes.json`;
+  `shepherd delegate` or `shepherd start`) are recorded in `~/.pi/agent/pi-shepherd/created-panes.json`;
   `shepherd close` only closes panes in that registry.
 - **Nothing reads the child session before the child has exited.** The parent
   waits for the `__SHEPHERD_DONE_` sentinel (printed by the shell after `pi`
@@ -110,7 +111,7 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
   - Once Phase 1 lands, add tiny fixture agent dirs under a temp cwd to
     exercise discovery precedence across the four locations.
   - Herd (Phase 4): verify against a running Herdr server; `shepherd list`, `start`,
-  `prompt --wait`, `close`. A live `sheepdog` run creates a tab, signals
+  `prompt --wait`, `close`. A live `shepherd delegate` run creates a tab, signals
   completion via the sidecar, and (with the default `stayOpen`) the subagent
   stays alive in the tab for you to keep driving — no `__SHEPHERD_DONE_` exit.
   With `stayOpen: false` it should exit and show `__SHEPHERD_DONE_0__` with

@@ -73,7 +73,7 @@ findings in a concise list. Do not edit files.
 
 ## Usage
 
-### Delegation (Herdr tabs) — `sheepdog`
+### Delegation (Herdr tabs) — `shepherd delegate`
 
 | Command | Action |
 |---------|--------|
@@ -83,8 +83,8 @@ findings in a concise list. Do not edit files.
 | `/pi-shepherd settings` (`/pi-shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
 
 You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
-parallel — one on auth, one on billing"* — the model uses the `sheepdog` tool
-(single / parallel / chain) to do it.
+parallel — one on auth, one on billing"* — the model uses the `shepherd`
+tool with `action: delegate` (single / parallel / chain) to do it.
 
 Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …):
 
@@ -121,7 +121,7 @@ files—is retained, as are the selected tools and permissions. Modes:
 
 #### Delegated input context
 
-Every `sheepdog` invocation starts a fresh child pi session in a Herdr tab. In
+Every `shepherd delegate` invocation starts a fresh child pi session in a Herdr tab. In
 normal mode (`omitSystemPrompt: false`), the child receives pi's built-in
 default system prompt plus the discovered agent definition's Markdown body as
 an appended system prompt. In replacement mode (`omitSystemPrompt: true`), the
@@ -136,7 +136,7 @@ conversation. In a chain, `{previous}` in the next step's task is replaced
 with the prior step's returned output. Parallel tasks start independent fresh
 sessions.
 
-`omitSystemPrompt: true` is a per-call sheepdog option that selects the
+`omitSystemPrompt: true` is a per-call shepherd option that selects the
 replacement behavior above. `false` (including the default) combines pi's
 built-in default with the agent body; `true` replaces the built-in default with
 the agent body. Neither mode omits project `AGENTS.md`/context files, the task,
@@ -144,7 +144,7 @@ completion instructions, model, cwd, or tools. Resolution is explicit call
 option (including explicit `false`), then the selected agent's
 `omit-system-prompt` frontmatter, then `false`. The frontmatter value must be a
 YAML boolean (`true` or `false`); other types are ignored. The option is
-available on the `sheepdog` tool; `/pi-shepherd <agent> <task>` has no separate
+available on the `shepherd` tool; `/pi-shepherd <agent> <task>` has no separate
 option and therefore uses the agent frontmatter/default behavior. Likewise,
 `shepherd start` keeps its existing launch behavior.
 
@@ -217,7 +217,7 @@ Requirements:
   an **inline** settings list in the writing-field slot, exactly like pi's own
   `/settings`: arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc
   closes. Settings are stored at `~/.pi/agent/pi-shepherd/settings.json` and read
-  fresh (no reload needed). Every `sheepdog`/`shepherd` run falls back to these
+  fresh (no reload needed). Every `shepherd` run falls back to these
   values when a call doesn't pass them explicitly. Typing `/pi-shepherd ` also
   shows `list`/`herd`/`settings`/agents in the native autocomplete menu.
 
@@ -231,11 +231,11 @@ Requirements:
 - **Agent locations** — the four discovery dirs above. User agents always load;
   add files there to extend the built-in set (user agents override built-ins
   with the same name).
-- **`sheepdog` defaults** — `keepOpen` (default `true`: leave the tab open for
+- **Delegation defaults** — `keepOpen` (default `true`: leave the tab open for
   inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
   subagent's pi process alive after completion so you can keep driving it in the
   tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
-  `omitSystemPrompt` is an optional per-call `sheepdog` boolean, not a persisted
+  `omitSystemPrompt` is an optional per-call `shepherd` boolean, not a persisted
   setting. Resolution is explicit call option > agent frontmatter
   `omit-system-prompt` (strict YAML boolean) > `false`. When `false`, pi's
   built-in default and the discovered agent Markdown body are combined; when
@@ -266,7 +266,7 @@ Requirements:
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
 ├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
 ├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
-├── subagent.ts       # sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
+├── subagent.ts       # delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
 ├── herdr.ts           # shepherd tool (list/start/prompt/status/read/close/gc) + herdr agent runner (runAgentInHerdr)
 ├── test/             # verification: discovery fixtures + Herdr-independent launch checks
 ├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker

@@ -23,7 +23,7 @@ Stack mirrors `pi-ops`:
 pi-shepherd/
 ├── index.ts          extension entry: registers tools + /pi-shepherd command
 ├── discovery.ts      agent discovery + VS Code frontmatter parsing (pure, testable)
-├── subagent.ts       sheepdog tool: run each agent live in a Herdr tab (single/parallel/chain)
+├── subagent.ts       delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
 ├── herdr.ts           shepherd tool: Herdr CLI wrappers (list/start/prompt/status/read/close) + herdr agent runner
 ├── shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end
 ├── .pi/agents/       built-in subagents (pi project format)
@@ -33,16 +33,16 @@ pi-shepherd/
 └── PLAN.md
 ```
 
-Two tool surface areas exposed to the model:
+One tool, two surface areas exposed to the model:
 
-1. **`sheepdog`** (custom tool) — delegate to an agent that runs **live in a
-   new Herdr tab** (labelled with the agent name), works there, and reports its
-   final output back on completion. **Herdr-native**: no subprocess fallback —
-   from a plain terminal the referenced headless Herdr server is
-   started/attached automatically. Named `sheepdog`, not `subagent`, so it
-   coexists with the `pi-herdr-agents` package (its `subagent` tool drives
-   Herdr-pane/worktree agents; two tools named `subagent` would fail extension
-   loading).
+1. **Delegation** (`shepherd action=delegate`) — delegate to an agent that
+   runs **live in a new Herdr tab** (labelled with the agent name), works
+   there, and reports its final output back on completion. **Herdr-native**: no
+   subprocess fallback — from a plain terminal the referenced headless Herdr
+   server is started/attached automatically. Delegation lives on the `shepherd`
+   tool (not a separate `subagent` tool) so it coexists with the
+   `pi-herdr-agents` package (its `subagent` tool drives Herdr-pane/worktree
+   agents; two tools named `subagent` would fail extension loading).
 2. **`shepherd`** (custom tool) — manage pi agents already running in Herdr panes
    (list/start/prompt/status/read/close).
 
@@ -155,7 +155,7 @@ bundled dirs so any user/project agent overrides them by name.
 ## Phase 4 — Herd (Herdr integration) (`herdr.ts`) ✅
 
 Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
-**herdr agent runner** (`runAgentInHerdr`) used by `sheepdog`, and is now
+**herdr agent runner** (`runAgentInHerdr`) used by the delegation path, and is now
 **herdr-native from any terminal**. Verified against the live CLI.
 
 - [x] **guard**: `herdr` CLI on PATH + (inside Herdr OR a reachable/startable
@@ -187,9 +187,9 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 ## Phase 5 — Command surface & polish (`index.ts`) 🔶
 
 - [x] Register the `/pi-shepherd` command: `list`, `<agent> <task>`, `herd`.
-- [x] Register the `sheepdog` + `shepherd` custom tools for natural-language use.
+- [x] Register the `shepherd` custom tool for natural-language use (delegation via `action: delegate`).
 - [x] Progress via `ctx.ui` (`setStatus`, `notify`); graceful failures.
-- [x] Herdr-native pivot: removed the subprocess fallback; `sheepdog` always
+- [x] Herdr-native pivot: removed the subprocess fallback; delegation always
       runs a Herdr tab (auto-starting the server from a plain terminal).
 - [x] Docs updated (README, AGENTS.md, PLAN.md) to match the code.
 - [ ] Commit the repo (currently uncommitted after the latest work).
