@@ -28,7 +28,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
+import {
+	type AgentConfig,
+	type AgentScope,
+	type DelegatorModel,
+	discoverAgents,
+	resolveDelegatedModel,
+} from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { runAgentInHerdr } from "./herdr.ts";
 import {
@@ -317,6 +323,7 @@ async function runSingleAgent(
 		session?: ShepherdSession;
 		artifact?: ArtifactReservation;
 		omitSystemPrompt?: boolean;
+		model?: string;
 	} = {},
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
@@ -361,7 +368,7 @@ async function runSingleAgent(
 		messages: [{ role: "assistant", content: [{ type: "text", text: "(starting…)" }] }],
 		stderr: "",
 		usage: zeroUsage(),
-		model: agent.model,
+		model: opts.model ?? agent.model,
 		step,
 	};
 
@@ -383,7 +390,7 @@ async function runSingleAgent(
 			omitSystemPrompt,
 			task,
 			cwd: cwd ?? defaultCwd,
-			model: agent.model,
+			model: opts.model ?? agent.model,
 			tools: agent.tools,
 			label,
 			keepOpen,
@@ -441,7 +448,7 @@ async function runSingleAgent(
 				status: run.exitCode === 0 ? "completed" : terminalArtifactStatus(run.errorMessage),
 			},
 		} : {}),
-		model: run.model ?? agent.model,
+		model: run.model ?? opts.model ?? agent.model,
 		errorMessage: run.errorMessage,
 		step,
 		herdrNote: ltLive,
@@ -454,7 +461,7 @@ export async function executeDelegation(
 	params: Static<typeof SubagentParams>,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
-	ctx: { cwd: string; hasUI?: boolean; ui?: any },
+	ctx: { cwd: string; model?: DelegatorModel; hasUI?: boolean; ui?: any },
 ): Promise<AgentToolResult<Record<string, unknown>>> {
 	const settings = loadSettings();
 	const agentScope: AgentScope = params.agentScope ?? settings.agentScope;
@@ -563,7 +570,15 @@ export async function executeDelegation(
 				signal,
 				chainUpdate,
 				makeDetails("chain"),
-				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[i], omitSystemPrompt: params.omitSystemPrompt },
+				{
+					keepOpen,
+					stayOpen,
+					timeout,
+					session,
+					artifact: artifacts[i],
+					omitSystemPrompt: params.omitSystemPrompt,
+					model: resolveDelegatedModel(agents.find((a) => a.name === step.agent)?.model, ctx.model),
+				},
 			);
 			results.push(result);
 
@@ -656,7 +671,15 @@ export async function executeDelegation(
 					}
 				},
 				makeDetails("parallel"),
-				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[index], omitSystemPrompt: params.omitSystemPrompt },
+				{
+					keepOpen,
+					stayOpen,
+					timeout,
+					session,
+					artifact: artifacts[index],
+					omitSystemPrompt: params.omitSystemPrompt,
+					model: resolveDelegatedModel(agents.find((a) => a.name === t.agent)?.model, ctx.model),
+				},
 			);
 			allResults[index] = result;
 			emitParallelUpdate();
@@ -695,7 +718,15 @@ export async function executeDelegation(
 			signal,
 			onUpdate,
 			makeDetails("single"),
-			{ keepOpen, stayOpen, timeout, session, artifact, omitSystemPrompt: params.omitSystemPrompt },
+			{
+				keepOpen,
+				stayOpen,
+				timeout,
+				session,
+				artifact,
+				omitSystemPrompt: params.omitSystemPrompt,
+				model: resolveDelegatedModel(agents.find((a) => a.name === params.agent)?.model, ctx.model),
+			},
 		);
 		const isError = isFailedResult(result);
 		if (isError) {
@@ -746,6 +777,7 @@ export async function subagentOnce(params: {
 	task: string;
 	cwd: string;
 	scope?: AgentScope;
+	model?: DelegatorModel;
 }): Promise<{ ok: boolean; text: string; stderr: string }> {
 	const scope = params.scope ?? loadSettings().agentScope;
 	const { agents } = discoverAgents(params.cwd, scope);
@@ -765,6 +797,7 @@ export async function subagentOnce(params: {
 		undefined,
 		undefined,
 		makeSingle,
+		{ model: resolveDelegatedModel(agents.find((a) => a.name === params.agent)?.model, params.model) },
 	);
 	const failed = isFailedResult(result);
 	return {

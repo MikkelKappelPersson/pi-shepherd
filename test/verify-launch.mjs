@@ -8,7 +8,7 @@ function assert(condition, label) {
   if (condition) console.log(`PASS  ${label}`);
   else { failures++; console.log(`FAIL  ${label}`); }
 }
-function check(label, omit, includeOption = true) {
+function check(label, omit, includeOption = true, model) {
   const name = label;
   const options = {
     name,
@@ -17,6 +17,7 @@ function check(label, omit, includeOption = true) {
     stayOpen: false,
     tools: ["read"],
   };
+  if (model !== undefined) options.model = model;
   if (includeOption) options.omitSystemPrompt = omit;
   let files;
   try {
@@ -28,6 +29,7 @@ function check(label, omit, includeOption = true) {
     assert(script.includes(`'@${files.dir}/task-${name}.md'`), `${label}: task file argument`);
     assert(task.includes("do the task") && task.includes("shepherd_done"), `${label}: task and completion instructions`);
     assert(script.includes("shepherd-done.ts") && script.includes("--tools read,shepherd_done"), `${label}: completion extension wiring`);
+    assert(script.includes("--model 'anthropic/claude-sonnet-4-5'") === (model !== undefined), `${label}: model argument`);
     assert(fs.existsSync(`${files.dir}/sysprompt-${name}.md`), `${label}: system prompt file`);
     assert(fs.readFileSync(`${files.dir}/sysprompt-${name}.md`, "utf8") === "agent Markdown body", `${label}: prompt file content`);
   } finally {
@@ -37,5 +39,7 @@ function check(label, omit, includeOption = true) {
 check("default", false);
 check("implicit-default", false, false);
 check("omit", true);
+check("model", false, true, "anthropic/claude-sonnet-4-5");
+// Inheritance is resolved before launch; absent model must omit --model.
 if (failures) process.exit(1);
 console.log("All launch assertions passed.");

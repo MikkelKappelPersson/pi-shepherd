@@ -19,6 +19,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { TaskItem, ChainItem, AgentScopeSchema } from "./types.ts";
+import type { DelegatorModel } from "./discovery.ts";
 import { executeDelegation } from "./subagent.ts";
 import {
 	HERDR_SETUP_HINT,
@@ -123,7 +124,7 @@ function textResult(text: string, details: Record<string, unknown>): AgentToolRe
 async function doAction(
 	action: string,
 	args: ShepherdArgs,
-	ctx: { cwd: string; hasUI?: boolean; ui?: any },
+	ctx: { cwd: string; model?: DelegatorModel; hasUI?: boolean; ui?: any },
 	signal?: AbortSignal,
 	onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void,
 ): Promise<AgentToolResult<Record<string, unknown>>> {

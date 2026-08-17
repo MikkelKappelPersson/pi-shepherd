@@ -17,6 +17,9 @@ import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/
 
 export type AgentScope = "user" | "project" | "both";
 
+/** The part of pi's current model needed to inherit its provider-qualified name. */
+export type DelegatorModel = { provider: string; id: string };
+
 export interface AgentConfig {
 	name: string;
 	description: string;
@@ -69,6 +72,26 @@ function findNearestProjectAgentsDir(cwd: string, subdir: string): string | null
 		if (parent === current) return null;
 		current = parent;
 	}
+}
+
+/** Normalize a model frontmatter value. Missing, null, empty, and whitespace-only
+ * values mean the agent inherits the delegator's model. */
+export function normalizeModel(model: unknown): string | undefined {
+	if (typeof model !== "string") return undefined;
+	const normalized = model.trim();
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+/** Resolve the model passed to a child pi process. An explicit agent model
+ * wins; otherwise inherit the parent's provider/id when both are available. */
+export function resolveDelegatedModel(agentModel: unknown, parentModel: DelegatorModel | undefined): string | undefined {
+	const explicit = normalizeModel(agentModel);
+	if (explicit) return explicit;
+	if (!parentModel || typeof parentModel !== "object") return undefined;
+	const model = parentModel as { provider?: unknown; id?: unknown };
+	const provider = normalizeModel(model.provider);
+	const id = normalizeModel(model.id);
+	return provider && id ? `${provider}/${id}` : undefined;
 }
 
 function normalizeTools(tools: unknown): string[] | undefined {
@@ -134,7 +157,7 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
 			name: agentName,
 			description,
 			tools: normalizeTools(frontmatter.tools),
-			model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
+			model: normalizeModel(frontmatter.model),
 			systemPrompt: body,
 			source,
 			filePath,

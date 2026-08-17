@@ -94,6 +94,10 @@ pattern for the external locations + two bundled, with VS Code syntax.
 - [x] `test/verify-discovery.mjs` — fixture tree in `test/fixtures/` exercises
       all locations + precedence + scope filtering (sets `$HOME` to the
       fixture home to control user dirs). Run: `npm run discovery:test`.
+- [x] Normalize `model`: explicit non-empty values are trimmed; missing,
+      null, empty, and whitespace-only values inherit the delegator's current
+      provider/id. Explicit agent models win; if the parent has no model,
+      `--model` is omitted across all delegation modes and slash command.
 - [x] Strict-boolean `omit-system-prompt` frontmatter is carried on
       `AgentConfig`; delegated resolution is explicit option > frontmatter >
       `false` across single, parallel, chain, and slash-command runs. The

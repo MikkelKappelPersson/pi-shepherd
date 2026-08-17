@@ -27,7 +27,7 @@ const fixtures = path.join(__dirname, "fixtures");
 // Point user dirs at the fixture "home" BEFORE importing discovery.
 process.env.HOME = path.join(fixtures, "home");
 
-const { discoverAgents, formatAgentList } = await import("../discovery.ts");
+const { discoverAgents, formatAgentList, normalizeModel, resolveDelegatedModel } = await import("../discovery.ts");
 
 let failures = 0;
 function assert(cond, label, extra = "") {
@@ -62,6 +62,13 @@ const omitInvalid = user.agents.find((a) => a.name === "omit-invalid");
 assert(omitTrue?.omitSystemPrompt === true, "frontmatter: strict true is retained");
 assert(omitFalse?.omitSystemPrompt === false, "frontmatter: strict false is retained");
 assert(omitInvalid?.omitSystemPrompt === undefined, "frontmatter: quoted true is ignored");
+assert(normalizeModel("  anthropic/claude  ") === "anthropic/claude", "frontmatter: model is trimmed");
+assert(normalizeModel("   ") === undefined && normalizeModel(null) === undefined, "frontmatter: empty/null model inherits");
+assert(user.agents.find((a) => a.name === "model-explicit")?.model === "anthropic/claude-sonnet-4-5", "frontmatter: explicit model is retained");
+assert(user.agents.find((a) => a.name === "model-empty")?.model === undefined, "frontmatter: empty model is normalized for inheritance");
+assert(resolveDelegatedModel(undefined, { provider: "openai", id: "gpt-4o" }) === "openai/gpt-4o", "model: parent provider/id inherited");
+assert(resolveDelegatedModel(" custom/model ", { provider: "openai", id: "gpt-4o" }) === "custom/model", "model: explicit agent wins");
+assert(resolveDelegatedModel(undefined, undefined) === undefined, "model: absent parent omitted");
 
 // --- project scope: only project agents ------------------------------------
 const project = discoverAgents(proj, "project");

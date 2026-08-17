@@ -128,7 +128,7 @@ export default function (pi: ExtensionAPI) {
 				const task = arg.slice(space + 1).trim();
 				if (task) {
 					ctx.ui?.setStatus?.(`pi-shepherd: running ${agent}…`);
-					const result = await subagentOnce({ agent, task, cwd: ctx.cwd });
+					const result = await subagentOnce({ agent, task, cwd: ctx.cwd, model: ctx.model });
 					ctx.ui?.setStatus?.(undefined);
 					if (!result.ok) {
 						ctx.ui?.notify(`pi-shepherd: ${agent} failed — ${result.text.slice(0, 400)}`, "error");

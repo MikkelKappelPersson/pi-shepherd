@@ -47,7 +47,9 @@ locations win over later ones with the same name):
 - Files may use the `.agent.md` or `.md` extension. Both are parsed the same way.
 - All four locations support the **VS Code custom-agent format** — YAML
   frontmatter (`name`, `description`, `tools`, `model`, `omit-system-prompt`, …)
-  plus a Markdown body used as the system prompt.
+  plus a Markdown body used as the system prompt. `model` may name an explicit
+  provider/id; missing, null, empty, or whitespace-only values inherit the
+  delegator's current model.
 - **Project agents are gated by trust.** By default only user-level agents load.
   Enable project agents with `agentScope: "project" | "both"` (and confirm on
   each run when interactive). This mirrors the security posture of pi's built-in
@@ -131,9 +133,12 @@ only pi's built-in default. In both modes, pi's project context—including
 `AGENTS.md` and other context files—remains available. The child also receives
 the delegated `task` as user input, followed by autonomous shepherd
 instructions to complete the task and call `shepherd_done`; those instructions
-are retained in both modes. It runs with the requested agent's `cwd`, `model`,
-and `tools` (plus the completion tool), rather than inheriting the parent's
-conversation. In a chain, `{previous}` in the next step's task is replaced
+are retained in both modes. It runs with the requested agent's `cwd`, model, and tools (plus the completion
+ tool), rather than inheriting the parent's conversation. An explicit non-empty
+ agent `model` wins; otherwise the child's `--model` is the parent's
+ `provider/id` (when available). If the parent has no model, `--model` is omitted.
+ This applies consistently to single, parallel, chain, and `/shepherd <agent> <task>` runs.
+ In a chain, `{previous}` in the next step's task is replaced
 with the prior step's returned output. Parallel tasks start independent fresh
 sessions.
 
