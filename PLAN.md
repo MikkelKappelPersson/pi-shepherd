@@ -124,6 +124,10 @@ unit of work is `runSingleAgent`, which routes to the herdr runner in `herdr.ts`
       4 concurrent); **Chain** `{chain: [...]}` with `{previous}` placeholder.
 - [x] Options: `keepOpen` (default `true` — tab left open for inspection) and
       `timeout` (default 10 min).
+- [x] Artifact-backed sessions: create/resume `.shepherd/sessions/NNNN-name/`
+      with a session MOC and per-invocation artifacts; reuse `sessionName` across
+      separate delegation calls.
+- [x] `stayOpen` defaults to `false`; `keepOpen` remains `true` independently.
 - [x] Progress via `onProgress` (session-file tail) while the tab runs.
 - [x] Re-read agent files from disk on each invocation (`discoverAgents`).
 - [x] `subagentOnce()` helper so `/pi-shepherd <agent> <task>` uses the same

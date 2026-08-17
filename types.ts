@@ -19,6 +19,9 @@ export const AgentScopeSchema = StringEnum(["user", "project", "both"] as const,
 });
 
 export const SubagentParams = Type.Object({
+	sessionName: Type.Optional(
+		Type.String({ description: "Optional human-facing name for the artifact-backed delegation session." }),
+	),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -37,8 +40,8 @@ export const SubagentParams = Type.Object({
 	stayOpen: Type.Optional(
 		Type.Boolean({
 			description:
-				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
-			default: true,
+				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: false.",
+			default: false,
 		}),
 	),
 	timeout: Type.Optional(

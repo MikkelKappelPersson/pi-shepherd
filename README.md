@@ -93,17 +93,18 @@ Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …)
 3. you can watch it work in the tab;
 4. when it finishes (it calls `shepherd_done`, or its turn completes), a
    completion sidecar is written and its output is handed back to the parent;
-   by default the subagent **stays open** in the tab (it does not exit) so you
-   can keep driving it;
+   by default the subagent process exits while the Herdr tab remains open for
+   inspection;
 5. the parent pi instance picks up the final output and reports it back;
 6. the tab is left open for inspection — the subagent may still be running, so
 you can keep prompting it, or close it with `shepherd close <pane>` (or in Herdr
 directly).
 
 Options: `keepOpen` (default `true` — set `false` to auto-close the tab),
-`stayOpen` (default `true` — keep the subagent's pi **alive** in the tab after
-it completes so you can keep driving it; set `false` to have it exit on done),
-`timeout` (ms, default 10 min), and the optional `omitSystemPrompt` override.
+`stayOpen` (default `false` — the subagent's pi exits after completion while the
+Herdr tab remains available for inspection; set `true` to keep the process alive
+for follow-up), `sessionName` (optional durable artifact-session name), `timeout`
+(ms, default 10 min), and the optional `omitSystemPrompt` override.
 When supplied, it overrides the selected agent's `omit-system-prompt`
 frontmatter (including an explicit `false`). When the override and frontmatter
 are both absent, the effective value is `false`. When enabled, the agent
@@ -232,9 +233,13 @@ Requirements:
   add files there to extend the built-in set (user agents override built-ins
   with the same name).
 - **Delegation defaults** — `keepOpen` (default `true`: leave the tab open for
-  inspection; set `false` to auto-close), `stayOpen` (default `true`: keep the
-  subagent's pi process alive after completion so you can keep driving it in the
-  tab; set `false` to have it exit on done) and `timeout` (ms, default 10 min).
+  inspection; set `false` to auto-close), `stayOpen` (default `false`: the
+  subagent's pi process exits on completion while the tab remains available;
+  set `true` to keep it alive for follow-up) and `timeout` (ms, default 10 min).
+  Artifact-backed delegation creates or resumes a session under
+  `.shepherd/sessions/NNNN-name/`; pass the same `sessionName` on later calls to
+  continue it. Each delegated invocation gets an artifact and the session's
+  `shepherd.md` MOC. There is no project-level Shepherd index file.
   `omitSystemPrompt` is an optional per-call `shepherd` boolean, not a persisted
   setting. Resolution is explicit call option > agent frontmatter
   `omit-system-prompt` (strict YAML boolean) > `false`. When `false`, pi's

@@ -31,6 +31,15 @@ import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { runAgentInHerdr } from "./herdr.ts";
+import {
+	type ArtifactReservation,
+	type ShepherdSession,
+	createOrResumeSession,
+	finalizeArtifact,
+	markArtifactStarted,
+	reserveArtifacts,
+	updateSessionMoc,
+} from "./sessions.ts";
 import { TaskItem, ChainItem, AgentScopeSchema, SubagentParams } from "./types.ts";
 export { TaskItem, ChainItem, AgentScopeSchema, SubagentParams };
 
@@ -164,11 +173,13 @@ interface SingleResult {
 	step?: number;
 	/** Set when the agent ran in a Herdr tab (pi-shepherd runtime). */
 	herdrNote?: string;
+	artifact?: { id: string; filePath: string; relativePath: string; status: string };
 }
 
 interface SubagentDetails {
 	mode: "single" | "parallel" | "chain";
 	agentScope: AgentScope;
+	session?: ShepherdSession;
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 }
@@ -248,6 +259,24 @@ function zeroUsage(): UsageStats {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
 }
 
+function sessionContext(session: ShepherdSession, artifact: ArtifactReservation): string {
+	return `\n\n[Shepherd artifact session]\n` +
+		`Session: ${session.directoryName}\n` +
+		`Session directory: ${session.sessionPath}\n` +
+		`Session MOC: ${session.mocPath}\n` +
+		`Project-relative session directory: ${session.sessionRelativePath}\n` +
+		`Your assigned artifact: ${artifact.filePath}\n` +
+		`Project-relative artifact: ${artifact.relativePath}\n\n` +
+		`Read the session MOC before working. Keep detailed findings in your assigned artifact when your tools permit writing. ` +
+		`Do not edit shepherd.md or another agent's artifact. Use relative Markdown links for files in the project or session.\n`;
+}
+
+function terminalArtifactStatus(message?: string): "failed" | "timed-out" | "cancelled" {
+	if (message && /timed out/i.test(message)) return "timed-out";
+	if (message && /aborted|cancelled/i.test(message)) return "cancelled";
+	return "failed";
+}
+
 /**
  * Run one delegated agent to completion in the Herdr runtime.
  *
@@ -273,6 +302,8 @@ async function runSingleAgent(
 		stayOpen?: boolean;
 		timeout?: number;
 		label?: string;
+		session?: ShepherdSession;
+		artifact?: ArtifactReservation;
 		omitSystemPrompt?: boolean;
 	} = {},
 ): Promise<SingleResult> {
@@ -280,6 +311,12 @@ async function runSingleAgent(
 
 	if (!agent) {
 		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
+		if (opts.artifact && opts.session) {
+			finalizeArtifact(opts.session, opts.artifact, {
+				status: "failed",
+				error: `Unknown agent: "${agentName}". Available agents: ${available}.`,
+			});
+		}
 		return {
 			agent: agentName,
 			agentSource: "unknown",
@@ -299,11 +336,13 @@ async function runSingleAgent(
 	const omitSystemPrompt = opts.omitSystemPrompt ?? agent.omitSystemPrompt ?? false;
 	const label = opts.label ?? agentName;
 
+	if (opts.artifact && opts.session) markArtifactStarted(opts.session, opts.artifact, { paneLabel: label });
 	const progress: SingleResult = {
 		agent: agentName,
 		agentSource: agent.source,
 		task,
 		exitCode: 0,
+		...(opts.artifact ? { artifact: { id: opts.artifact.id, filePath: opts.artifact.filePath, relativePath: opts.artifact.relativePath, status: "running" } } : {}),
 		messages: [{ role: "assistant", content: [{ type: "text", text: "(starting…)" }] }],
 		stderr: "",
 		usage: zeroUsage(),
@@ -339,15 +378,17 @@ async function runSingleAgent(
 			onProgress: emitProgress,
 		});
 	} catch (error: any) {
+		const message = String(error?.message ?? error);
+		if (opts.artifact && opts.session) finalizeArtifact(opts.session, opts.artifact, { status: terminalArtifactStatus(message), error: message });
 		return {
 			agent: agentName,
 			agentSource: agent.source,
 			task,
 			exitCode: 1,
 			messages: [],
-			stderr: String(error?.message ?? error),
+			stderr: message,
 			usage: zeroUsage(),
-			errorMessage: String(error?.message ?? error),
+			errorMessage: message,
 			step,
 		};
 	}
@@ -362,6 +403,13 @@ async function runSingleAgent(
 				`The tab is left open for inspection — close it with shepherd close ${run.paneId}.`
 			: `[herd: ${agentName}] ran in Herdr tab "${label}" (pane ${run.paneId}) and was closed after pickup.`;
 
+	const finalOutput = getFinalOutput(run.messages) || run.finalText;
+	if (opts.artifact && opts.session) finalizeArtifact(opts.session, opts.artifact, {
+		status: run.exitCode === 0 ? "completed" : terminalArtifactStatus(run.errorMessage),
+		output: finalOutput,
+		error: run.errorMessage,
+		metadata: { paneId: run.paneId, tabId: run.tabId },
+	});
 	return {
 		agent: agentName,
 		agentSource: agent.source,
@@ -370,6 +418,14 @@ async function runSingleAgent(
 		messages: run.messages,
 		stderr: run.errorMessage ?? "",
 		usage: { ...zeroUsage(), turns: assistantCount },
+		...(opts.artifact ? {
+			artifact: {
+				id: opts.artifact.id,
+				filePath: opts.artifact.filePath,
+				relativePath: opts.artifact.relativePath,
+				status: run.exitCode === 0 ? "completed" : terminalArtifactStatus(run.errorMessage),
+			},
+		} : {}),
 		model: run.model ?? agent.model,
 		errorMessage: run.errorMessage,
 		step,
@@ -400,11 +456,13 @@ export async function executeDelegation(
 	const timeout = params.timeout ?? settings.timeout;
 	// Preserve undefined: runSingleAgent resolves explicit > frontmatter > false.
 
+	let session: ShepherdSession | undefined;
 	const makeDetails =
 		(mode: "single" | "parallel" | "chain") =>
 		(results: SingleResult[]): SubagentDetails => ({
 			mode,
 			agentScope,
+			session,
 			projectAgentsDir: discovery.projectDirs[0] ?? null,
 			results,
 		});
@@ -447,13 +505,25 @@ export async function executeDelegation(
 		}
 	}
 
+	if (params.tasks && params.tasks.length > MAX_PARALLEL_TASKS) {
+		return {
+			content: [{ type: "text", text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.` }],
+			details: makeDetails("parallel")([]),
+		};
+	}
+
+	const mode: "single" | "parallel" | "chain" = hasChain ? "chain" : hasTasks ? "parallel" : "single";
+	const firstTask = params.task ?? params.chain?.[0]?.task ?? params.tasks?.[0]?.task;
+	session = createOrResumeSession({ projectRoot: ctx.cwd, sessionName: params.sessionName, fallbackTask: firstTask, mode });
+
 	if (params.chain && params.chain.length > 0) {
 		const results: SingleResult[] = [];
+		const artifacts = reserveArtifacts(session, params.chain.map((step) => ({ agent: step.agent, mode: "chain" as const, task: step.task })));
 		let previousOutput = "";
 
 		for (let i = 0; i < params.chain.length; i++) {
 			const step = params.chain[i];
-			const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+			const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput) + sessionContext(session, artifacts[i]);
 
 			const chainUpdate: OnUpdateCallback | undefined = onUpdate
 				? (partial) => {
@@ -478,13 +548,14 @@ export async function executeDelegation(
 				signal,
 				chainUpdate,
 				makeDetails("chain"),
-				{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
+				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[i], omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
 			);
 			results.push(result);
 
 			const isError = isFailedResult(result);
 			if (isError) {
 				const errorMsg = getResultOutput(result);
+				updateSessionMoc(session, { status: "failed" });
 				return {
 					content: [
 						{
@@ -498,6 +569,7 @@ export async function executeDelegation(
 			}
 			previousOutput = getFinalOutput(result.messages);
 		}
+		updateSessionMoc(session, { status: "completed" });
 		const last = results[results.length - 1];
 		return {
 			content: [
@@ -505,7 +577,8 @@ export async function executeDelegation(
 					type: "text",
 					text:
 						(getFinalOutput(last.messages) || "(no output)") +
-						(last.herdrNote ? `\n${last.herdrNote}` : ""),
+						(last.herdrNote ? `\n${last.herdrNote}` : "") +
+						`\n[session: ${session.sessionRelativePath}]`,
 				},
 			],
 			details: makeDetails("chain")(results),
@@ -524,6 +597,7 @@ export async function executeDelegation(
 				details: makeDetails("parallel")([]),
 			};
 
+		const artifacts = reserveArtifacts(session!, params.tasks.map((task) => ({ agent: task.agent, mode: "parallel" as const, task: task.task })));
 		const allResults: SingleResult[] = new Array(params.tasks.length);
 
 		for (let i = 0; i < params.tasks.length; i++) {
@@ -556,7 +630,7 @@ export async function executeDelegation(
 				ctx.cwd,
 				agents,
 				t.agent,
-				t.task,
+				t.task + sessionContext(session!, artifacts[index]),
 				t.cwd,
 				undefined,
 				signal,
@@ -567,7 +641,7 @@ export async function executeDelegation(
 					}
 				},
 				makeDetails("parallel"),
-				{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
+				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[index], omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
 			);
 			allResults[index] = result;
 			emitParallelUpdate();
@@ -575,6 +649,7 @@ export async function executeDelegation(
 		});
 
 		const successCount = results.filter((r) => !isFailedResult(r)).length;
+		updateSessionMoc(session!, { status: successCount === results.length ? "completed" : "failed" });
 		const summaries = results.map((r) => {
 			const output = truncateParallelOutput(getResultOutput(r));
 			const status = isFailedResult(r)
@@ -586,7 +661,7 @@ export async function executeDelegation(
 			content: [
 				{
 					type: "text",
-					text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
+					text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}\n\n[session: ${session!.sessionRelativePath}]`,
 				},
 			],
 			details: makeDetails("parallel")(results),
@@ -594,20 +669,22 @@ export async function executeDelegation(
 	}
 
 	if (params.agent && params.task) {
+		const artifact = reserveArtifacts(session!, [{ agent: params.agent, mode: "single", task: params.task }])[0];
 		const result = await runSingleAgent(
 			ctx.cwd,
 			agents,
 			params.agent,
-			params.task,
+			params.task + sessionContext(session!, artifact),
 			params.cwd,
 			undefined,
 			signal,
 			onUpdate,
 			makeDetails("single"),
-			{ keepOpen, stayOpen, timeout, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
+			{ keepOpen, stayOpen, timeout, session, artifact, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
 		);
 		const isError = isFailedResult(result);
 		if (isError) {
+			updateSessionMoc(session!, { status: terminalArtifactStatus(result.errorMessage ?? result.stderr) });
 			const errorMsg = getResultOutput(result);
 			return {
 				content: [
@@ -620,13 +697,15 @@ export async function executeDelegation(
 				isError: true,
 			};
 		}
+		updateSessionMoc(session!, { status: "completed" });
 		return {
 			content: [
 				{
 					type: "text",
 					text:
 						(getFinalOutput(result.messages) || "(no output)") +
-						(result.herdrNote ? `\n${result.herdrNote}` : ""),
+						(result.herdrNote ? `\n${result.herdrNote}` : "") +
+						`\n[session: ${session.sessionRelativePath}]`,
 				},
 			],
 			details: makeDetails("single")([result]),

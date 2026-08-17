@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 	agentScope: "user",
 	confirmProjectAgents: true,
 	keepOpen: true,
-	stayOpen: true,
+	stayOpen: false,
 	timeout: 600_000,
 };
 

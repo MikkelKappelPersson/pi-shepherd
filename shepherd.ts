@@ -74,6 +74,7 @@ const ShepherdParams = Type.Object({
 			description: "Delegation mode for action=delegate (default: single)",
 		}),
 	),
+	sessionName: Type.Optional(Type.String({ description: "Optional artifact-backed session name for delegation." })),
 	direction: Type.Optional(DirectionSchema),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane or delegated task" })),
 	agentScope: Type.Optional(AgentScopeSchema),
@@ -89,8 +90,8 @@ const ShepherdParams = Type.Object({
 	stayOpen: Type.Optional(
 		Type.Boolean({
 			description:
-				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: true.",
-			default: true,
+				"Keep the subagent's pi process alive after it completes, so you can keep driving it in the tab. Default: false.",
+			default: false,
 		}),
 	),
 	omitSystemPrompt: Type.Optional(
@@ -130,6 +131,7 @@ async function doAction(
 		case "delegate": {
 			const agentName = args.agent ?? args.name;
 			const params = {
+				sessionName: args.sessionName,
 				agent: agentName,
 				task: args.task,
 				tasks: args.tasks,

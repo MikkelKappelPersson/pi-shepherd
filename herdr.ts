@@ -740,7 +740,6 @@ export async function runAgentInHerdr(opts: {
 				}
 			}
 
-			const pickup = parseSessionFile(sessionFile);
 			const code = await doneSentinelInTail(paneId);
 			if (code !== null) {
 				outcome = code === 0 ? "done" : "error";
@@ -750,7 +749,7 @@ export async function runAgentInHerdr(opts: {
 				break;
 			}
 
-			opts.onProgress?.(lastAssistantText(pickup.messages) || "(running...)");
+			opts.onProgress?.("(running...)");
 			await new Promise((r) => setTimeout(r, 1000));
 		}
 
@@ -782,9 +781,11 @@ export async function runAgentInHerdr(opts: {
 			}
 		}
 
-		const pickup = parseSessionFile(sessionFile);
+		// A completion sidecar is not an immutable session snapshot. If the child
+		// remains alive (stayOpen or timeout), do not read its JSONL yet.
+		const pickup = settled ? parseSessionFile(sessionFile) : { messages: [] as Message[], model: undefined };
 		const finalText =
-			lastAssistantText(pickup.messages) || (await readPaneTail(paneId)).trim();
+			(settled ? lastAssistantText(pickup.messages) : "") || (await readPaneTail(paneId)).trim();
 
 		if (!keepOpen) {
 			try {
