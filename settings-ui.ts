@@ -50,7 +50,10 @@ function booleans(value: boolean): [string, string[]] {
 
 /** Render + drive the settings menu. Shared by the two commands. */
 export async function openSettings(ctx: ExtensionCommandContext): Promise<void> {
-	const settings = loadSettings();
+	// Keep the in-memory state current while the menu is open. SettingsList can
+	// invoke onChange multiple times in one session; applying every change to
+	// the initial snapshot would otherwise discard earlier changes.
+	let settings = loadSettings();
 	const [keepOpenValue, keepOpenValues] = booleans(settings.keepOpen);
 	const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
 	const [confirmValue, confirmValues] = booleans(settings.confirmProjectAgents);
@@ -106,10 +109,10 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 				Math.min(items.length + 2, 12),
 				getSettingsListTheme(),
 				(id, value) => {
-					const next = applyValue(settings, id, value);
-					saveSettings(next);
+					settings = applyValue(settings, id, value);
+					saveSettings(settings);
 					const note =
-						id === "agentScope" && next.agentScope !== "user"
+						id === "agentScope" && settings.agentScope !== "user"
 							? `${id} = ${value} (project agents are repo-controlled)`
 							: `${id} = ${value}`;
 					ctx.ui?.notify?.(note, "info");
