@@ -2,6 +2,7 @@
 /** Verify delegation-name preflight keeps names exact and validates batches atomically. */
 
 const { executeDelegation, unknownDelegationAgentNames } = await import("../subagent.ts");
+const { ShepherdParams } = await import("../shepherd.ts");
 const { mkdtemp, readdir, rm } = await import("node:fs/promises");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
@@ -20,6 +21,14 @@ const agents = [
 	{ name: "Worker" },
 ];
 
+assert(
+	Array.isArray(ShepherdParams.anyOf) && ShepherdParams.anyOf.length >= 7,
+	"shepherd schema uses an action-discriminated union",
+);
+assert(
+	ShepherdParams.anyOf.some((variant) => variant.properties?.action?.const === "delegate"),
+	"delegate action is one explicit union variant",
+);
 assert(
 	unknownDelegationAgentNames({ agent: "scout" }, agents).length === 0,
 	"single mode accepts an exact discovered name",

@@ -21,6 +21,7 @@ import { Type, type Static } from "typebox";
 import { TaskItem, ChainItem, AgentScopeSchema } from "./types.ts";
 import type { DelegatorModel } from "./discovery.ts";
 import { executeDelegation } from "./subagent.ts";
+import { discoverAgents, formatAgentList } from "./discovery.ts";
 import {
 	HERDR_SETUP_HINT,
 	agentSummaries,
@@ -44,9 +45,6 @@ import {
 } from "./herdr.ts";
 
 const execFileAsync = promisify(execFile);
-const ActionSchema = StringEnum(["delegate", "list", "start", "prompt", "status", "read", "close", "gc"] as const, {
-	description: "Herd action to perform (delegate | list | start | prompt | status | read | close | gc)",
-});
 const DirectionSchema = StringEnum(["right", "down"] as const, {
 	description: "Split direction for a new sibling pane (start)",
 	default: "right",
@@ -56,8 +54,10 @@ const SourceSchema = StringEnum(["visible", "recent", "recent-unwrapped", "detec
 	default: "recent-unwrapped",
 });
 
-const ShepherdParams = Type.Object({
-	action: ActionSchema,
+const DelegateParams = Type.Object({
+	action: Type.Literal("delegate", {
+		description: "Delegate a task to one or more discovered agents and wait for completion.",
+	}),
 	name: Type.Optional(
 		Type.String({
 			description:
@@ -67,20 +67,20 @@ const ShepherdParams = Type.Object({
 	agent: Type.Optional(
 		Type.String({
 			description:
-				"Exact discovered agent name for delegation (case-sensitive). Run /shepherd list first and copy a name exactly; do not invent aliases.",
+				"Exact discovered agent name for delegation (case-sensitive). Run /shepherd agents first and copy a name exactly; do not invent aliases.",
 		}),
 	),
 	task: Type.Optional(Type.String({ description: "Task to delegate (action=delegate) or prompt to submit (action=prompt/start)." })),
 	tasks: Type.Optional(
 		Type.Array(TaskItem, {
 			description:
-				"Parallel delegation items. Every agent must be an exact name from /shepherd list; all names are validated before any tab or artifact starts.",
+				"Parallel delegation items. Every agent must be an exact name from /shepherd agents; all names are validated before any tab or artifact starts.",
 		}),
 	),
 	chain: Type.Optional(
 		Type.Array(ChainItem, {
 			description:
-				"Sequential delegation items. Every agent must be an exact name from /shepherd list; all names are validated before any tab or artifact starts.",
+				"Sequential delegation items. Every agent must be an exact name from /shepherd agents; all names are validated before any tab or artifact starts.",
 		}),
 	),
 	mode: Type.Optional(
@@ -89,7 +89,6 @@ const ShepherdParams = Type.Object({
 		}),
 	),
 	sessionName: Type.Optional(Type.String({ description: "Optional artifact-backed session name for delegation." })),
-	direction: Type.Optional(DirectionSchema),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane or delegated task" })),
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
@@ -116,32 +115,119 @@ const ShepherdParams = Type.Object({
 	timeout: Type.Optional(
 		Type.Integer({ description: "Wait timeout (ms) for prompt settle or delegation run (default 120000)", default: 120000 }),
 	),
+});
+
+const ListParams = Type.Object({
+	action: Type.Literal("list", { description: "List Herdr panes and detected agents." }),
+});
+const AgentsParams = Type.Object({
+	action: Type.Literal("agents", { description: "List available discovered agent definitions and their source metadata.",}),
+	agentScope: Type.Optional(AgentScopeSchema),
+});
+const StartParams = Type.Object({
+	action: Type.Literal("start", { description: "Create a new Herdr pane and start a pi agent in it." }),
+	name: Type.String({ description: "Label for the new pane or existing pane target to reuse." }),
+	task: Type.Optional(Type.String({ description: "Optional task to seed into the new agent." })),
+	direction: Type.Optional(DirectionSchema),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the new pane." })),
+});
+const PromptParams = Type.Object({
+	action: Type.Literal("prompt", { description: "Send a task to an existing agent and wait for completion." }),
+	name: Type.String({ description: "Name or pane id of the target agent." }),
+	task: Type.String({ description: "Task to send to the target agent." }),
+	timeout: Type.Optional(Type.Integer({ description: "Wait timeout (ms) for prompt settle.", default: 120000 })),
+});
+const StatusParams = Type.Object({
+	action: Type.Literal("status", { description: "Inspect the current Herdr agent status for a pane or label." }),
+	name: Type.String({ description: "Name or pane id of the target agent." }),
+});
+const ReadParams = Type.Object({
+	action: Type.Literal("read", { description: "Read recent terminal output from a pane or agent." }),
+	name: Type.String({ description: "Name or pane id of the target agent." }),
 	lines: Type.Optional(Type.Integer({ description: "Number of recent lines for read (default 40)", default: 40 })),
 	source: Type.Optional(SourceSchema),
 });
+const CloseParams = Type.Object({
+	action: Type.Literal("close", { description: "Close a pane that was created by pi-shepherd." }),
+	name: Type.String({ description: "Name or pane id to close." }),
+});
+const GcParams = Type.Object({
+	action: Type.Literal("gc", { description: "Prune stale pi-shepherd pane registrations." }),
+});
+
+export const ShepherdParams = Type.Union(
+	[
+	DelegateParams,
+	ListParams,
+	AgentsParams,
+	StartParams,
+	PromptParams,
+	StatusParams,
+	ReadParams,
+	CloseParams,
+	GcParams,
+	],
+	{ description: "Action-discriminated shepherd commands for delegating work and managing Herdr panes." },
+);
 
 type ShepherdArgs = Static<typeof ShepherdParams>;
 
-function unavailableResult(): AgentToolResult<{ error: string }> {
+function unavailableResult(): AgentToolResult<Record<string, unknown>> {
 	return {
 		content: [{ type: "text", text: `Herd requires a running Herdr session.\n${HERDR_SETUP_HINT}` }],
 		details: { error: "herdr not available" },
 		isError: true,
-	};
+	} as AgentToolResult<Record<string, unknown>>;
 }
 
 function textResult(text: string, details: Record<string, unknown>): AgentToolResult<Record<string, unknown>> {
 	return { content: [{ type: "text" as const, text }], details };
 }
 
+/** Keep tool-call previews compact without rendering an empty placeholder. */
+function previewText(value: unknown, maxLength = 40): string {
+	const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : String(value ?? "");
+	return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function delegationItemPreview(item: unknown): string {
+	if (!item || typeof item !== "object") return "?";
+	const entry = item as { agent?: unknown; task?: unknown };
+	const agent = previewText(entry.agent) || "?";
+	const task = previewText(entry.task);
+	return agent + (task ? ` "${task}"` : "");
+}
+
+/**
+ * Render the arguments that select a delegation mode. In particular, don't use
+ * the single-task preview for array modes: those calls have no top-level task,
+ * which used to result in the unhelpful `"…"` being displayed.
+ */
+function delegationPreview(args: ShepherdArgs): string {
+	if (args.action !== "delegate") return "";
+	if (Array.isArray(args.chain) && args.chain.length > 0) {
+		return ` [chain: ${args.chain.map(delegationItemPreview).join(" → ")}]`;
+	}
+	if (Array.isArray(args.tasks) && args.tasks.length > 0) {
+		return ` [parallel: ${args.tasks.map(delegationItemPreview).join(", ")}]`;
+	}
+
+	const target = previewText(args.agent || args.name);
+	const task = previewText(args.task);
+	return (target ? ` ${target}` : "") + (task ? ` "${task}"` : "");
+}
+
+function reusableText(lastComponent: unknown): Text {
+	return lastComponent instanceof Text ? lastComponent : new Text("", 0, 0);
+}
+
 async function doAction(
-	action: string,
 	args: ShepherdArgs,
 	ctx: { cwd: string; model?: DelegatorModel; hasUI?: boolean; ui?: any },
 	signal?: AbortSignal,
 	onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
-	switch (action) {
+	switch (args.action) {
 		case "delegate": {
 			const agentName = args.agent ?? args.name;
 			const params = {
@@ -159,6 +245,16 @@ async function doAction(
 				omitSystemPrompt: args.omitSystemPrompt,
 			};
 			return executeDelegation(params, signal, onUpdate as any, ctx);
+		}
+
+		case "agents": {
+			// List discovered agent definitions (for delegation).
+			const scope = args.agentScope ?? "user";
+			const { agents, projectDirs } = discoverAgents(ctx.cwd, scope);
+			if (agents.length === 0)
+				return textResult("No agent definitions found.", { agents: [], projectDirs, scope });
+			const lines = agents.map((a) => `${a.name} (${a.source}): ${a.description}`);
+			return textResult(lines.join("\n"), { agents, projectDirs, scope });
 		}
 
 		case "list": {
@@ -456,24 +552,33 @@ async function doAction(
 	}
 }
 
+export const SHEPHERD_TOOL_DESCRIPTION = [
+	"Manage and Delegate work specialized agents inside Herdr panes.",
+	"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
+].join(" ");
+
+export const SHEPHERD_TOOL_PROMPT_SNIPPET =
+	"Manage and Delegate work specialized agents inside Herdr panes.";
+
+export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
+	"Use shepherd action=delegate for isolated scouting, planning, implementation, or review work; use exact agent names from shepherd action=agents.",
+	"Use shepherd action=agents before to retrieve available agents before delegating work.",
+	"Always end turn after delegating with shepherd. The harness will prompt you when subagents are complete.",
+];
+
 export function registerShepherdTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "shepherd",
 		label: "Shepherd (delegate & manage Herdr agents)",
-		description: [
-			"Unifying tool to delegate tasks to subagents or manage agents in Herdr panes.",
-			"Actions: delegate | list | start | prompt | status | read | close | gc.",
-			"For delegation (action=delegate), first run /shepherd list and use the exact discovered agent name (case-sensitive) in agent, tasks[].agent, or chain[].agent; do not invent aliases.",
-			"All requested delegation names are validated before artifact/session creation or Herdr tabs start. Unknown names return available names without side effects.",
-			"For fleet management: list active agent panes, start sibling panes, prompt, status, read, or close panes.",
-			"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
-		].join(" "),
+		description: SHEPHERD_TOOL_DESCRIPTION,
+		promptSnippet: SHEPHERD_TOOL_PROMPT_SNIPPET,
+		promptGuidelines: SHEPHERD_TOOL_PROMPT_GUIDELINES,
 		parameters: ShepherdParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!isHerdrAvailable()) return unavailableResult();
 			try {
-				return await doAction(params.action, params as ShepherdArgs, ctx, signal, onUpdate);
+				return await doAction(params as ShepherdArgs, ctx, signal, onUpdate);
 			} catch (error: any) {
 				return {
 					content: [
@@ -485,35 +590,39 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 			}
 		},
 
-		renderCall(args, theme) {
+		renderCall(args, theme, context) {
 			const action = args.action ?? "list";
 			const target = args.agent || args.name ? ` ${args.agent || args.name}` : "";
 			const extra =
-				action === "prompt" || action === "delegate"
-					? ` "…${((args.task ?? "").length > 40 ? (args.task ?? "").slice(0, 40) + "…" : args.task ?? "")}"`
-					: "";
-			return new Text(
+				action === "delegate"
+					? delegationPreview(args as ShepherdArgs)
+					: action === "prompt"
+						? (previewText(args.task) ? ` "${previewText(args.task)}"` : "")
+						: "";
+			const component = reusableText(context.lastComponent);
+			component.setText(
 				theme.fg("toolTitle", theme.bold("shepherd ")) +
 					theme.fg("accent", action) +
-					theme.fg("dim", `${target}${extra}`),
-				0,
-				0,
+					theme.fg("dim", action === "delegate" ? extra : `${target}${extra}`),
 			);
+			return component;
 		},
 
-		renderResult(result, { expanded }, theme) {
+		renderResult(result, { expanded }, theme, context) {
 			const text = result.content[0];
 			const body = text?.type === "text" ? (text.text ?? "") : "";
+			let rendered: string;
 			if (!expanded && body.includes("\n")) {
 				const firstLine = body.split("\n")[0];
-				return new Text(
+				rendered =
 					theme.fg("accent", firstLine) +
-						`\n${theme.fg("muted", `… +${body.split("\n").length - 1} more lines (Ctrl+O to expand)`)}`,
-					0,
-					0,
-				);
+						`\n${theme.fg("muted", `… +${body.split("\n").length - 1} more lines (Ctrl+O to expand)`)}`;
+			} else {
+				rendered = theme.fg("toolOutput", body || "(no output)");
 			}
-			return new Text(theme.fg("toolOutput", body || "(no output)"), 0, 0);
+			const component = reusableText(context.lastComponent);
+			component.setText(rendered);
+			return component;
 		},
 	});
 }

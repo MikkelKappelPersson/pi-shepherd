@@ -154,6 +154,32 @@ available on the `shepherd` tool; `/shepherd <agent> <task>` has no separate
 option and therefore uses the agent frontmatter/default behavior. Likewise,
 `shepherd start` keeps its existing launch behavior.
 
+To inspect the Shepherd-owned system-prompt contribution without launching an
+agent, run:
+
+```bash
+npm run show:shepherd-prompt -- scout
+npm run show:shepherd-prompt -- scout --raw
+npm run show:shepherd-prompt -- scout --cwd /path/to/project --scope both
+npm run show:shepherd-prompt -- scout --omit
+```
+
+This reads the same discovered agent body that delegation passes to pi. It does
+not include pi's built-in prompt or project context files. `--omit`/`--append`
+override the agent's frontmatter only for the displayed launch mode.
+
+To inspect what the parent/orchestrator model receives about Shepherd, run:
+
+```bash
+npm run show:shepherd-orchestrator
+npm run show:shepherd-orchestrator -- --json
+```
+
+The parent receives Shepherd in two forms: its `description` and parameter
+schema are exposed as model-facing tool metadata, while its `promptSnippet` and
+`promptGuidelines` are included in pi's textual system prompt when the tool is
+active. The script prints all four pieces exactly.
+
 ### Shepherd (pi agents in Herdr panes)
 
 pi-shepherd drives Herdr through the `herdr` CLI (works from inside Herdr *or* a
