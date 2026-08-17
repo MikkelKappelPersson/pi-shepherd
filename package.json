@@ -12,6 +12,7 @@
     "launch:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-launch.mjs",
     "sentinel:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-sentinel.mjs",
     "sessions:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-sessions.mjs",
-    "test": "npm run discovery:test && npm run launch:test && npm run sentinel:test && npm run sessions:test"
+    "validation:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-validation.mjs",
+    "test": "npm run discovery:test && npm run launch:test && npm run sentinel:test && npm run sessions:test && npm run validation:test"
   }
 }

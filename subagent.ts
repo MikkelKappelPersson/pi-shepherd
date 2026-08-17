@@ -27,7 +27,7 @@ import {
 	getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import {
 	type AgentConfig,
 	type AgentScope,
@@ -457,6 +457,29 @@ async function runSingleAgent(
 
 
 
+/**
+ * Return every distinct requested agent name that is not present in the
+ * freshly discovered set. This is intentionally separate from runSingleAgent:
+ * delegation modes must validate the complete batch before reserving an
+ * artifact, creating a session, or launching any Herdr tab.
+ */
+export function unknownDelegationAgentNames(
+	params: Static<typeof SubagentParams>,
+	agents: AgentConfig[],
+): string[] {
+	// Match the same precedence as executeDelegation's mode selection. Ignore
+	// unrelated fields when callers provide a valid mode plus extra data.
+	const requested = params.chain?.length
+		? params.chain.map((step) => step.agent)
+		: params.tasks?.length
+			? params.tasks.map((task) => task.agent)
+			: params.agent !== undefined
+				? [params.agent]
+				: [];
+	const available = new Set(agents.map((agent) => agent.name));
+	return [...new Set(requested)].filter((name) => !available.has(name));
+}
+
 export async function executeDelegation(
 	params: Static<typeof SubagentParams>,
 	signal: AbortSignal | undefined,
@@ -499,6 +522,27 @@ export async function executeDelegation(
 				},
 			],
 			details: makeDetails("single")([]),
+		};
+	}
+
+	// Validate every requested name as one atomic preflight. In particular, do
+	// this before createOrResumeSession/reserveArtifacts below: a bad name in a
+	// later parallel or chain item must not leave earlier artifacts or panes.
+	const unknownNames = unknownDelegationAgentNames(params, agents);
+	if (unknownNames.length > 0) {
+		const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+		const mode: "single" | "parallel" | "chain" = hasChain ? "chain" : hasTasks ? "parallel" : "single";
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Unknown agent name${unknownNames.length === 1 ? "" : "s"}: ${unknownNames
+						.map((name) => `"${name}"`)
+						.join(", ")}. Use an exact name from /shepherd list. Available agents: ${available}`,
+				},
+			],
+			details: makeDetails(mode)([]),
+			isError: true,
 		};
 	}
 

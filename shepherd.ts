@@ -65,11 +65,24 @@ const ShepherdParams = Type.Object({
 		}),
 	),
 	agent: Type.Optional(
-		Type.String({ description: "Agent name for action=delegate (e.g. scout, worker, reviewer)" }),
+		Type.String({
+			description:
+				"Exact discovered agent name for delegation (case-sensitive). Run /shepherd list first and copy a name exactly; do not invent aliases.",
+		}),
 	),
 	task: Type.Optional(Type.String({ description: "Task to delegate (action=delegate) or prompt to submit (action=prompt/start)." })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel delegation (action=delegate)" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential delegation (action=delegate)" })),
+	tasks: Type.Optional(
+		Type.Array(TaskItem, {
+			description:
+				"Parallel delegation items. Every agent must be an exact name from /shepherd list; all names are validated before any tab or artifact starts.",
+		}),
+	),
+	chain: Type.Optional(
+		Type.Array(ChainItem, {
+			description:
+				"Sequential delegation items. Every agent must be an exact name from /shepherd list; all names are validated before any tab or artifact starts.",
+		}),
+	),
 	mode: Type.Optional(
 		StringEnum(["single", "parallel", "chain"] as const, {
 			description: "Delegation mode for action=delegate (default: single)",
@@ -450,7 +463,8 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 		description: [
 			"Unifying tool to delegate tasks to subagents or manage agents in Herdr panes.",
 			"Actions: delegate | list | start | prompt | status | read | close | gc.",
-			"For delegation (action=delegate): pass agent and task (or tasks array for parallel, or chain array for sequential steps).",
+			"For delegation (action=delegate), first run /shepherd list and use the exact discovered agent name (case-sensitive) in agent, tasks[].agent, or chain[].agent; do not invent aliases.",
+			"All requested delegation names are validated before artifact/session creation or Herdr tabs start. Unknown names return available names without side effects.",
 			"For fleet management: list active agent panes, start sibling panes, prompt, status, read, or close panes.",
 			"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
 		].join(" "),

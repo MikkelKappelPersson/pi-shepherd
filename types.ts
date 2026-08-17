@@ -2,13 +2,19 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 export const TaskItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task to delegate to the agent" }),
+	agent: Type.String({
+		description:
+			"Exact discovered agent name to invoke (case-sensitive). Run /shepherd list first and copy a name exactly; do not invent aliases.",
+	}),
+	task: Type.String({ description: "Task to delegate to the selected agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
 export const ChainItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
+	agent: Type.String({
+		description:
+			"Exact discovered agent name to invoke (case-sensitive). Run /shepherd list first and copy a name exactly; do not invent aliases.",
+	}),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
@@ -22,10 +28,25 @@ export const SubagentParams = Type.Object({
 	sessionName: Type.Optional(
 		Type.String({ description: "Optional human-facing name for the artifact-backed delegation session." }),
 	),
-	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
-	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
+	agent: Type.Optional(
+		Type.String({
+			description:
+				"Exact discovered agent name for single mode (case-sensitive). Run /shepherd list first and copy a name exactly; do not use aliases.",
+		}),
+	),
+	task: Type.Optional(Type.String({ description: "Task to delegate to the selected agent (for single mode)" })),
+	tasks: Type.Optional(
+		Type.Array(TaskItem, {
+			description:
+				"Parallel delegation items. Every agent must be an exact name from /shepherd list; validate all names before starting.",
+		}),
+	),
+	chain: Type.Optional(
+		Type.Array(ChainItem, {
+			description:
+				"Sequential delegation items. Every agent must be an exact name from /shepherd list; validate all names before starting.",
+		}),
+	),
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
