@@ -467,16 +467,18 @@ export function writePiLaunchFiles(opts: {
 			: undefined;
 	if (tools) args.push("--tools", tools);
 
-	if (opts.task !== undefined) {
-		const taskFile = path.join(dir, `task-${safe}.md`);
-		const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
-		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600 });
+	if (opts.systemPrompt !== undefined) {
 		const sysFile = path.join(dir, `sysprompt-${safe}.md`);
-		fs.writeFileSync(sysFile, opts.systemPrompt ?? "", { encoding: "utf8", mode: 0o600 });
+		fs.writeFileSync(sysFile, opts.systemPrompt, { encoding: "utf8", mode: 0o600 });
 		args.push(
 			opts.omitSystemPrompt ? "--system-prompt" : "--append-system-prompt",
 			shellQuote(sysFile),
 		);
+	}
+	if (opts.task !== undefined) {
+		const taskFile = path.join(dir, `task-${safe}.md`);
+		const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
+		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: "0600" });
 		args.push(`'@${taskFile}'`);
 	}
 
@@ -658,7 +660,8 @@ export async function runAgentInHerdr(opts: {
 	agentName: string;
 	systemPrompt: string;
 	omitSystemPrompt?: boolean;
-	task: string;
+	task?: string;
+	interactive?: boolean;
 	cwd: string;
 	model?: string;
 	tools?: string[];
@@ -697,7 +700,7 @@ export async function runAgentInHerdr(opts: {
 		task: opts.task,
 		systemPrompt: opts.systemPrompt,
 		omitSystemPrompt: opts.omitSystemPrompt,
-		stayOpen,
+		stayOpen: opts.interactive ? true : stayOpen,
 		model: opts.model,
 		tools: opts.tools,
 	});
@@ -705,6 +708,15 @@ export async function runAgentInHerdr(opts: {
 	// clean it up if this pane is left open (stayOpen/keepOpen). Harmless when
 	// the run settles and removes the dir itself (force rm of a missing path).
 	setCreatedPaneDir(paneId, dir);
+	sendCommandInHerdr(paneId, `bash ${shellQuote(scriptFile)}`);
+
+	if (opts.interactive) {
+		const detected = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
+		if (!detected.detected) {
+			throw new Error(`Bare agent did not become ready in pane ${paneId}.`);
+		}
+		return { ok: true, exitCode: 0, messages: [], model: opts.model, paneId, tabId };
+	}
 
 	let settled = false;
 	let outcome: "done" | "error" | null = null;
@@ -712,8 +724,6 @@ export async function runAgentInHerdr(opts: {
 	const started = Date.now();
 
 	try {
-		sendCommandInHerdr(paneId, `bash ${shellQuote(scriptFile)}`);
-
 		while (Date.now() - started < timeout) {
 			if (opts.signal?.aborted) {
 				sendEscapeInHerdr(paneId);

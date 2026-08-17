@@ -8,13 +8,13 @@ and herding **pi agents inside Herdr**.
 > to your main pi instance when it completes. No invisible subprocesses.
 
 ```
-you ──► shepherd (action: delegate | list | start | prompt | status | read | close | gc)
+you ──► shepherd (action: delegate | list | prompt | status | read | close | gc)
 ```
 
 The extension exposes its unified capability as the **`shepherd`** tool:
 
 - **`shepherd` (action: `delegate`)** — delegate a task to a specialized agent (`scout`, `planner`, `reviewer`, `worker`, …). It runs **live in a new Herdr tab** labelled with its artifact name (for example, `scout-02`) when artifact-backed, or with the agent name otherwise; it gets the delegated system prompt + tool/model config, and on completion the main instance picks up its final output.
-- **`shepherd` (action: `list` | `start` | `prompt` | `status` | `read` | `close` | `gc`)** — manage pi agents living in your Herdr panes: see them (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check status / read output (`status`, `read`), and close panes that pi-shepherd created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes stale registry entries.
+- **`shepherd` (action: `list` | `prompt` | `status` | `read` | `close` | `gc`)** — manage pi agents living in your Herdr panes. Use `delegate` with `mode: "bare"` to start a persistent discovered agent with no initial task, then use `prompt` to drive it. Panes pi-shepherd created are marked `●`. `gc` prunes stale registry entries.
 
 
 
@@ -152,7 +152,7 @@ option (including explicit `false`), then the selected agent's
 YAML boolean (`true` or `false`); other types are ignored. The option is
 available on the `shepherd` tool; `/shepherd <agent> <task>` has no separate
 option and therefore uses the agent frontmatter/default behavior. Likewise,
-`shepherd start` keeps its existing launch behavior.
+`shepherd delegate` with `mode: "bare"` starts an interactive discovered agent with no initial task and forces it to stay open.
 
 To inspect the Shepherd-owned system-prompt contribution without launching an
 agent, run:
@@ -201,8 +201,8 @@ herdr pane run <pane-id> 'bash /tmp/pi-shepherd-*/launch-reviewer.sh'
 herdr agent read <pane-id> --source recent-unwrapped --lines 40 --format text
 ```
 
-A `shepherd start` with no `task` boots a bare pi you drive later with
-`shepherd prompt`; a `task` given to `start` is delivered at launch.
+A bare delegation boots a discovered agent with no initial task; drive it later with
+`shepherd prompt`.
 
 ---
 

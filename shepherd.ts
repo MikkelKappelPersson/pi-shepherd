@@ -45,10 +45,6 @@ import {
 } from "./herdr.ts";
 
 const execFileAsync = promisify(execFile);
-const DirectionSchema = StringEnum(["right", "down"] as const, {
-	description: "Split direction for a new sibling pane (start)",
-	default: "right",
-});
 const SourceSchema = StringEnum(["visible", "recent", "recent-unwrapped", "detection"] as const, {
 	description: "Terminal snapshot source for read",
 	default: "recent-unwrapped",
@@ -70,7 +66,7 @@ const DelegateParams = Type.Object({
 				"Exact discovered agent name for delegation (case-sensitive). Run /shepherd agents first and copy a name exactly; do not invent aliases.",
 		}),
 	),
-	task: Type.Optional(Type.String({ description: "Task to delegate (action=delegate) or prompt to submit (action=prompt/start)." })),
+	task: Type.Optional(Type.Union([Type.String({ description: "Task to delegate." }), Type.Null({ description: "Null for bare mode." })])),
 	tasks: Type.Optional(
 		Type.Array(TaskItem, {
 			description:
@@ -83,16 +79,16 @@ const DelegateParams = Type.Object({
 				"Sequential delegation items. Every agent must be an exact name from /shepherd agents; all names are validated before any tab or artifact starts.",
 		}),
 	),
-	mode: Type.Optional(
-		StringEnum(["single", "parallel", "chain"] as const, {
-			description: "Delegation mode for action=delegate (default: single)",
-		}),
-	),
 	sessionName: Type.Optional(Type.String({ description: "Optional artifact-backed session name for delegation." })),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a new pane or delegated task" })),
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
+	),
+	mode: Type.Optional(
+		StringEnum(["single", "parallel", "chain", "bare"] as const, {
+			description: "Delegation mode. Bare starts an interactive agent with no initial task.",
+		}),
 	),
 	keepOpen: Type.Optional(
 		Type.Boolean({
@@ -124,13 +120,6 @@ const AgentsParams = Type.Object({
 	action: Type.Literal("agents", { description: "List available discovered agent definitions and their source metadata.",}),
 	agentScope: Type.Optional(AgentScopeSchema),
 });
-const StartParams = Type.Object({
-	action: Type.Literal("start", { description: "Create a new Herdr pane and start a pi agent in it." }),
-	name: Type.String({ description: "Label for the new pane or existing pane target to reuse." }),
-	task: Type.Optional(Type.String({ description: "Optional task to seed into the new agent." })),
-	direction: Type.Optional(DirectionSchema),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the new pane." })),
-});
 const PromptParams = Type.Object({
 	action: Type.Literal("prompt", { description: "Send a task to an existing agent and wait for completion." }),
 	name: Type.String({ description: "Name or pane id of the target agent." }),
@@ -160,7 +149,6 @@ export const ShepherdParams = Type.Union(
 	DelegateParams,
 	ListParams,
 	AgentsParams,
-	StartParams,
 	PromptParams,
 	StatusParams,
 	ReadParams,
@@ -236,6 +224,7 @@ async function doAction(
 				task: args.task,
 				tasks: args.tasks,
 				chain: args.chain,
+				mode: args.mode,
 				agentScope: args.agentScope,
 				confirmProjectAgents: args.confirmProjectAgents,
 				cwd: args.cwd,
@@ -268,86 +257,6 @@ async function doAction(
 			return textResult(agents.map(formatSummary).join("\n"), { agents });
 		}
 
-		case "start": {
-			const name = args.name?.trim();
-			if (!name) return textResult("Provide a name for the new agent (action=start).", {});
-			const cwd = args.cwd ?? ctx.cwd ?? process.cwd();
-			const direction = args.direction ?? "right";
-			const task = args.task?.trim() || undefined;
-
-			let paneId: string;
-			let tabId = "";
-			const parentPane = process.env.HERDR_PANE_ID;
-			if (parentPane) {
-				// Split our own pane to create a sibling; reference target output.
-				const splitOut = herdrExecSync([
-					"pane", "split", parentPane,
-					"--direction", direction,
-					"--cwd", cwd,
-					"--no-focus",
-				]);
-				paneId = paneIdOf(splitOut, "pane split");
-			} else {
-				// From a plain terminal there is no pane to split — fall back to a
-				// fresh tab in the resolved workspace (reuses the delegation helpers).
-				const created = createHerdrTab(name, cwd, getHerdrWorkspaceId());
-				paneId = created.paneId;
-				tabId = created.tabId;
-			}
-
-			// Track the pane as soon as it exists (BEFORE any await) so that even a
-			// shell-ready timeout or failed launch leaves a pane `shepherd close` may
-			// close — never a closable orphan. Idempotent, so the later launch path
-			// is unaffected.
-			recordCreatedPane({ paneId, tabId, name, cwd, createdAt: Date.now() });
-
-			try {
-				// The flaky `herdr agent start` lifecycle is intentionally skipped:
-				// it injected no task and its keystroke prompt timing silently ate
-				// tasks on never-focused panes. Instead wait for the shell, boot pi
-				// via the trusted launch script (task baked in at launch), and let
-				// Herdr auto-detect the session (same as delegation panes do).
-				await waitForHerdrShellReady(paneId);
-
-				try {
-					herdrExecSync(["pane", "rename", paneId, name]);
-				} catch {
-					/* cosmetic — ignore */
-				}
-
-				const landing = launchPiInPane(paneId, { name, task, stayOpen: true });
-				setCreatedPaneDir(paneId, landing.dir);
-
-				// Advisory post-start readiness check (never errors — the pane is
-				// visibly open and the launch script ran).
-				const det = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
-				const delivered = task !== undefined ? "task delivered" : "no task";
-				const advisory = det.detected
-					? ` (agent state: ${det.state ?? "unknown"})`
-					: "\npi is booting — verify with shepherd status " + paneId + ".";
-				return textResult(
-					`Started pi agent "${name}" in pane ${paneId} [${delivered}].` +
-						advisory +
-						`\nDrive it with shepherd prompt ${paneId} ..., or close with shepherd close ${paneId}.`,
-					{ paneId, name, taskDelivered: task !== undefined, agentState: det.state },
-				);
-			} catch (error: any) {
-				// If start failed, the sibling pane still exists — leave it so the
-				// user can inspect/start manually, but report plainly.
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Created pane ${paneId} but failed to start pi agent "${name}": ${
-								error?.message ?? String(error)
-						}\nThe pane is left open for inspection.`,
-						},
-					],
-					details: { paneId, name, error: String(error?.message ?? error) },
-					isError: true,
-				};
-			}
-		}
 		case "prompt": {
 			const target = args.name?.trim();
 			const task = args.task?.trim() || "";

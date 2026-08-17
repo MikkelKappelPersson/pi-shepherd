@@ -34,7 +34,17 @@ export const SubagentParams = Type.Object({
 				"Exact discovered agent name for single mode (case-sensitive). Run /shepherd agents first and copy a name exactly; do not use aliases.",
 		}),
 	),
-	task: Type.Optional(Type.String({ description: "Task to delegate to the selected agent (for single mode)" })),
+	task: Type.Optional(
+		Type.Union([
+			Type.String({ description: "Task to delegate to the selected agent (for single mode)" }),
+			Type.Null({ description: "Null for bare mode." }),
+		]),
+	),
+	mode: Type.Optional(
+		StringEnum(["single", "parallel", "chain", "bare"] as const, {
+			description: "Delegation mode (default: inferred from supplied fields). Bare starts an interactive agent with no initial task.",
+		}),
+	),
 	tasks: Type.Optional(
 		Type.Array(TaskItem, {
 			description:

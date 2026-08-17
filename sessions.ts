@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
-export type SessionMode = "single" | "parallel" | "chain";
+export type SessionMode = "single" | "parallel" | "chain" | "bare";
 export type ArtifactStatus = "pending" | "running" | "completed" | "failed" | "timed-out" | "cancelled";
 
 export interface ShepherdSession {

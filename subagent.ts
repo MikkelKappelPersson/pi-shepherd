@@ -169,6 +169,7 @@ interface SingleResult {
 	agent: string;
 	agentSource: "user" | "project" | "bundled" | "unknown";
 	task: string;
+	paneId?: string;
 	exitCode: number;
 	messages: Message[];
 	stderr: string;
@@ -183,7 +184,7 @@ interface SingleResult {
 }
 
 interface SubagentDetails {
-	mode: "single" | "parallel" | "chain";
+	mode: "single" | "parallel" | "chain" | "bare";
 	agentScope: AgentScope;
 	session?: ShepherdSession;
 	projectAgentsDir: string | null;
@@ -309,7 +310,7 @@ async function runSingleAgent(
 	defaultCwd: string,
 	agents: AgentConfig[],
 	agentName: string,
-	task: string,
+	task: string | undefined,
 	cwd: string | undefined,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
@@ -318,6 +319,7 @@ async function runSingleAgent(
 	opts: {
 		keepOpen?: boolean;
 		stayOpen?: boolean;
+		interactive?: boolean;
 		timeout?: number;
 		label?: string;
 		session?: ShepherdSession;
@@ -362,7 +364,7 @@ async function runSingleAgent(
 	const progress: SingleResult = {
 		agent: agentName,
 		agentSource: agent.source,
-		task,
+		task: task ?? "",
 		exitCode: 0,
 		...(opts.artifact ? { artifact: { id: opts.artifact.id, filePath: opts.artifact.filePath, relativePath: opts.artifact.relativePath, status: "running" } } : {}),
 		messages: [{ role: "assistant", content: [{ type: "text", text: "(starting…)" }] }],
@@ -395,6 +397,7 @@ async function runSingleAgent(
 			label,
 			keepOpen,
 			stayOpen,
+			interactive: opts.interactive,
 			timeout,
 			signal,
 			onProgress: emitProgress,
@@ -436,6 +439,7 @@ async function runSingleAgent(
 		agent: agentName,
 		agentSource: agent.source,
 		task,
+		paneId: run.paneId,
 		exitCode: run.exitCode,
 		messages: run.messages,
 		stderr: run.errorMessage ?? "",
@@ -494,8 +498,9 @@ export async function executeDelegation(
 
 	const hasChain = (params.chain?.length ?? 0) > 0;
 	const hasTasks = (params.tasks?.length ?? 0) > 0;
-	const hasSingle = Boolean(params.agent && params.task);
-	const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+	const hasBare = params.mode === "bare";
+	const hasSingle = Boolean(params.agent && params.task != null && params.mode !== "bare");
+	const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle) + Number(hasBare);
 	const keepOpen = params.keepOpen ?? settings.keepOpen;
 	const stayOpen = params.stayOpen ?? settings.stayOpen;
 	const timeout = params.timeout ?? settings.timeout;
@@ -503,7 +508,7 @@ export async function executeDelegation(
 
 	let session: ShepherdSession | undefined;
 	const makeDetails =
-		(mode: "single" | "parallel" | "chain") =>
+		(mode: "single" | "parallel" | "chain" | "bare") =>
 		(results: SingleResult[]): SubagentDetails => ({
 			mode,
 			agentScope,
@@ -531,7 +536,7 @@ export async function executeDelegation(
 	const unknownNames = unknownDelegationAgentNames(params, agents);
 	if (unknownNames.length > 0) {
 		const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
-		const mode: "single" | "parallel" | "chain" = hasChain ? "chain" : hasTasks ? "parallel" : "single";
+		const mode: "single" | "parallel" | "chain" | "bare" = hasBare ? "bare" : hasChain ? "chain" : hasTasks ? "parallel" : "single";
 		return {
 			content: [
 				{
@@ -578,7 +583,7 @@ export async function executeDelegation(
 		};
 	}
 
-	const mode: "single" | "parallel" | "chain" = hasChain ? "chain" : hasTasks ? "parallel" : "single";
+	const mode: "single" | "parallel" | "chain" | "bare" = hasBare ? "bare" : hasChain ? "chain" : hasTasks ? "parallel" : "single";
 	const firstTask = params.task ?? params.chain?.[0]?.task ?? params.tasks?.[0]?.task;
 	session = createOrResumeSession({ projectRoot: ctx.cwd, sessionName: params.sessionName, fallbackTask: firstTask, mode });
 
@@ -750,7 +755,23 @@ export async function executeDelegation(
 		};
 	}
 
-	if (params.agent && params.task) {
+	if (hasBare) {
+		if (!params.agent || params.task != null || params.tasks || params.chain) {
+			return { content: [{ type: "text", text: "Bare mode requires exactly one agent and task omitted or null." }], details: makeDetails("bare")([]), isError: true };
+		}
+		const result = await runSingleAgent(ctx.cwd, agents, params.agent!, undefined, params.cwd, undefined, signal, onUpdate, makeDetails("bare"), {
+			keepOpen: true, stayOpen: true, interactive: true, timeout,
+			omitSystemPrompt: params.omitSystemPrompt,
+			model: resolveDelegatedModel(agents.find((a) => a.name === params.agent)?.model, ctx.model),
+		});
+		return {
+			content: [{ type: "text", text: result.exitCode === 0 ? `Started bare ${params.agent} agent in pane ${result.paneId ?? "(unknown)"}; use shepherd prompt with that pane id.` : result.stderr || "Failed to start bare agent." }],
+			details: makeDetails("bare")([result]),
+			isError: result.exitCode !== 0,
+		};
+	}
+
+	if (params.agent && params.task != null) {
 		const artifact = reserveArtifacts(session!, [{ agent: params.agent, mode: "single", task: params.task }])[0];
 		const result = await runSingleAgent(
 			ctx.cwd,
