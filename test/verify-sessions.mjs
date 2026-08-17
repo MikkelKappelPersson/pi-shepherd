@@ -12,6 +12,8 @@ const {
   createOrResumeSession, reserveArtifacts, markArtifactStarted,
   finalizeArtifact, markArtifactStatus, updateSessionMoc, readSessionMetadata,
 } = mod;
+assert.equal((await import("../subagent.ts")).artifactTabLabel({ fileName: "scout-01.md" }), "scout-01");
+assert.equal((await import("../subagent.ts")).artifactTabLabel({ fileName: "scout-02.md" }), "scout-02");
 let failures = 0;
 async function check(label, fn) {
   try { await fn(); console.log(`PASS  ${label}`); }

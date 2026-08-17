@@ -37,7 +37,8 @@ pi-shepherd/
 One tool, two surface areas exposed to the model:
 
 1. **Delegation** (`shepherd action=delegate`) — delegate to an agent that
-   runs **live in a new Herdr tab** (labelled with the agent name), works
+   runs **live in a new Herdr tab** (artifact-backed delegations use labels such
+   as `scout-01`; non-artifact agents use the agent name), works
    there, and reports its final output back on completion. **Herdr-native**: no
    subprocess fallback — from a plain terminal the referenced headless Herdr
    server is started/attached automatically. Delegation lives on the `shepherd`

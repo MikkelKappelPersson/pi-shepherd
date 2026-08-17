@@ -13,7 +13,7 @@ you ──► shepherd (action: delegate | list | start | prompt | status | read
 
 The extension exposes its unified capability as the **`shepherd`** tool:
 
-- **`shepherd` (action: `delegate`)** — delegate a task to a specialized agent (`scout`, `planner`, `reviewer`, `worker`, …). It runs **live in a new Herdr tab labelled with the agent name**, gets the delegated system prompt + tool/model config, and on completion the main instance picks up its final output.
+- **`shepherd` (action: `delegate`)** — delegate a task to a specialized agent (`scout`, `planner`, `reviewer`, `worker`, …). It runs **live in a new Herdr tab** labelled with its artifact name (for example, `scout-02`) when artifact-backed, or with the agent name otherwise; it gets the delegated system prompt + tool/model config, and on completion the main instance picks up its final output.
 - **`shepherd` (action: `list` | `start` | `prompt` | `status` | `read` | `close` | `gc`)** — manage pi agents living in your Herdr panes: see them (`list`), start a sibling agent (`start`), push a prompt (`prompt`), check status / read output (`status`, `read`), and close panes that pi-shepherd created (`close`). Panes pi-shepherd created are marked `●`. `gc` prunes stale registry entries.
 
 
@@ -86,7 +86,7 @@ You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
 parallel — one on auth, one on billing"* — the model uses the `shepherd`
 tool with `action: delegate` (single / parallel / chain) to do it.
 
-Each agent runs **live in its own Herdr tab** (labelled `scout`, `planner`, …):
+Each agent runs **live in its own Herdr tab** (artifact-backed delegations are labelled `scout-01`, `planner-01`, …; non-artifact agents retain their agent-name labels):
 
 1. a new tab is created in the current (or resolved) workspace;
 2. `pi` starts there with the agent's delegated system prompt, tools and model;

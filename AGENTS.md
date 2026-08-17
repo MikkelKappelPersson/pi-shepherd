@@ -36,7 +36,9 @@ their tool permissions match yours.
   `CONFIG_DIR_NAME`, `getAgentDir`.
 - The **herd** capability shells out to the **`herdr` CLI** (no js library).
   Subagents run as **pi agents inside Herdr tabs**: pi-shepherd creates a tab
-  labelled with the agent name, runs the delegated `pi` process in it
+  labelled with the reserved artifact name (such as `scout-02`) for
+  artifact-backed delegation, or the agent name otherwise, and runs the delegated
+  `pi` process in it
   (`herdr pane run`), waits for a completion sidecar, and hands the result
   back to the parent.
 

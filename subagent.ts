@@ -278,6 +278,18 @@ function terminalArtifactStatus(message?: string): "failed" | "timed-out" | "can
 }
 
 /**
+ * Derive the visible Herdr tab and root-pane label for an artifact-backed run.
+ *
+ * The reservation is the source of truth for invocation identity: unlike the
+ * agent name, its filename includes the per-agent ordinal (for example,
+ * `scout-02.md`). Keeping this here means single, parallel, chain, and resumed
+ * calls all use the same label derivation.
+ */
+export function artifactTabLabel(artifact: Pick<ArtifactReservation, "fileName">): string {
+	return path.parse(artifact.fileName).name;
+}
+
+/**
  * Run one delegated agent to completion in the Herdr runtime.
  *
  * pi-shepherd is Herdr-native: every subagent runs in a real Herdr tab (its own
@@ -334,7 +346,10 @@ async function runSingleAgent(
 	const timeout = opts.timeout ?? loadSettings().timeout;
 	// Preserve undefined so precedence is explicit option > frontmatter > false.
 	const omitSystemPrompt = opts.omitSystemPrompt ?? agent.omitSystemPrompt ?? false;
-	const label = opts.label ?? agentName;
+	// Artifact filenames are reserved before launch and carry the invocation
+	// ordinal. They override caller labels so every delegation mode (and a
+	// resumed session) gets the same unambiguous tab/root-pane identity.
+	const label = opts.artifact ? artifactTabLabel(opts.artifact) : opts.label ?? agentName;
 
 	if (opts.artifact && opts.session) markArtifactStarted(opts.session, opts.artifact, { paneLabel: label });
 	const progress: SingleResult = {
@@ -548,7 +563,7 @@ export async function executeDelegation(
 				signal,
 				chainUpdate,
 				makeDetails("chain"),
-				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[i], omitSystemPrompt: params.omitSystemPrompt, label: `${step.agent}-${i + 1}` },
+				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[i], omitSystemPrompt: params.omitSystemPrompt },
 			);
 			results.push(result);
 
@@ -641,7 +656,7 @@ export async function executeDelegation(
 					}
 				},
 				makeDetails("parallel"),
-				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[index], omitSystemPrompt: params.omitSystemPrompt, label: `${t.agent}-${index + 1}` },
+				{ keepOpen, stayOpen, timeout, session, artifact: artifacts[index], omitSystemPrompt: params.omitSystemPrompt },
 			);
 			allResults[index] = result;
 			emitParallelUpdate();
@@ -680,7 +695,7 @@ export async function executeDelegation(
 			signal,
 			onUpdate,
 			makeDetails("single"),
-			{ keepOpen, stayOpen, timeout, session, artifact, omitSystemPrompt: params.omitSystemPrompt, label: params.agent },
+			{ keepOpen, stayOpen, timeout, session, artifact, omitSystemPrompt: params.omitSystemPrompt },
 		);
 		const isError = isFailedResult(result);
 		if (isError) {
