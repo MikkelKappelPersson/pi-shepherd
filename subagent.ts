@@ -738,7 +738,7 @@ export async function executeDelegation(
 
 /**
  * Lightweight programmatic entry: run a single subagent to completion and
- * return the final text (used by the `/pi-shepherd <agent> <task>` command).
+ * return the final text (used by the `/shepherd <agent> <task>` command).
  * Herdr-native: runs in a Herdr tab; no TUI rendering, no confirmation prompt.
  */
 export async function subagentOnce(params: {

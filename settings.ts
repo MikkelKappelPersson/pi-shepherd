@@ -4,7 +4,7 @@
  *
  * These are the *defaults* used when a tool call doesn't pass an explicit
  * value. They're read fresh from disk (with a cheap mtime cache) so edits made
- * from the `/pi-shepherd settings` popup take effect immediately.
+ * from the `/shepherd settings` popup take effect immediately.
  */
 
 import * as fs from "node:fs";

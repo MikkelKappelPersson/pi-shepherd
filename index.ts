@@ -74,10 +74,10 @@ export default function (pi: ExtensionAPI) {
 	registerSettingsCommand(pi);
 	registerSubagentStatusWidget(pi);
 
-	pi.registerCommand("pi-shepherd", {
+	pi.registerCommand("shepherd", {
 		description: "pi-shepherd: list | herd | settings | <agent> <task>",
 		// Native inline autocomplete for the subcommand slot — typing
-		// `/pi-shepherd ` shows list/herd/settings + the built-in agents in the
+		// `/shepherd ` shows list/herd/settings + the built-in agents in the
 		// writing-field menu, arrow-selectable, like pi's own /model command.
 		getArgumentCompletions: (prefix) => {
 			const options = ["list", "herd", "settings", "scout", "planner", "reviewer", "worker"];
@@ -140,7 +140,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui?.notify(
-				`pi-shepherd: try /pi-shepherd list, /pi-shepherd herd, /pi-shepherd settings, or /pi-shepherd <agent> <task>` +
+				`pi-shepherd: try /shepherd list, /shepherd herd, /shepherd settings, or /shepherd <agent> <task>` +
 					(arg ? ` (unhandled arg: ${arg})` : ""),
 				"info",
 			);

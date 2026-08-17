@@ -9,7 +9,7 @@
  * (capped at 30). Keep every label ≤ 30 visible chars so the value column
  * stays aligned.
  *
- * Commands: `/pi-shepherd settings` and the dedicated `/pi-shepherd-settings`.
+ * Commands: `/shepherd settings` and the dedicated `/shepherd-settings`.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -133,7 +133,7 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 }
 
 export function registerSettingsCommand(pi: ExtensionAPI): void {
-	pi.registerCommand("pi-shepherd-settings", {
+	pi.registerCommand("shepherd-settings", {
 		description: "pi-shepherd settings menu (inline, like /settings)",
 		handler: async (_args, ctx) => {
 			await openSettings(ctx);

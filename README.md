@@ -77,10 +77,10 @@ findings in a concise list. Do not edit files.
 
 | Command | Action |
 |---------|--------|
-| `/pi-shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
-| `/pi-shepherd list`                | List discovered agents and their source |
-| `/pi-shepherd herd`                | Herd hint (the `shepherd` tool does the work) |
-| `/pi-shepherd settings` (`/pi-shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
+| `/shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
+| `/shepherd list`                | List discovered agents and their source |
+| `/shepherd herd`                | Herd hint (the `shepherd` tool does the work) |
+| `/shepherd settings` (`/shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
 
 You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
 parallel — one on auth, one on billing"* — the model uses the `shepherd`
@@ -145,7 +145,7 @@ completion instructions, model, cwd, or tools. Resolution is explicit call
 option (including explicit `false`), then the selected agent's
 `omit-system-prompt` frontmatter, then `false`. The frontmatter value must be a
 YAML boolean (`true` or `false`); other types are ignored. The option is
-available on the `shepherd` tool; `/pi-shepherd <agent> <task>` has no separate
+available on the `shepherd` tool; `/shepherd <agent> <task>` has no separate
 option and therefore uses the agent frontmatter/default behavior. Likewise,
 `shepherd start` keeps its existing launch behavior.
 
@@ -214,12 +214,12 @@ Requirements:
 
 ## Configuration
 
-- **Settings menu** — `/pi-shepherd settings` (or `/pi-shepherd-settings`) opens
+- **Settings menu** — `/shepherd settings` (or `/shepherd-settings`) opens
   an **inline** settings list in the writing-field slot, exactly like pi's own
   `/settings`: arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc
   closes. Settings are stored at `~/.pi/agent/pi-shepherd/settings.json` and read
   fresh (no reload needed). Every `shepherd` run falls back to these
-  values when a call doesn't pass them explicitly. Typing `/pi-shepherd ` also
+  values when a call doesn't pass them explicitly. Typing `/shepherd ` also
   shows `list`/`herd`/`settings`/agents in the native autocomplete menu.
 
 ### Persisted settings (`settings.json`)
@@ -267,10 +267,10 @@ Requirements:
 
 ```
 ~/.pi/agent/extensions/pi-shepherd/
-├── index.ts          # extension entry: /pi-shepherd command + tool registration
+├── index.ts          # extension entry: /shepherd command + tool registration
 ├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
 ├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
-├── settings-ui.ts    # /pi-shepherd settings menu (inline in the editor slot, SettingsList)
+├── settings-ui.ts    # /shepherd settings menu (inline in the editor slot, SettingsList)
 ├── subagent.ts       # delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
 ├── shepherd.ts       # the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts)
 ├── herdr.ts           # Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry

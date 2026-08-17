@@ -21,7 +21,7 @@ Stack mirrors `pi-ops`:
 
 ```
 pi-shepherd/
-├── index.ts          extension entry: registers tools + /pi-shepherd command
+├── index.ts          extension entry: registers tools + /shepherd command
 ├── discovery.ts      agent discovery + VS Code frontmatter parsing (pure, testable)
 ├── subagent.ts       delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
 ├── shepherd.ts       the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts)
@@ -48,7 +48,7 @@ One tool, two surface areas exposed to the model:
 2. **`shepherd`** (custom tool) — manage pi agents already running in Herdr panes
    (list/start/prompt/status/read/close).
 
-Plus the `/pi-shepherd` slash command for listing agents and herding.
+Plus the `/shepherd` slash command for listing agents and herding.
 
 ---
 
@@ -58,8 +58,8 @@ Plus the `/pi-shepherd` slash command for listing agents and herding.
 - [x] `.gitignore` (`node_modules`, `.gk/`).
 - [ ] `tsconfig.json` — **omitted on purpose**: pi runs `.ts` directly (Bun-style) and neither `pi-ops` nor the official examples ship one. Add only if we adopt a type-check step.
 - [x] `AGENTS.md` mirroring `pi-ops`/`AGENTS.md` (runtime, invariants, conventions, testing, security).
-- [x] Stub `index.ts` registering `/pi-shepherd`.
-- **Accept**: `/pi-shepherd` command is discovered (verified via a stderr probe in headless JSON mode; UI `notify` is silent headless so use probes to confirm).
+- [x] Stub `index.ts` registering `/shepherd`.
+- **Accept**: `/shepherd` command is discovered (verified via a stderr probe in headless JSON mode; UI `notify` is silent headless so use probes to confirm).
 
 ---
 
@@ -106,7 +106,7 @@ pattern for the external locations + two bundled, with VS Code syntax.
 
 - **Accept**: ✅ `discoverAgents` returns the correct set/precedence for each
   of the four locations + bundled; `formatAgentList` shows name + source.
-  Wired into `/pi-shepherd list`; extension loads cleanly under pi (no
+  Wired into `/shepherd list`; extension loads cleanly under pi (no
   `./discovery.ts` resolve error).
 
 ---
@@ -131,7 +131,7 @@ unit of work is `runSingleAgent`, which routes to the herdr runner in `herdr.ts`
 - [x] `stayOpen` defaults to `false`; `keepOpen` remains `true` independently.
 - [x] Progress via `onProgress` (session-file tail) while the tab runs.
 - [x] Re-read agent files from disk on each invocation (`discoverAgents`).
-- [x] `subagentOnce()` helper so `/pi-shepherd <agent> <task>` uses the same
+- [x] `subagentOnce()` helper so `/shepherd <agent> <task>` uses the same
       herdr path without the tool UI.
 - **Accept**: ✅ verified live — `subagentOnce({agent: "scout", …})` created a
       "scout" tab, ran pi in it, exited via `shepherd_done`, echoed
@@ -192,7 +192,7 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 
 ## Phase 5 — Command surface & polish (`index.ts`) 🔶
 
-- [x] Register the `/pi-shepherd` command: `list`, `<agent> <task>`, `herd`.
+- [x] Register the `/shepherd` command: `list`, `<agent> <task>`, `herd`.
 - [x] Register the `shepherd` custom tool for natural-language use (delegation via `action: delegate`).
 - [x] Progress via `ctx.ui` (`setStatus`, `notify`); graceful failures.
 - [x] Herdr-native pivot: removed the subprocess fallback; delegation always
@@ -219,8 +219,8 @@ Manage pi agents living in Herdr panes via the `herdr` CLI. Also carries the
 ## Testing / verification
 
 - No unit suite; verify interactively like pi-ops:
-  - `pi --mode json -p --no-session "/pi-shepherd list"`
-  - `/pi-shepherd scout "…"` — expect a `scout` tab that runs pi, finishes with
+  - `pi --mode json -p --no-session "/shepherd list"`
+  - `/shepherd scout "…"` — expect a `scout` tab that runs pi, finishes with
     `__SHEPHERD_DONE_0__`, and leaves the tab open; then `shepherd close <pane>`.
   - Shepherd: `list` (look for the `●` marker), `start`, `prompt --wait`, `close`.
 - Add tiny fixture agent dirs under a temp cwd to exercise discovery precedence.

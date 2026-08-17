@@ -45,14 +45,14 @@ their tool permissions match yours.
 ## Architecture
 
 ```
-index.ts      extension entry: /pi-shepherd command + tool registration
+index.ts      extension entry: /shepherd command + tool registration
 subagent.ts   delegation runner: runSingleAgent / executeDelegation (single/parallel/chain) ✅
 shepherd.ts   the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts) ✅
 shepherd-done.ts  in-tab extension: shepherd_done tool + completion sidecar on agent_end ✅
 discovery.ts  agent discovery + VS Code frontmatter parsing (pure, testable) ✅
 herdr.ts       Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry ✅
 settings.ts   persisted defaults store (~/.pi/agent/pi-shepherd/settings.json, mtime-cached) ✅
-settings-ui.ts  /pi-shepherd settings menu (inline in the editor slot, SettingsList) ✅
+settings-ui.ts  /shepherd settings menu (inline in the editor slot, SettingsList) ✅
 .pi/agents/   bundled built-in subagents (pi project format)                  ✅
 .agents/agents/  bundled built-in subagents (shared/cross-tool format)        ✅
 ```
@@ -110,7 +110,7 @@ Files marked with a phase are not yet implemented (stub only). See `PLAN.md`.
 ## Testing / verification
 
 - **No unit suite.** Verify interactively as features land:
-  - `pi --mode json -p --no-session "/pi-shepherd list"`
+  - `pi --mode json -p --no-session "/shepherd list"`
   - Once Phase 1 lands, add tiny fixture agent dirs under a temp cwd to
     exercise discovery precedence across the four locations.
   - Herd (Phase 4): verify against a running Herdr server; `shepherd list`, `start`,
