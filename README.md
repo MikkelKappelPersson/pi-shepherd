@@ -63,9 +63,27 @@ Waiting never closes an agent.
 | `read` | Read recent output for diagnostics |
 | `gc` | Prune stale pi-shepherd pane registrations |
 
-Handles are opaque, stable serialized IDs. Callers should never construct
-handles from raw pane IDs. `close` refuses any pane not recorded in the
-pi-shepherd created-pane registry.
+Handles are opaque, stable values returned in the tool result's `details`.
+Pass the complete `details.handle` value to later actions; do not reconstruct
+handles from raw pane IDs. At the tool boundary, an agent or prompt handle may
+be supplied as the returned object, as `JSON.stringify(handle)`, or as its
+opaque `id`. The object form is preferred and the JSON form is useful for CLI
+or text transports. For example:
+
+```json
+{
+  "action": "prompt",
+  "handle": {
+    "id": "shepherd-agent-...",
+    "agent": "worker",
+    "paneId": "..."
+  },
+  "message": "Say hi"
+}
+```
+
+Do not pass a different field such as `name`, `task`, or a raw Herdr pane ID.
+`close` refuses any pane not recorded in the pi-shepherd created-pane registry.
 
 ## Agent discovery and security
 

@@ -26,11 +26,19 @@ export interface AgentHandle {
 	workspaceId?: string;
 }
 
+/**
+ * Handle values crossing the model/tool boundary may be the returned object,
+ * its JSON.stringify() form, or the opaque id itself.
+ */
+export type AgentHandleInput = AgentHandle | string;
+
 export interface PromptHandle {
 	id: string;
 	agentId: string;
 	createdAt: number;
 }
+
+export type PromptHandleInput = PromptHandle | string;
 
 export interface AgentStatus {
 	handle: AgentHandle;
@@ -81,6 +89,29 @@ interface PromptRecord {
  * In-memory registry for one extension process. IDs are opaque and include a
  * random component, so callers never need to know Herdr pane identifiers.
  */
+function handleId(input: unknown, kind: "AgentHandle" | "PromptHandle"): string {
+	let value = input;
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (!trimmed) throw new LifecycleError("invalid_handle", `${kind} must not be empty.`);
+		try {
+			const parsed: unknown = JSON.parse(trimmed);
+			if (parsed !== null && typeof parsed === "object") value = parsed;
+			else return trimmed;
+		} catch {
+			// A plain string is treated as the opaque handle id below.
+			return trimmed;
+		}
+	}
+	if (!value || typeof value !== "object" || typeof (value as { id?: unknown }).id !== "string") {
+		throw new LifecycleError(
+			"invalid_handle",
+			`Expected a ${kind} object, JSON-encoded ${kind}, or opaque handle id.`,
+		);
+	}
+	return (value as { id: string }).id;
+}
+
 export class LifecycleRegistry {
 	private readonly sessionId = randomUUID().slice(0, 8);
 	private readonly agents = new Map<string, AgentRecord>();
@@ -96,16 +127,18 @@ export class LifecycleRegistry {
 		return { ...handle };
 	}
 
-	getAgent(handle: AgentHandle): AgentRecord {
-		if (!handle || typeof handle.id !== "string") {
-			throw new LifecycleError("invalid_handle", "A serialized AgentHandle is required.");
-		}
-		const record = this.agents.get(handle.id);
-		if (!record) throw new LifecycleError("unknown_handle", `Unknown agent handle "${handle.id}".`);
+	getAgent(input: AgentHandleInput | unknown): AgentRecord {
+		const id = handleId(input, "AgentHandle");
+		const record = this.agents.get(id);
+		if (!record) throw new LifecycleError("unknown_handle", `Unknown agent handle "${id}".`);
 		return record;
 	}
 
-	status(handle: AgentHandle, state?: AgentLifecycleState, error?: string): AgentStatus {
+	canonicalAgentHandle(input: AgentHandleInput | unknown): AgentHandle {
+		return { ...this.getAgent(input).handle };
+	}
+
+	status(handle: AgentHandleInput, state?: AgentLifecycleState, error?: string): AgentStatus {
 		const record = this.getAgent(handle);
 		if (state) record.state = state;
 		if (error) record.error = error;
@@ -116,21 +149,22 @@ export class LifecycleRegistry {
 		};
 	}
 
-	setAgentState(handle: AgentHandle, state: AgentLifecycleState, error?: string): void {
+	setAgentState(handle: AgentHandleInput, state: AgentLifecycleState, error?: string): void {
 		const record = this.getAgent(handle);
 		record.state = state;
 		record.error = error;
 	}
 
-	createPrompt(handle: AgentHandle, timeoutMs?: number, baselineStateChangeSeq?: number): PromptHandle {
+	createPrompt(handle: AgentHandleInput, timeoutMs?: number, baselineStateChangeSeq?: number): PromptHandle {
 		const agent = this.getAgent(handle);
-		if (agent.state === "closed") throw new LifecycleError("closed_handle", `Agent "${handle.id}" is closed.`);
+		const agentId = agent.handle.id;
+		if (agent.state === "closed") throw new LifecycleError("closed_handle", `Agent "${agentId}" is closed.`);
 		if (agent.activePromptId) {
-			throw new LifecycleError("active_prompt", `Agent "${handle.id}" already has an unresolved prompt.`);
+			throw new LifecycleError("active_prompt", `Agent "${agentId}" already has an unresolved prompt.`);
 		}
 		let resolve!: (result: PromptResult) => void;
 		const promise = new Promise<PromptResult>((r) => (resolve = r));
-		const prompt: PromptHandle = { id: this.id("prompt"), agentId: handle.id, createdAt: Date.now() };
+		const prompt: PromptHandle = { id: this.id("prompt"), agentId, createdAt: Date.now() };
 		this.prompts.set(prompt.id, { handle: prompt, baselineStateChangeSeq, observedWorking: false, settled: false, resolve, promise });
 		agent.activePromptId = prompt.id;
 		agent.state = "working";
@@ -143,14 +177,18 @@ export class LifecycleRegistry {
 		return { ...prompt };
 	}
 
-	getPrompt(handle: PromptHandle): PromptRecord {
-		if (!handle || typeof handle.id !== "string") throw new LifecycleError("invalid_handle", "A serialized PromptHandle is required.");
-		const record = this.prompts.get(handle.id);
-		if (!record) throw new LifecycleError("unknown_handle", `Unknown prompt handle "${handle.id}".`);
+	getPrompt(input: PromptHandleInput | unknown): PromptRecord {
+		const id = handleId(input, "PromptHandle");
+		const record = this.prompts.get(id);
+		if (!record) throw new LifecycleError("unknown_handle", `Unknown prompt handle "${id}".`);
 		return record;
 	}
 
-	wait(handle: PromptHandle): Promise<PromptResult> {
+	canonicalPromptHandle(input: PromptHandleInput | unknown): PromptHandle {
+		return { ...this.getPrompt(input).handle };
+	}
+
+	wait(handle: PromptHandleInput | unknown): Promise<PromptResult> {
 		return this.getPrompt(handle).promise;
 	}
 

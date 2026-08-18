@@ -114,12 +114,12 @@ async function doAction(
 		case "start": {
 			const a: any = args;
 			const handle = await startAgent(a.agent, a, ctx);
-			return textResult(`Started idle agent ${a.agent} (${handle.id}).`, { handle });
+			return textResult(`Started idle agent ${a.agent} (${handle.id}). Use details.handle for prompt, status, and close; pass it as an object, JSON text, or its id.`, { handle });
 		}
 		case "prompt": {
 			const a: any = args;
 			const handle = await promptAgent(a.handle, a.message, { timeout: a.timeout });
-			return textResult(`Prompt submitted (${handle.id}); call wait with this handle.`, { handle });
+			return textResult(`Prompt submitted (${handle.id}); call wait with this handle. Pass the complete details.handle object (or its JSON form/id) to the next action.`, { handle });
 		}
 		case "wait": {
 			const a: any = args;
@@ -133,8 +133,8 @@ async function doAction(
 		}
 		case "close": {
 			const a: any = args;
-			closeAgent(a.handle);
-			return textResult(`Closed agent ${a.handle.id}.`, { handle: a.handle });
+			const handle = closeAgent(a.handle);
+			return textResult(`Closed agent ${handle.id}.`, { handle });
 		}
 		case "agents": {
 			// List discovered agent definitions (for delegation).

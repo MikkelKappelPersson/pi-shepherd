@@ -4,7 +4,10 @@ import {
  waitForHerdrAgentDetected, launchPiInPane, herdrExec, herdrExecSync,
  loadCreatedPanes, paneExists, removeCreatedPaneDir, readPaneTail,
 } from "./herdr.ts";
-import { lifecycleRegistry, type AgentHandle, type PromptHandle, type PromptResult, type AgentStatus } from "./orchestration.ts";
+import {
+ lifecycleRegistry, type AgentHandle, type AgentHandleInput, type PromptHandle, type PromptHandleInput,
+ type PromptResult, type AgentStatus,
+} from "./orchestration.ts";
 
 export interface StartOptions { cwd?: string; model?: string; agentScope?: AgentScope; confirmProjectAgents?: boolean; omitSystemPrompt?: boolean; timeout?: number; }
 
@@ -31,12 +34,13 @@ export async function startAgent(name: string, options: StartOptions = {}, ctx: 
  }
 }
 
-export async function promptAgent(handle: AgentHandle, message: string, options: { timeout?: number } = {}): Promise<PromptHandle> {
+export async function promptAgent(handle: AgentHandleInput, message: string, options: { timeout?: number } = {}): Promise<PromptHandle> {
  if (!message.trim()) throw new Error("Prompt message must not be empty.");
- const record = lifecycleRegistry.getAgent(handle);
+ const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
+ const record = lifecycleRegistry.getAgent(canonical);
  if (!record.handle.paneId) throw new Error("Agent handle has no pane.");
  const detected = await waitForHerdrAgentDetected(record.handle.paneId, { timeoutMs: Math.min(options.timeout ?? 120000, 15000) });
- if (!detected.detected) throw new Error(`Agent "${handle.id}" is not detected.`);
+ if (!detected.detected) throw new Error(`Agent "${canonical.id}" is not detected.`);
  // Reserve the single active slot before submission, so concurrent callers
  // cannot both pass validation. Failed submission is settled immediately and
  // never returned as a usable handle.
@@ -46,7 +50,7 @@ export async function promptAgent(handle: AgentHandle, message: string, options:
   const seq = before?.result?.agent?.state_change_seq;
   if (typeof seq === "number") baselineStateChangeSeq = seq;
  } catch {}
- const prompt = lifecycleRegistry.createPrompt(handle, options.timeout, baselineStateChangeSeq);
+ const prompt = lifecycleRegistry.createPrompt(canonical, options.timeout, baselineStateChangeSeq);
  try {
   // No --wait: submission returns as soon as Herdr accepts the message.
   await herdrExec(["agent", "prompt", record.handle.paneId, message]);
@@ -57,41 +61,42 @@ export async function promptAgent(handle: AgentHandle, message: string, options:
  }
 }
 
-async function waitOne(handle: PromptHandle, timeoutMs = 120000): Promise<PromptResult> {
+async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<PromptResult> {
  const failed = (error: unknown): PromptResult => ({
-  promptId: typeof handle?.id === "string" ? handle.id : "unknown",
-  agentId: typeof handle?.agentId === "string" ? handle.agentId : "unknown",
+  promptId: typeof handle === "object" && handle && typeof handle.id === "string" ? handle.id : "unknown",
+  agentId: typeof handle === "object" && handle && typeof handle.agentId === "string" ? handle.agentId : "unknown",
   status: "failed", ok: false, error: String((error as any)?.message ?? error),
  });
  try {
-  const record = lifecycleRegistry.getPrompt(handle);
-  if (record.settled) return lifecycleRegistry.wait(handle);
-  const agent = lifecycleRegistry.getAgent({ id: handle.agentId } as AgentHandle);
+  const canonical = lifecycleRegistry.canonicalPromptHandle(handle);
+  const record = lifecycleRegistry.getPrompt(canonical);
+  if (record.settled) return lifecycleRegistry.wait(canonical);
+  const agent = lifecycleRegistry.getAgent({ id: canonical.agentId } as AgentHandle);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
    try {
     const out: any = herdrExecSync(["agent", "get", agent.handle.paneId!]);
     const state = String(out?.result?.agent?.agent_status ?? "unknown").toLowerCase();
     const seq = out?.result?.agent?.state_change_seq;
-    const tracking = lifecycleRegistry.promptTracking(handle);
-    if (state === "working") lifecycleRegistry.observeWorking(handle);
+    const tracking = lifecycleRegistry.promptTracking(canonical);
+    if (state === "working") lifecycleRegistry.observeWorking(canonical);
     const sequenceAdvanced = tracking.baselineStateChangeSeq === undefined || (typeof seq === "number" && seq !== tracking.baselineStateChangeSeq);
     // An idle/done state observed before this submission is not completion.
     // Require a post-submit state transition or a working observation first.
     if (["idle", "done", "blocked"].includes(state) && (tracking.observedWorking || sequenceAdvanced)) {
      const text = agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : "";
-     return lifecycleRegistry.settlePrompt(handle, { promptId: handle.id, agentId: handle.agentId, status: state === "blocked" ? "blocked" : state === "done" ? "done" : "idle", ok: state !== "blocked", text });
+     return lifecycleRegistry.settlePrompt(canonical, { promptId: canonical.id, agentId: canonical.agentId, status: state === "blocked" ? "blocked" : state === "done" ? "done" : "idle", ok: state !== "blocked", text });
     }
    } catch {}
    await new Promise(r => setTimeout(r, 500));
   }
-  return lifecycleRegistry.settlePrompt(handle, { promptId: handle.id, agentId: handle.agentId, status: "timeout", ok: false, error: "Timed out waiting for agent." });
+  return lifecycleRegistry.settlePrompt(canonical, { promptId: canonical.id, agentId: canonical.agentId, status: "timeout", ok: false, error: "Timed out waiting for agent." });
  } catch (error) {
   return failed(error);
  }
 }
 
-export async function waitPrompts(handles: PromptHandle | PromptHandle[], options: { timeout?: number } = {}): Promise<PromptResult | PromptResult[]> {
+export async function waitPrompts(handles: PromptHandleInput | PromptHandleInput[], options: { timeout?: number } = {}): Promise<PromptResult | PromptResult[]> {
  const timeout = options.timeout ?? 120000;
  if (Array.isArray(handles)) {
   // Promise.all is intentionally concurrent and preserves input order. Each
@@ -102,21 +107,24 @@ export async function waitPrompts(handles: PromptHandle | PromptHandle[], option
  return waitOne(handles, timeout);
 }
 
-export function statusAgent(handle: AgentHandle): AgentStatus {
- const status = lifecycleRegistry.status(handle);
- if (status.state === "closed" || !handle.paneId) return status;
+export function statusAgent(handle: AgentHandleInput): AgentStatus {
+ const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
+ const status = lifecycleRegistry.status(canonical);
+ if (status.state === "closed" || !canonical.paneId) return status;
  try {
-  const rec: any = (herdrExecSync(["agent", "get", handle.paneId]) as any)?.result?.agent;
+  const rec: any = (herdrExecSync(["agent", "get", canonical.paneId]) as any)?.result?.agent;
   const state = String(rec?.agent_status ?? "unknown").toLowerCase();
   const mapped = ["idle", "working", "blocked", "done"].includes(state) ? state as any : "unknown";
-  return { ...status, state: mapped, paneId: rec?.pane_id ?? handle.paneId, tabId: rec?.tab_id ?? handle.tabId, workspaceId: rec?.workspace_id ?? handle.workspaceId };
- } catch { return { ...status, state: paneExists(handle.paneId) ? "unknown" : "failed" }; }
+  return { ...status, state: mapped, paneId: rec?.pane_id ?? canonical.paneId, tabId: rec?.tab_id ?? canonical.tabId, workspaceId: rec?.workspace_id ?? canonical.workspaceId };
+ } catch { return { ...status, state: paneExists(canonical.paneId) ? "unknown" : "failed" }; }
 }
 
-export function closeAgent(handle: AgentHandle): void {
- const record = lifecycleRegistry.getAgent(handle);
+export function closeAgent(handle: AgentHandleInput): AgentHandle {
+ const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
+ const record = lifecycleRegistry.getAgent(canonical);
  if (!record.handle.paneId || !loadCreatedPanes().some(p => p.paneId === record.handle.paneId)) throw new Error("Refusing to close an unowned pane.");
- lifecycleRegistry.close(handle);
+ lifecycleRegistry.close(canonical);
  try { herdrExecSync(["pane", "close", record.handle.paneId]); } catch { if (paneExists(record.handle.paneId)) throw new Error("Could not close agent pane."); }
  if (!paneExists(record.handle.paneId)) removeCreatedPaneDir(record.handle.paneId);
+ return canonical;
 }
