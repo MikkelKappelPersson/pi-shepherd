@@ -15,6 +15,11 @@ const preparedArray = prepareShepherdArguments({
 });
 assert(JSON.stringify(preparedArray.handle) === JSON.stringify([{ id: "prompt-1", agentId: "agent-1", createdAt: 1 }]), "stringified handle array is normalized before validation");
 assert(prepareShepherdArguments({ action: "prompt", handle: { id: "agent-1" }, message: "say hi" }).handle.id === "agent-1", "native handle is preserved");
+const normalizedOptions = prepareShepherdArguments({
+ action: "start", agent: "worker", confirmProjectAgents: "False", omitSystemPrompt: "True", timeout: "120000",
+});
+assert(normalizedOptions.confirmProjectAgents === false && normalizedOptions.omitSystemPrompt === true, "stringified booleans are normalized");
+assert(normalizedOptions.timeout === 120000, "stringified integer is normalized");
 
 const registry = new LifecycleRegistry();
 const agent = registry.registerAgent({ agent: "scout", paneId: "owned-pane" });

@@ -63,12 +63,20 @@ Waiting never closes an agent.
 | `read` | Read recent output for diagnostics |
 | `gc` | Prune stale pi-shepherd pane registrations |
 
+`read` accepts an agent name, a Herdr pane id such as `w9:p18`, or a recorded
+Shepherd pane id. Herdr's opaque internal pane handle (for example, `pane-14`)
+is not a pane target and cannot be read. `recent` and `recent-unwrapped` may
+return empty output for idle panes with no scrollback; use `visible` for the
+current viewport or `detection` for Herdr's detection view.
+
 Handles are stable objects returned in the tool result's `details.handle`.
 The canonical handle syntax is to pass that complete native object unchanged
 to the next lifecycle action. Do not pass only its `id`, manually JSON-encode it,
 or reconstruct it from raw Herdr pane IDs. The model-facing tool has a narrow
 transport-compatibility step that recovers when a provider encodes the nested
-`handle` field as JSON text before validation. For example:
+`handle` field as JSON text before validation. It also normalizes stringified
+boolean and integer option values from transports that incorrectly serialize
+primitive arguments; native JSON booleans and numbers remain preferred. For example:
 
 ```json
 {

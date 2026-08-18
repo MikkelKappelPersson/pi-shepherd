@@ -18,6 +18,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { AgentScopeSchema, StartParams, LifecyclePromptParams, WaitParams, LifecycleStatusParams, LifecycleCloseParams } from "./types.ts";
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from "./lifecycle.ts";
+import { lifecycleRegistry } from "./orchestration.ts";
 import type { DelegatorModel } from "./discovery.ts";
 import { discoverAgents, formatAgentList } from "./discovery.ts";
 import {
@@ -57,7 +58,7 @@ const AgentsParams = Type.Object({
 });
 const ReadParams = Type.Object({
 	action: Type.Literal("read", { description: "Read recent terminal output from a pane or agent." }),
-	name: Type.String({ description: "Name or pane id of the target agent." }),
+	name: Type.String({ description: "Agent name, Herdr pane id, or AgentHandle id of the target." }),
 	lines: Type.Optional(Type.Integer({ description: "Number of recent lines for read (default 40)", default: 40 })),
 	source: Type.Optional(SourceSchema),
 });
@@ -84,22 +85,40 @@ type ShepherdArgs = Static<typeof ShepherdParams>;
 
 /**
  * Some model/provider tool-call transports encode nested JSON objects as a
- * string. Pi validates arguments after this hook, so normalize only the
- * lifecycle `handle` field here while keeping the public schema object-only.
- * This preserves native handles as the canonical form and avoids weakening
- * the schema to accept arbitrary strings.
+ * string. Pi validates arguments after this hook, so normalize only known
+ * transport-serialization artifacts here while keeping the public schema
+ * strict and object-only for handles. Native handles and primitive values
+ * remain the canonical form.
  */
 export function prepareShepherdArguments(input: unknown): ShepherdArgs {
 	if (!input || typeof input !== "object" || Array.isArray(input)) return input as ShepherdArgs;
 	const args = { ...(input as Record<string, unknown>) };
 	const handle = args.handle;
-	if (typeof handle !== "string") return args as ShepherdArgs;
-	try {
-		const parsed: unknown = JSON.parse(handle);
-		if (parsed && typeof parsed === "object") args.handle = parsed;
-	} catch {
-		// Leave malformed strings untouched so normal schema validation reports a
-		// useful object/array type error rather than hiding the bad call.
+	if (typeof handle === "string") {
+		try {
+			const parsed: unknown = JSON.parse(handle);
+			if (parsed && typeof parsed === "object") args.handle = parsed;
+		} catch {
+			// Leave malformed strings untouched so normal schema validation reports a
+			// useful object/array type error rather than hiding the bad call.
+		}
+	}
+
+	// A few tool transports stringify primitive JSON values (and some emit
+	// Python-style `True`/`False`). Recover only the fields whose schemas are
+	// explicitly boolean/integer; leave all other strings alone so validation
+	// remains strict. Native values are copied unchanged.
+	for (const name of ["confirmProjectAgents", "omitSystemPrompt"]) {
+		const value = args[name];
+		if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) {
+			args[name] = value.trim().toLowerCase() === "true";
+		}
+	}
+	for (const name of ["timeout", "lines"]) {
+		const value = args[name];
+		if (typeof value === "string" && /^[-+]?\d+$/.test(value.trim())) {
+			args[name] = Number(value.trim());
+		}
 	}
 	return args as ShepherdArgs;
 }
@@ -269,7 +288,19 @@ async function doAction(
 			// prompt/close) so `read scout` works after a lifecycle start.
 			const created = loadCreatedPanes();
 			const match = created.find((p) => p.paneId === target || p.name === target);
-			const resolved = match?.paneId ?? target;
+			let resolved = match?.paneId ?? target;
+			// Diagnostics are often invoked from the lifecycle result, where the
+			// caller has the opaque AgentHandle id rather than the Herdr pane id.
+			// Resolve that id only through our in-memory registry; never guess a
+			// pane from an arbitrary id.
+			if (!match) {
+				try {
+					resolved = lifecycleRegistry.getAgent({ id: target }).handle.paneId ?? target;
+				} catch {
+					// Keep the original target so Herdr returns the useful not-found
+					// error for unknown names/panes.
+				}
+			}
 			try {
 				const { stdout } = await execFileAsync(
 					"herdr",
