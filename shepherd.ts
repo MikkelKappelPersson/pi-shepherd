@@ -122,6 +122,87 @@ function previewText(value: unknown, maxLength = 40): string {
 	return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+/** Render opaque lifecycle handles as CLI-like ids instead of [object Object]. */
+function handlePreview(value: unknown, maxLength = 40): string {
+	if (Array.isArray(value)) {
+		return `[${value.map((item) => handlePreview(item, maxLength)).join(", ")}]`;
+	}
+
+	if (value && typeof value === "object" && "id" in value) {
+		return previewText((value as { id?: unknown }).id, maxLength);
+	}
+
+	// A few providers serialize nested handle arguments before they reach the
+	// renderer. Keep the display useful even though prepareArguments normalizes
+	// them before execution.
+	if (typeof value === "string") {
+		try {
+			const parsed: unknown = JSON.parse(value);
+			if (parsed && typeof parsed === "object") return handlePreview(parsed, maxLength);
+		} catch {
+			// It may simply be an id, so fall through.
+		}
+	}
+
+	return previewText(value, maxLength);
+}
+
+/** Quote values that would otherwise be ambiguous in a command-like preview. */
+function cliValue(value: unknown, maxLength = 80): string {
+	const text = previewText(value, maxLength);
+	return /[\s"'=]/.test(text) ? JSON.stringify(text) : text;
+}
+
+function cliOption(name: string, value: unknown, maxLength = 80): string {
+	if (value === undefined || value === null) return "";
+	return `--${name}=${cliValue(value, maxLength)}`;
+}
+
+/**
+ * Show the actual supplied arguments in a compact, CLI-like form. Defaults
+ * that were not supplied by the model are intentionally omitted; this makes
+ * options such as --timeout visible without dumping handle implementation
+ * details (paneId, tabId, workspaceId).
+ */
+function shepherdCallPreview(args: Record<string, any>, expanded = false): string {
+	const valueLimit = expanded ? Number.POSITIVE_INFINITY : 80;
+	const idLimit = expanded ? Number.POSITIVE_INFINITY : 48;
+	const tokens = ["shepherd", String(args.action ?? "list")];
+	const add = (name: string) => {
+		const option = cliOption(name, args[name], valueLimit);
+		if (option) tokens.push(option);
+	};
+
+	switch (args.action) {
+		case "start":
+			tokens.push(cliValue(args.agent, valueLimit));
+			for (const name of ["agentScope", "confirmProjectAgents", "cwd", "model", "omitSystemPrompt", "timeout"]) add(name);
+			break;
+		case "prompt":
+			tokens.push(handlePreview(args.handle, idLimit));
+			if (args.message !== undefined) tokens.push(cliValue(args.message, valueLimit));
+			add("timeout");
+			break;
+		case "wait":
+			tokens.push(handlePreview(args.handle, idLimit));
+			add("timeout");
+			break;
+		case "status":
+		case "close":
+			tokens.push(handlePreview(args.handle, idLimit));
+			break;
+		case "agents":
+			add("agentScope");
+			break;
+		case "read":
+			tokens.push(cliValue(args.name, valueLimit));
+			for (const name of ["lines", "source"]) add(name);
+			break;
+	}
+
+	return tokens.filter(Boolean).join(" ");
+}
+
 function reusableText(lastComponent: unknown): Text {
 	return lastComponent instanceof Text ? lastComponent : new Text("", 0, 0);
 }
@@ -282,14 +363,14 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme, context) {
-			const action = args.action ?? "list";
-			const target = args.agent || args.name || args.handle ? ` ${previewText(args.agent || args.name || args.handle)}` : "";
-			const extra = action === "prompt" ? (previewText(args.message) ? ` "${previewText(args.message)}"` : "") : "";
+			const action = String(args.action ?? "list");
+			const command = shepherdCallPreview(args as Record<string, any>, context.expanded);
+			const prefix = `shepherd ${action}`;
 			const component = reusableText(context.lastComponent);
 			component.setText(
 				theme.fg("toolTitle", theme.bold("shepherd ")) +
 					theme.fg("accent", action) +
-					theme.fg("dim", `${target}${extra}`),
+					theme.fg("dim", command.slice(prefix.length)),
 			);
 			return component;
 		},
