@@ -19,13 +19,19 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { renameSync, writeFileSync } from "node:fs";
 
 function writeSidecar(payload: Record<string, unknown>): void {
 	const sessionFile = process.env.PI_SHEPHERD_SESSION;
 	if (!sessionFile) return;
 	try {
-		writeFileSync(`${sessionFile}.exit`, JSON.stringify(payload));
+		// A unique signal makes repeated `done` payloads distinguishable across
+		// prompts. Rename is atomic, so the parent never parses a partial JSON file.
+		const target = `${sessionFile}.exit`;
+		const temporary = `${target}.${randomUUID()}.tmp`;
+		writeFileSync(temporary, JSON.stringify({ ...payload, signalId: randomUUID() }));
+		renameSync(temporary, target);
 	} catch {
 		// Best effort — the parent can still detect the terminal sentinel.
 	}
@@ -65,7 +71,9 @@ export default function (pi: ExtensionAPI) {
 	const stayOpen = process.env.PI_SHEPHERD_STAY_OPEN === "1";
 
 	pi.on("agent_end", (event: any, ctx: { shutdown: () => void }) => {
-		if (!autoExit) return;
+		// Persistent shepherd agents stay alive, but must still publish a
+		// completion signal for the parent. One-shot agents publish it and exit.
+		if (!autoExit && !stayOpen) return;
 		const outcome = latestAssistantOutcome(event?.messages);
 		if (!outcome.exit) return; // aborted / no assistant turn — leave open.
 		if (outcome.error) writeSidecar({ type: "error", errorMessage: outcome.error.errorMessage });

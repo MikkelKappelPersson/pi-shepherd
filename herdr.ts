@@ -541,6 +541,22 @@ export async function waitForHerdrAgentDetected(
 	return { detected: false, state };
 }
 
+export interface CompletionSignal {
+	type?: string;
+	errorMessage?: string;
+	signalId?: string;
+}
+
+/** Read the latest atomic completion signal emitted by the child. */
+export function readCompletionSignal(signalPath: string): CompletionSignal | undefined {
+	try {
+		const value = JSON.parse(fs.readFileSync(signalPath, "utf8"));
+		return value && typeof value === "object" ? value as CompletionSignal : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export async function readPaneTail(paneId: string): Promise<string> {
 	try {
 		const { stdout } = await execFileAsync(

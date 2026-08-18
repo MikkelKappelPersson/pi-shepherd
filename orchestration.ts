@@ -70,6 +70,8 @@ export class LifecycleError extends Error {
 
 interface AgentRecord {
 	handle: AgentHandle;
+	/** Completion sidecar emitted by the child for each completed prompt. */
+	completionSignalPath?: string;
 	state: AgentLifecycleState;
 	activePromptId?: string;
 	error?: string;
@@ -79,6 +81,8 @@ interface PromptRecord {
 	handle: PromptHandle;
 	/** Herdr state sequence before submission; prevents matching pre-submit idle. */
 	baselineStateChangeSeq?: number;
+	/** Completion sidecar signal before submission; detects fast completions. */
+	baselineCompletionSignalId?: string;
 	observedWorking: boolean;
 	result?: PromptResult;
 	settled: boolean;
@@ -112,9 +116,9 @@ export class LifecycleRegistry {
 		return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
 	}
 
-	registerAgent(input: Omit<AgentHandle, "id">): AgentHandle {
+	registerAgent(input: Omit<AgentHandle, "id">, metadata: { completionSignalPath?: string } = {}): AgentHandle {
 		const handle = { ...input, id: this.id("agent") };
-		this.agents.set(handle.id, { handle, state: "idle" });
+		this.agents.set(handle.id, { handle, completionSignalPath: metadata.completionSignalPath, state: "idle" });
 		return { ...handle };
 	}
 
@@ -146,7 +150,7 @@ export class LifecycleRegistry {
 		record.error = error;
 	}
 
-	createPrompt(handle: AgentHandleInput, timeoutMs?: number, baselineStateChangeSeq?: number): PromptHandle {
+	createPrompt(handle: AgentHandleInput, timeoutMs?: number, baselineStateChangeSeq?: number, baselineCompletionSignalId?: string): PromptHandle {
 		const agent = this.getAgent(handle);
 		const agentId = agent.handle.id;
 		if (agent.state === "closed") throw new LifecycleError("closed_handle", `Agent "${agentId}" is closed.`);
@@ -156,7 +160,7 @@ export class LifecycleRegistry {
 		let resolve!: (result: PromptResult) => void;
 		const promise = new Promise<PromptResult>((r) => (resolve = r));
 		const prompt: PromptHandle = { id: this.id("prompt"), agentId, createdAt: Date.now() };
-		this.prompts.set(prompt.id, { handle: prompt, baselineStateChangeSeq, observedWorking: false, settled: false, resolve, promise });
+		this.prompts.set(prompt.id, { handle: prompt, baselineStateChangeSeq, baselineCompletionSignalId, observedWorking: false, settled: false, resolve, promise });
 		agent.activePromptId = prompt.id;
 		agent.state = "working";
 		if (timeoutMs !== undefined && timeoutMs >= 0) {
@@ -183,9 +187,17 @@ export class LifecycleRegistry {
 		return this.getPrompt(handle).promise;
 	}
 
-	promptTracking(handle: PromptHandle): { baselineStateChangeSeq?: number; observedWorking: boolean } {
+	completionSignalPath(handle: AgentHandleInput): string | undefined {
+		return this.getAgent(handle).completionSignalPath;
+	}
+
+	promptTracking(handle: PromptHandle): { baselineStateChangeSeq?: number; baselineCompletionSignalId?: string; observedWorking: boolean } {
 		const record = this.getPrompt(handle);
-		return { baselineStateChangeSeq: record.baselineStateChangeSeq, observedWorking: record.observedWorking };
+		return {
+			baselineStateChangeSeq: record.baselineStateChangeSeq,
+			baselineCompletionSignalId: record.baselineCompletionSignalId,
+			observedWorking: record.observedWorking,
+		};
 	}
 
 	observeWorking(handle: PromptHandle): void {

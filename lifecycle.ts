@@ -1,8 +1,8 @@
 import { discoverAgents, type AgentScope } from "./discovery.ts";
 import {
  ensureHerdrRuntime, getHerdrWorkspaceId, createHerdrTab, waitForHerdrShellReady,
- waitForHerdrAgentDetected, launchPiInPane, herdrExec, herdrExecSync,
- loadCreatedPanes, paneExists, removeCreatedPaneDir, readPaneTail,
+ waitForHerdrAgentDetected, launchPiInPane, setCreatedPaneDir, herdrExec, herdrExecSync,
+ loadCreatedPanes, paneExists, removeCreatedPaneDir, readPaneTail, readCompletionSignal,
 } from "./herdr.ts";
 import {
  lifecycleRegistry, type AgentHandle, type AgentHandleInput, type PromptHandle, type PromptHandleInput,
@@ -23,10 +23,13 @@ export async function startAgent(name: string, options: StartOptions = {}, ctx: 
  const { paneId, tabId } = createHerdrTab(name, cwd, getHerdrWorkspaceId());
  try {
   await waitForHerdrShellReady(paneId, { timeoutMs: options.timeout ?? 15000 });
-  launchPiInPane(paneId, { name, persistent: true, systemPrompt: found.systemPrompt, omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt, model: options.model ?? found.model, tools: found.tools });
+  const files = launchPiInPane(paneId, { name, persistent: true, systemPrompt: found.systemPrompt, omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt, model: options.model ?? found.model, tools: found.tools });
+  setCreatedPaneDir(paneId, files.dir);
+  // Keep the launch directory registered while the persistent child is alive;
+  // its completion sidecar is also the reliable fast-completion signal.
   const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: options.timeout ?? 20000 });
   if (!ready.detected) throw new Error(`Agent "${name}" did not become ready.`);
-  return lifecycleRegistry.registerAgent({ agent: name, paneId, tabId, workspaceId: getHerdrWorkspaceId() });
+  return lifecycleRegistry.registerAgent({ agent: name, paneId, tabId, workspaceId: getHerdrWorkspaceId() }, { completionSignalPath: `${files.sessionFile}.exit` });
  } catch (error) {
   try { herdrExecSync(["pane", "close", paneId]); } catch {}
   if (!paneExists(paneId)) removeCreatedPaneDir(paneId);
@@ -50,7 +53,9 @@ export async function promptAgent(handle: AgentHandleInput, message: string, opt
   const seq = before?.result?.agent?.state_change_seq;
   if (typeof seq === "number") baselineStateChangeSeq = seq;
  } catch {}
- const prompt = lifecycleRegistry.createPrompt(canonical, options.timeout, baselineStateChangeSeq);
+ const signalPath = lifecycleRegistry.completionSignalPath(canonical);
+ const baselineCompletionSignalId = signalPath ? readCompletionSignal(signalPath)?.signalId : undefined;
+ const prompt = lifecycleRegistry.createPrompt(canonical, options.timeout, baselineStateChangeSeq, baselineCompletionSignalId);
  try {
   // No --wait: submission returns as soon as Herdr accepts the message.
   await herdrExec(["agent", "prompt", record.handle.paneId, message]);
@@ -72,6 +77,7 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
   const record = lifecycleRegistry.getPrompt(canonical);
   if (record.settled) return lifecycleRegistry.wait(canonical);
   const agent = lifecycleRegistry.getAgent({ id: canonical.agentId } as AgentHandle);
+  const signalPath = lifecycleRegistry.completionSignalPath(agent.handle);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
    try {
@@ -80,6 +86,13 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
     const seq = out?.result?.agent?.state_change_seq;
     const tracking = lifecycleRegistry.promptTracking(canonical);
     if (state === "working") lifecycleRegistry.observeWorking(canonical);
+    const signal = signalPath ? readCompletionSignal(signalPath) : undefined;
+    const signalAdvanced = Boolean(signal?.signalId && signal.signalId !== tracking.baselineCompletionSignalId);
+    if (signalAdvanced) {
+     const text = agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : "";
+     const failedSignal = signal?.type === "error";
+     return lifecycleRegistry.settlePrompt(canonical, { promptId: canonical.id, agentId: canonical.agentId, status: failedSignal ? "failed" : "done", ok: !failedSignal, text, ...(failedSignal && signal?.errorMessage ? { error: signal.errorMessage } : {}) });
+    }
     const sequenceAdvanced = tracking.baselineStateChangeSeq === undefined || (typeof seq === "number" && seq !== tracking.baselineStateChangeSeq);
     // An idle/done state observed before this submission is not completion.
     // Require a post-submit state transition or a working observation first.
