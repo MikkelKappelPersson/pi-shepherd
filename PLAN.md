@@ -33,7 +33,7 @@ modes. A one-shot operation is explicitly `start + prompt + wait + close`.
 
 ## Completed implementation
 
-- Agent and prompt handles are stable session-scoped objects returned in tool details; the tool accepts only those complete objects (or a native array of complete prompt objects for multi-wait), never IDs or JSON strings.
+- Agent and prompt handles are stable session-scoped objects returned in tool details; callers use those complete native objects (or a native array of complete prompt objects for multi-wait), never IDs or manually stringified handles. The model-facing boundary tolerates provider-level JSON encoding of the nested handle field before validation.
 - Registries enforce one unresolved prompt per agent, idempotent settlement, and
   deterministic cancellation.
 - Persistent Herdr tabs launch pi with discovered system prompt, tools, model,

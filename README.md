@@ -64,9 +64,11 @@ Waiting never closes an agent.
 | `gc` | Prune stale pi-shepherd pane registrations |
 
 Handles are stable objects returned in the tool result's `details.handle`.
-There is exactly one valid handle syntax: pass that complete object unchanged
-to the next lifecycle action. Do not pass only its `id`, JSON-encode it, or
-reconstruct it from raw Herdr pane IDs. For example:
+The canonical handle syntax is to pass that complete native object unchanged
+to the next lifecycle action. Do not pass only its `id`, manually JSON-encode it,
+or reconstruct it from raw Herdr pane IDs. The model-facing tool has a narrow
+transport-compatibility step that recovers when a provider encodes the nested
+`handle` field as JSON text before validation. For example:
 
 ```json
 {
@@ -83,8 +85,8 @@ reconstruct it from raw Herdr pane IDs. For example:
 Do not pass a different field such as `name`, `task`, an id string, a JSON
 string, or a raw Herdr pane ID. For parallel `wait`, pass one native array of
 the complete prompt handle objects returned by the two `prompt` actions; do not
-stringify the array. If the tool reports an invalid handle shape, retry using
-the exact object from `details.handle`. `close` refuses any pane not recorded
+manually stringify the array. If the tool reports an invalid handle shape, retry using
+the exact native object from `details.handle`. `close` refuses any pane not recorded
 in the pi-shepherd created-pane registry.
 
 ## Agent discovery and security

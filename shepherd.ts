@@ -82,6 +82,28 @@ export const ShepherdParams = Type.Union(
 
 type ShepherdArgs = Static<typeof ShepherdParams>;
 
+/**
+ * Some model/provider tool-call transports encode nested JSON objects as a
+ * string. Pi validates arguments after this hook, so normalize only the
+ * lifecycle `handle` field here while keeping the public schema object-only.
+ * This preserves native handles as the canonical form and avoids weakening
+ * the schema to accept arbitrary strings.
+ */
+export function prepareShepherdArguments(input: unknown): ShepherdArgs {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return input as ShepherdArgs;
+	const args = { ...(input as Record<string, unknown>) };
+	const handle = args.handle;
+	if (typeof handle !== "string") return args as ShepherdArgs;
+	try {
+		const parsed: unknown = JSON.parse(handle);
+		if (parsed && typeof parsed === "object") args.handle = parsed;
+	} catch {
+		// Leave malformed strings untouched so normal schema validation reports a
+		// useful object/array type error rather than hiding the bad call.
+	}
+	return args as ShepherdArgs;
+}
+
 function unavailableResult(): AgentToolResult<Record<string, unknown>> {
 	return {
 		content: [{ type: "text", text: `Herd requires a running Herdr session.\n${HERDR_SETUP_HINT}` }],
@@ -114,12 +136,12 @@ async function doAction(
 		case "start": {
 			const a: any = args;
 			const handle = await startAgent(a.agent, a, ctx);
-			return textResult(`Started idle agent ${a.agent} (${handle.id}). Pass the complete details.handle object to prompt, status, or close; do not pass its id or a JSON string.`, { handle });
+			return textResult(`Started idle agent ${a.agent} (${handle.id}). Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`, { handle });
 		}
 		case "prompt": {
 			const a: any = args;
 			const handle = await promptAgent(a.handle, a.message, { timeout: a.timeout });
-			return textResult(`Prompt submitted (${handle.id}); call wait with the complete details.handle object. For parallel work, pass a native array of complete prompt handle objects.`, { handle });
+			return textResult(`Prompt submitted (${handle.id}); call wait with the complete details.handle object natively. For parallel work, pass a native array of complete prompt handle objects.`, { handle });
 		}
 		case "wait": {
 			const a: any = args;
@@ -217,19 +239,19 @@ async function doAction(
 
 export const SHEPHERD_TOOL_DESCRIPTION = [
 	"Manage specialized agents inside Herdr panes.",
-	"Lifecycle handles must always be passed as the complete handle object returned in details.handle; IDs and JSON strings are invalid.",
-	"For parallel wait, pass handle as a native array of complete prompt handle objects, not a stringified array.",
+	"Lifecycle handles must be passed as the complete native handle object returned in details.handle; never manually stringify, replace it with an id, or reconstruct it.",
+	"For parallel wait, pass handle as a native array of complete prompt handle objects, not a manually stringified array. The tool tolerates transport-level JSON encoding of this nested field.",
 	"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
 ].join(" ");
 
 export const SHEPHERD_TOOL_PROMPT_SNIPPET =
-	"Manage and Delegate work specialized agents inside Herdr panes.";
+	"Manage specialized agents inside Herdr panes with start, prompt, wait, status, and close.";
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
 	"Use shepherd action=agents to retrieve available agent definitions.",
 	"Pass lifecycle handles exactly as the complete object returned in details.handle; never replace one with its id or JSON text.",
 	"Start an idle agent, then prompt it. Wait with the complete prompt details.handle object; for parallel work use one native array of those complete objects.",
-	"If a handle shape is rejected, retry with the exact details.handle object rather than an id, JSON string, or stringified array.",
+	"If a handle shape is rejected, retry with the exact native details.handle object rather than an id or manually stringifying it.",
 	"Agents remain alive after wait and must be explicitly closed.",
 ];
 
@@ -241,6 +263,7 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 		promptSnippet: SHEPHERD_TOOL_PROMPT_SNIPPET,
 		promptGuidelines: SHEPHERD_TOOL_PROMPT_GUIDELINES,
 		parameters: ShepherdParams,
+		prepareArguments: prepareShepherdArguments,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!isHerdrAvailable()) return unavailableResult();

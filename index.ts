@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui?.notify(
-				`pi-shepherd: try /shepherd list, /shepherd herd, /shepherd settings, or /shepherd <agent> <task>` +
+				`pi-shepherd: try /shepherd list, /shepherd herd, or /shepherd settings` +
 					(arg ? ` (unhandled arg: ${arg})` : ""),
 				"info",
 			);

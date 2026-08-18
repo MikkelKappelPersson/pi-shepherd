@@ -19,9 +19,10 @@ const HandleObjectOptions = { additionalProperties: true } as const;
  * Lifecycle actions have one public handle representation: the complete
  * handle object returned by the preceding action's `details.handle`.
  *
- * Do not add string/JSON alternatives here. Besides making the protocol
- * ambiguous, those alternatives cause an array of handles to be stringified
- * by some model/tool transports and then misinterpreted as one handle.
+ * The canonical protocol is object-only. The model-facing tool has a narrow
+ * prepareArguments compatibility step for transports that encode this nested
+ * field as JSON text before schema validation; callers should still pass the
+ * native object and never stringify it themselves.
  */
 export const AgentHandleInputSchema = Type.Object({
  id: Type.String({ description: "Handle id from details.handle returned by start." }),
@@ -29,14 +30,14 @@ export const AgentHandleInputSchema = Type.Object({
  tabId: Type.Optional(Type.String()), workspaceId: Type.Optional(Type.String()),
 }, {
  ...HandleObjectOptions,
- description: "The complete AgentHandle object returned in details.handle by start; do not pass an id or JSON string.",
+ description: "The complete AgentHandle object returned in details.handle by start; pass it natively and do not stringify it yourself.",
 });
 export const PromptHandleInputSchema = Type.Object({
  id: Type.String({ description: "Handle id from details.handle returned by prompt." }),
  agentId: Type.Optional(Type.String()), createdAt: Type.Optional(Type.Number()),
 }, {
  ...HandleObjectOptions,
- description: "The complete PromptHandle object returned in details.handle by prompt; do not pass an id or JSON string.",
+ description: "The complete PromptHandle object returned in details.handle by prompt; pass it natively and do not stringify it yourself.",
 });
 
 export const LifecyclePromptParams = Type.Object({
@@ -51,10 +52,10 @@ export const WaitParams = Type.Object({
   PromptHandleInputSchema,
   Type.Array(PromptHandleInputSchema, {
    minItems: 1,
-   description: "Native array of complete PromptHandle objects for parallel wait; do not stringify the array.",
+   description: "Native array of complete PromptHandle objects for parallel wait; do not stringify the array yourself.",
   }),
  ], {
-  description: "One complete PromptHandle object, or a native array of complete PromptHandle objects.",
+  description: "One complete PromptHandle object, or a native array of complete PromptHandle objects; pass these natively.",
  }),
  timeout: Type.Optional(Type.Integer()),
 });
