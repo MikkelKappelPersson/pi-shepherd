@@ -109,7 +109,9 @@ const operation = prompt(agent, "Review the current diff", {
 ```
 
 The returned `PromptHandle` identifies this particular submitted operation and
-can be passed to `wait`.
+can be passed to `wait`. At the model-facing tool boundary, callers must pass
+the complete handle object returned in `details.handle`; passing only its ID,
+JSON text, or a raw pane ID is invalid.
 
 The initial implementation must reject a prompt when the agent already has an
 unresolved prompt. This prevents ambiguous result association. Parallel work
@@ -131,6 +133,12 @@ when the agent is no longer needed.
 const result = await wait(operation)
 const results = await wait([researchA, researchB])
 ```
+
+For the model-facing `shepherd` tool, `operation`, `researchA`, and
+`researchB` mean the complete `details.handle` objects returned by `prompt`,
+not their IDs or JSON representations. A multi-wait must use one native array
+of those objects; do not stringify the array. This is the only accepted tool
+input syntax for lifecycle handles.
 
 For an array, the default behavior is **wait for all**. Results preserve the
 same order as the input handles, regardless of completion order. Waiting for
@@ -171,9 +179,12 @@ handle from another session or an unknown handle should produce a clear error.
 
 ## Data model
 
-Handles are opaque to callers but serializable across model/tool calls.
-Internal representations may contain Herdr identifiers, but callers should use
-the generated handle ID rather than depending on pane IDs.
+Handles are stable objects returned in tool result details and are intended to
+be passed back unchanged across model/tool calls. Internal representations may
+contain Herdr identifiers, but callers must not reconstruct handles from pane
+IDs or reduce them to an ID string. The model-facing tool deliberately accepts
+one handle syntax only: the complete returned object; for multiple prompts,
+a native array of complete prompt handle objects.
 
 Illustrative shapes:
 
@@ -219,6 +230,13 @@ const promptB = await prompt(researcherB, "Research authorization")
 
 const [resultA, resultB] = await wait([promptA, promptB])
 ```
+
+When composing this through `shepherd`, use the returned objects exactly:
+`wait({ handle: promptA.details.handle })` for one prompt, or
+`wait({ handle: [promptA.details.handle, promptB.details.handle] })` for two.
+Never use `[promptA.details.handle.id, promptB.details.handle.id]` or a
+stringified version of either form. If the tool reports an invalid handle
+shape, retry with the exact object from `details.handle`.
 
 ### Sequential chain
 

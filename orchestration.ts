@@ -27,10 +27,11 @@ export interface AgentHandle {
 }
 
 /**
- * Handle values crossing the model/tool boundary may be the returned object,
- * its JSON.stringify() form, or the opaque id itself.
+ * The model-facing tool accepts the complete object returned by the previous
+ * lifecycle action. Keep this as an object rather than accepting IDs or JSON
+ * strings so malformed transport shapes are rejected clearly.
  */
-export type AgentHandleInput = AgentHandle | string;
+export type AgentHandleInput = AgentHandle;
 
 export interface PromptHandle {
 	id: string;
@@ -38,7 +39,7 @@ export interface PromptHandle {
 	createdAt: number;
 }
 
-export type PromptHandleInput = PromptHandle | string;
+export type PromptHandleInput = PromptHandle;
 
 export interface AgentStatus {
 	handle: AgentHandle;
@@ -90,26 +91,16 @@ interface PromptRecord {
  * random component, so callers never need to know Herdr pane identifiers.
  */
 function handleId(input: unknown, kind: "AgentHandle" | "PromptHandle"): string {
-	let value = input;
-	if (typeof value === "string") {
-		const trimmed = value.trim();
-		if (!trimmed) throw new LifecycleError("invalid_handle", `${kind} must not be empty.`);
-		try {
-			const parsed: unknown = JSON.parse(trimmed);
-			if (parsed !== null && typeof parsed === "object") value = parsed;
-			else return trimmed;
-		} catch {
-			// A plain string is treated as the opaque handle id below.
-			return trimmed;
-		}
-	}
-	if (!value || typeof value !== "object" || typeof (value as { id?: unknown }).id !== "string") {
+	if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { id?: unknown }).id !== "string") {
+		const syntax = kind === "PromptHandle"
+			? `Correct syntax: { action: "wait", handle: details.handle } (or { action: "wait", handle: [promptA.details.handle, promptB.details.handle] } for parallel wait).`
+			: `Correct syntax: { action: "prompt", handle: details.handle, message: "..." }.`;
 		throw new LifecycleError(
 			"invalid_handle",
-			`Expected a ${kind} object, JSON-encoded ${kind}, or opaque handle id.`,
+			`Expected the complete ${kind} object returned in details.handle; do not pass an id, JSON string, or array. ${syntax}`,
 		);
 	}
-	return (value as { id: string }).id;
+	return (input as { id: string }).id;
 }
 
 export class LifecycleRegistry {

@@ -15,22 +15,29 @@ export const StartParams = Type.Object({
 });
 const HandleObjectOptions = { additionalProperties: true } as const;
 
-/** Handles may be passed as the returned object, JSON text, or opaque id. */
-export const AgentHandleInputSchema = Type.Union([
- Type.Object({
-  id: Type.String({ description: "Opaque agent handle id returned by start." }),
-  agent: Type.Optional(Type.String()), paneId: Type.Optional(Type.String()),
-  tabId: Type.Optional(Type.String()), workspaceId: Type.Optional(Type.String()),
- }, HandleObjectOptions),
- Type.String({ description: "AgentHandle JSON text or opaque agent handle id." }),
-]);
-export const PromptHandleInputSchema = Type.Union([
- Type.Object({
-  id: Type.String({ description: "Opaque prompt handle id returned by prompt." }),
-  agentId: Type.Optional(Type.String()), createdAt: Type.Optional(Type.Number()),
- }, HandleObjectOptions),
- Type.String({ description: "PromptHandle JSON text or opaque prompt handle id." }),
-]);
+/**
+ * Lifecycle actions have one public handle representation: the complete
+ * handle object returned by the preceding action's `details.handle`.
+ *
+ * Do not add string/JSON alternatives here. Besides making the protocol
+ * ambiguous, those alternatives cause an array of handles to be stringified
+ * by some model/tool transports and then misinterpreted as one handle.
+ */
+export const AgentHandleInputSchema = Type.Object({
+ id: Type.String({ description: "Handle id from details.handle returned by start." }),
+ agent: Type.Optional(Type.String()), paneId: Type.Optional(Type.String()),
+ tabId: Type.Optional(Type.String()), workspaceId: Type.Optional(Type.String()),
+}, {
+ ...HandleObjectOptions,
+ description: "The complete AgentHandle object returned in details.handle by start; do not pass an id or JSON string.",
+});
+export const PromptHandleInputSchema = Type.Object({
+ id: Type.String({ description: "Handle id from details.handle returned by prompt." }),
+ agentId: Type.Optional(Type.String()), createdAt: Type.Optional(Type.Number()),
+}, {
+ ...HandleObjectOptions,
+ description: "The complete PromptHandle object returned in details.handle by prompt; do not pass an id or JSON string.",
+});
 
 export const LifecyclePromptParams = Type.Object({
  action: Type.Literal("prompt", { description: "Submit one message and return a prompt handle without waiting." }),
@@ -40,7 +47,15 @@ export const LifecyclePromptParams = Type.Object({
 });
 export const WaitParams = Type.Object({
  action: Type.Literal("wait", { description: "Wait for one or more prompt handles; agents remain alive." }),
- handle: Type.Union([PromptHandleInputSchema, Type.Array(PromptHandleInputSchema, { minItems: 1 })]),
+ handle: Type.Union([
+  PromptHandleInputSchema,
+  Type.Array(PromptHandleInputSchema, {
+   minItems: 1,
+   description: "Native array of complete PromptHandle objects for parallel wait; do not stringify the array.",
+  }),
+ ], {
+  description: "One complete PromptHandle object, or a native array of complete PromptHandle objects.",
+ }),
  timeout: Type.Optional(Type.Integer()),
 });
 export const LifecycleStatusParams = Type.Object({

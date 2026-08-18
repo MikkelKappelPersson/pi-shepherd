@@ -33,7 +33,7 @@ Prints the exact model-facing Shepherd tool description and parameter schema.
 
 const registration = {
 	name: "shepherd",
-	label: "Shepherd (delegate & manage Herdr agents)",
+	label: "Shepherd (manage Herdr agents)",
 	description: SHEPHERD_TOOL_DESCRIPTION,
 	promptSnippet: SHEPHERD_TOOL_PROMPT_SNIPPET,
 	promptGuidelines: SHEPHERD_TOOL_PROMPT_GUIDELINES,

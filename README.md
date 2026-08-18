@@ -63,12 +63,10 @@ Waiting never closes an agent.
 | `read` | Read recent output for diagnostics |
 | `gc` | Prune stale pi-shepherd pane registrations |
 
-Handles are opaque, stable values returned in the tool result's `details`.
-Pass the complete `details.handle` value to later actions; do not reconstruct
-handles from raw pane IDs. At the tool boundary, an agent or prompt handle may
-be supplied as the returned object, as `JSON.stringify(handle)`, or as its
-opaque `id`. The object form is preferred and the JSON form is useful for CLI
-or text transports. For example:
+Handles are stable objects returned in the tool result's `details.handle`.
+There is exactly one valid handle syntax: pass that complete object unchanged
+to the next lifecycle action. Do not pass only its `id`, JSON-encode it, or
+reconstruct it from raw Herdr pane IDs. For example:
 
 ```json
 {
@@ -82,8 +80,12 @@ or text transports. For example:
 }
 ```
 
-Do not pass a different field such as `name`, `task`, or a raw Herdr pane ID.
-`close` refuses any pane not recorded in the pi-shepherd created-pane registry.
+Do not pass a different field such as `name`, `task`, an id string, a JSON
+string, or a raw Herdr pane ID. For parallel `wait`, pass one native array of
+the complete prompt handle objects returned by the two `prompt` actions; do not
+stringify the array. If the tool reports an invalid handle shape, retry using
+the exact object from `details.handle`. `close` refuses any pane not recorded
+in the pi-shepherd created-pane registry.
 
 ## Agent discovery and security
 
@@ -126,7 +128,7 @@ TypeScript runs directly; there is no build step. Run the focused suite with:
 npm test
 ```
 
-The tests cover discovery, launch configuration, opaque registry behavior,
+The tests cover discovery, launch configuration, strict handle-shape validation,
 active-prompt enforcement, settlement/cancellation, and concurrent multi-wait.
 Live Herdr verification should additionally cover idle start, non-blocking
 prompt, result recovery, parallel prompts, iterative prompting, close, focus

@@ -114,12 +114,12 @@ async function doAction(
 		case "start": {
 			const a: any = args;
 			const handle = await startAgent(a.agent, a, ctx);
-			return textResult(`Started idle agent ${a.agent} (${handle.id}). Use details.handle for prompt, status, and close; pass it as an object, JSON text, or its id.`, { handle });
+			return textResult(`Started idle agent ${a.agent} (${handle.id}). Pass the complete details.handle object to prompt, status, or close; do not pass its id or a JSON string.`, { handle });
 		}
 		case "prompt": {
 			const a: any = args;
 			const handle = await promptAgent(a.handle, a.message, { timeout: a.timeout });
-			return textResult(`Prompt submitted (${handle.id}); call wait with this handle. Pass the complete details.handle object (or its JSON form/id) to the next action.`, { handle });
+			return textResult(`Prompt submitted (${handle.id}); call wait with the complete details.handle object. For parallel work, pass a native array of complete prompt handle objects.`, { handle });
 		}
 		case "wait": {
 			const a: any = args;
@@ -216,7 +216,9 @@ async function doAction(
 }
 
 export const SHEPHERD_TOOL_DESCRIPTION = [
-	"Manage and Delegate work specialized agents inside Herdr panes.",
+	"Manage specialized agents inside Herdr panes.",
+	"Lifecycle handles must always be passed as the complete handle object returned in details.handle; IDs and JSON strings are invalid.",
+	"For parallel wait, pass handle as a native array of complete prompt handle objects, not a stringified array.",
 	"Requires a running Herdr session (HERDR_ENV=1 or headless server).",
 ].join(" ");
 
@@ -225,7 +227,9 @@ export const SHEPHERD_TOOL_PROMPT_SNIPPET =
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
 	"Use shepherd action=agents to retrieve available agent definitions.",
-	"Start an idle agent, then prompt it and wait on the returned prompt handle; wait accepts an array for parallel work.",
+	"Pass lifecycle handles exactly as the complete object returned in details.handle; never replace one with its id or JSON text.",
+	"Start an idle agent, then prompt it. Wait with the complete prompt details.handle object; for parallel work use one native array of those complete objects.",
+	"If a handle shape is rejected, retry with the exact details.handle object rather than an id, JSON string, or stringified array.",
 	"Agents remain alive after wait and must be explicitly closed.",
 ];
 
@@ -243,9 +247,10 @@ export function registerShepherdTool(pi: ExtensionAPI) {
 			try {
 				return await doAction(params as ShepherdArgs, ctx, signal, onUpdate);
 			} catch (error: any) {
+				const message = String(error?.message ?? error);
 				return {
 					content: [
-						{ type: "text", text: `Herd ${params.action} failed: ${error?.message ?? String(error)}` },
+						{ type: "text", text: `Herd ${params.action} failed: ${message}` },
 					],
 					details: { action: params.action, error: String(error?.message ?? error) },
 					isError: true,
