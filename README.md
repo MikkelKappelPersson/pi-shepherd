@@ -1,317 +1,115 @@
 # pi-shepherd
 
-A no-fuss **Herdr-native** pi extension for managing your coding agents: delegation
-and herding **pi agents inside Herdr**.
+A Herdr-native pi extension for explicit agent lifecycle orchestration.
+Agents are visible in Herdr and are controlled through five composable
+primitives:
 
-> **Philosophy:** bare bones, works out of the box. **Every** delegated agent runs in
-> its own real **Herdr tab** — you watch it work live, and the result is handed back
-> to your main pi instance when it completes. No invisible subprocesses.
-
-```
-you ──► shepherd (action: delegate | list | prompt | status | read | close | gc)
-```
-
-The extension exposes its unified capability as the **`shepherd`** tool:
-
-- **`shepherd` (action: `delegate`)** — delegate a task to a specialized agent (`scout`, `planner`, `reviewer`, `worker`, …). It runs **live in a new Herdr tab** labelled with its artifact name (for example, `scout-02`) when artifact-backed, or with the agent name otherwise; it gets the delegated system prompt + tool/model config, and on completion the main instance picks up its final output.
-- **`shepherd` (action: `list` | `prompt` | `status` | `read` | `close` | `gc`)** — manage pi agents living in your Herdr panes. Use `delegate` with `mode: "bare"` to start a persistent discovered agent with no initial task, then use `prompt` to drive it. Panes pi-shepherd created are marked `●`. `gc` prunes stale registry entries.
-
-
-
-Agent definitions are loaded from plain Markdown files using the
-[standard VS Code custom-agent syntax](https://code.visualstudio.com/docs/agent-customization/custom-agents)
-(YAML frontmatter + Markdown body), so any `.agent.md` you already have just works.
-
----
-
-## Agent discovery
-
-Agents are discovered from these locations, in order (earlier/higher-precedence
-locations win over later ones with the same name):
-
-| Scope       | Location                         | Notes                          |
-|-------------|----------------------------------|--------------------------------|
-| user        | `~/.pi/agent/agents/`            | pi's own agent dir             |
-| user        | `~/.agents/agents/`              | cross-tool shared agent dir    |
-| project     | `<project>/.pi/agents/`          | project-scoped pi agents       |
-| project     | `<project>/.agents/agents/`      | project-scoped shared agents  |
-| **bundled** | `…/pi-shepherd/.pi/agents/`      | built-in subagents shipped with pi-shepherd |
-| **bundled** | `…/pi-shepherd/.agents/agents/`  | built-ins, shared/cross-tool format        |
-
-> **Bundled agents** are the package's own defaults, living in pi-shepherd's
-> own `.pi/agents/` and `.agents/agents/` directories — the same layout it
-> discovers from. They are the **lowest precedence**: any user/project agent
-> with the same name overrides them, so you replace a built-in by dropping
-> your own file in `~/.pi/agent/agents/`.
-
-- Files may use the `.agent.md` or `.md` extension. Both are parsed the same way.
-- All four locations support the **VS Code custom-agent format** — YAML
-  frontmatter (`name`, `description`, `tools`, `model`, `omit-system-prompt`, …)
-  plus a Markdown body used as the system prompt. `model` may name an explicit
-  provider/id; missing, null, empty, or whitespace-only values inherit the
-  delegator's current model.
-- **Project agents are gated by trust.** By default only user-level agents load.
-  Enable project agents with `agentScope: "project" | "both"` (and confirm on
-  each run when interactive). This mirrors the security posture of pi's built-in
-  subagent tool.
-
-### Example agent definition (VS Code syntax)
-
-```markdown
----
-name: my-reviewer
-description: Reviews diffs for bugs, security, and readability
-tools: read, grep, find, ls, bash
-model: claude-sonnet-4-5
-# Set true to replace pi's built-in default with the Markdown body.
-omit-system-prompt: false
----
-You are a code reviewer. Read the provided diff/context, identify bugs,
-security issues, and readability problems, and report only actionable
-findings in a concise list. Do not edit files.
+```text
+start(agent, options) -> AgentHandle
+prompt(agentHandle, message, options) -> PromptHandle
+wait(promptHandle | promptHandles) -> Result | Result[]
+status(agentHandle) -> Status
+close(agentHandle) -> void
 ```
 
----
+The model-facing `shepherd` tool also retains diagnostic/operational actions:
+`agents`, `list`, `read`, and `gc`.
 
-## Usage
+## Lifecycle usage
 
-### Delegation (Herdr tabs) — `shepherd delegate`
+`start` launches an idle persistent agent. It never submits a task and has no
+`stayOpen` option. The agent remains alive until explicitly closed.
 
-| Command | Action |
-|---------|--------|
-| `/shepherd <agent> <task>`      | Run one agent in a Herdr tab and pick up the result |
-| `/shepherd list`                | List discovered agents and their source |
-| `/shepherd herd`                | Herd hint (the `shepherd` tool does the work) |
-| `/shepherd settings` (`/shepherd-settings`) | Open the settings menu (inline, like `/settings`) |
+```text
+agent = shepherd({ action: "start", agent: "scout", cwd: project })
+prompt = shepherd({
+  action: "prompt",
+  handle: agent.handle,
+  message: "Research the authentication code",
+})
+result = shepherd({ action: "wait", handle: prompt.handle })
+shepherd({ action: "close", handle: agent.handle })
+```
 
-You can also instruct pi naturally: *"scout the readme"* or *"run 2 scouts in
-parallel — one on auth, one on billing"* — the model uses the `shepherd`
-tool with `action: delegate` (single / parallel / chain) to do it.
+Prompt submission is non-blocking. `wait` is the synchronization point. For
+parallel work, start multiple agents, prompt each one, then wait on the array:
 
-Each agent runs **live in its own Herdr tab** (artifact-backed delegations are labelled `scout-01`, `planner-01`, …; non-artifact agents retain their agent-name labels):
+```text
+scoutA = start("scout", options)
+scoutB = start("scout", options)
+promptA = prompt(scoutA, "Research authentication")
+promptB = prompt(scoutB, "Research authorization")
+[resultA, resultB] = wait([promptA, promptB])
+close(scoutA)
+close(scoutB)
+```
 
-1. a new tab is created in the current (or resolved) workspace;
-2. `pi` starts there with the agent's delegated system prompt, tools and model;
-3. you can watch it work in the tab;
-4. when it finishes (it calls `shepherd_done`, or its turn completes), a
-   completion sidecar is written and its output is handed back to the parent;
-   by default the subagent process exits while the Herdr tab remains open for
-   inspection;
-5. the parent pi instance picks up the final output and reports it back;
-6. the tab is left open for inspection — the subagent may still be running, so
-you can keep prompting it, or close it with `shepherd close <pane>` (or in Herdr
-directly).
+Arrays wait concurrently and preserve input order. A single agent may have
+only one unresolved prompt. Sequential chains are composed by the caller:
+wait for one result, include its text in the next prompt, and wait again.
+Waiting never closes an agent.
 
-Options: `keepOpen` (default `true` — set `false` to auto-close the tab),
-`stayOpen` (default `false` — the subagent's pi exits after completion while the
-Herdr tab remains available for inspection; set `true` to keep the process alive
-for follow-up), `sessionName` (optional durable artifact-session name), `timeout`
-(ms, default 10 min), and the optional `omitSystemPrompt` override.
-When supplied, it overrides the selected agent's `omit-system-prompt`
-frontmatter (including an explicit `false`). When the override and frontmatter
-are both absent, the effective value is `false`. When enabled, the agent
-Markdown body is passed as a replacement system prompt via `--system-prompt`:
-this omits only pi's built-in default system prompt. The task and completion
-instructions are still passed as input. In
-both modes, pi's project context—including `AGENTS.md` and other context
-files—is retained, as are the selected tools and permissions. Modes:
+## Shepherd actions
 
-| Mode      | Description                                          |
-|-----------|------------------------------------------------------|
-| Single    | One agent, one task                                  |
-| Parallel  | Up to 8 tasks, 4 concurrent, each in its own tab     |
-| Chain     | Sequential steps; `{previous}` placeholder pipes context |
+| Action | Purpose |
+|---|---|
+| `start` | Create an idle persistent discovered agent in a background Herdr tab |
+| `prompt` | Submit one message using an `AgentHandle`; returns immediately |
+| `wait` | Wait for one or many `PromptHandle`s |
+| `status` | Inspect a handle without focusing or mutating Herdr |
+| `close` | Explicitly close an owned agent and cancel unresolved prompts |
+| `agents` | List discovered agent definitions and source metadata |
+| `list` | List live Herdr agents |
+| `read` | Read recent output for diagnostics |
+| `gc` | Prune stale pi-shepherd pane registrations |
 
-#### Delegated input context
+Handles are opaque, stable serialized IDs. Callers should never construct
+handles from raw pane IDs. `close` refuses any pane not recorded in the
+pi-shepherd created-pane registry.
 
-Every `shepherd delegate` invocation starts a fresh child pi session in a Herdr tab. In
-normal mode (`omitSystemPrompt: false`), the child receives pi's built-in
-default system prompt plus the discovered agent definition's Markdown body as
-an appended system prompt. In replacement mode (`omitSystemPrompt: true`), the
-child receives the agent Markdown body as its system prompt instead, omitting
-only pi's built-in default. In both modes, pi's project context—including
-`AGENTS.md` and other context files—remains available. The child also receives
-the delegated `task` as user input, followed by autonomous shepherd
-instructions to complete the task and call `shepherd_done`; those instructions
-are retained in both modes. It runs with the requested agent's `cwd`, model, and tools (plus the completion
- tool), rather than inheriting the parent's conversation. An explicit non-empty
- agent `model` wins; otherwise the child's `--model` is the parent's
- `provider/id` (when available). If the parent has no model, `--model` is omitted.
- This applies consistently to single, parallel, chain, and `/shepherd <agent> <task>` runs.
- In a chain, `{previous}` in the next step's task is replaced
-with the prior step's returned output. Parallel tasks start independent fresh
-sessions.
+## Agent discovery and security
 
-`omitSystemPrompt: true` is a per-call shepherd option that selects the
-replacement behavior above. `false` (including the default) combines pi's
-built-in default with the agent body; `true` replaces the built-in default with
-the agent body. Neither mode omits project `AGENTS.md`/context files, the task,
-completion instructions, model, cwd, or tools. Resolution is explicit call
-option (including explicit `false`), then the selected agent's
-`omit-system-prompt` frontmatter, then `false`. The frontmatter value must be a
-YAML boolean (`true` or `false`); other types are ignored. The option is
-available on the `shepherd` tool; `/shepherd <agent> <task>` has no separate
-option and therefore uses the agent frontmatter/default behavior. Likewise,
-`shepherd delegate` with `mode: "bare"` starts an interactive discovered agent with no initial task and forces it to stay open.
+Definitions use VS Code custom-agent Markdown (`.md` or `.agent.md`) with YAML
+frontmatter and a Markdown system prompt. Discovery precedence is:
 
-To inspect the Shepherd-owned system-prompt contribution without launching an
-agent, run:
+1. `~/.pi/agent/agents/`
+2. `~/.agents/agents/`
+3. nearest project `.pi/agents/`
+4. nearest project `.agents/agents/`
+5. bundled `.pi/agents/`
+6. bundled `.agents/agents/`
+
+User-level discovery is the default. Project definitions are repo-controlled,
+require explicit project/both scope, and require confirmation when interactive.
+Agents retain the host user's normal pi tool permissions.
+
+## Herdr runtime
+
+pi-shepherd uses the `herdr` CLI and never uses an invisible subprocess
+fallback. It works inside Herdr or from a plain terminal by ensuring a
+headless Herdr server is available. Background tabs use `--no-focus`, preserve
+the requested cwd, and remain visible for inspection.
+
+Temporary launch/session files are retained while pi is alive and cleaned only
+after the pane is confirmed gone. The pane ownership registry is the source of
+truth for safe close operations.
+
+## Slash command
+
+`/shepherd list`, `/shepherd agents`, `/shepherd herd`, and
+`/shepherd settings` remain available. The slash command no longer accepts
+`<agent> <task>`; use the lifecycle tool protocol for work submission.
+
+## Development and tests
+
+TypeScript runs directly; there is no build step. Run the focused suite with:
 
 ```bash
-npm run show:shepherd-prompt -- scout
-npm run show:shepherd-prompt -- scout --raw
-npm run show:shepherd-prompt -- scout --cwd /path/to/project --scope both
-npm run show:shepherd-prompt -- scout --omit
+npm test
 ```
 
-This reads the same discovered agent body that delegation passes to pi. It does
-not include pi's built-in prompt or project context files. `--omit`/`--append`
-override the agent's frontmatter only for the displayed launch mode.
-
-To inspect what the parent/orchestrator model receives about Shepherd, run:
-
-```bash
-npm run show:shepherd-orchestrator
-npm run show:shepherd-orchestrator -- --json
-```
-
-The parent receives Shepherd in two forms: its `description` and parameter
-schema are exposed as model-facing tool metadata, while its `promptSnippet` and
-`promptGuidelines` are included in pi's textual system prompt when the tool is
-active. The script prints all four pieces exactly.
-
-### Shepherd (pi agents in Herdr panes)
-
-pi-shepherd drives Herdr through the `herdr` CLI (works from inside Herdr *or* a
-plain terminal — the headless server is started/attached automatically).
-
-- **List** — show live pi agents in Herdr, their pane, `idle`/`working`/`blocked`/`done` state, and mark `●` the panes pi-shepherd created.
-- **Start** — split a sibling pane (right by default, preserving your cwd) and launch a named pi agent in it with `--no-focus`.
-- **Prompt** — send a task to a named agent across the floor and wait for it to settle.
-- **Status / read** — check lifecycle state and pull recent output from a pane.
-- **Close** — close a pane that pi-shepherd created (by pane id or agent name). It refuses to close panes it didn't create (safety).
-
-Example (what the `shepherd` tool does under the hood — the task is delivered at launch via the same pane-run launch script the delegation path uses, so it lands reliably instead of relying on flaky `herdr agent start`/prompt keystroke timing):
-
-```bash
-# start a reviewer agent as a right-hand sibling of the current pane, task baked in
-herdr pane split "$HERDR_PANE_ID" --direction right --cwd "$PWD" --no-focus
-# wait for its shell, then boot pi with the launch script (session + @task file)
-herdr pane run <pane-id> 'bash /tmp/pi-shepherd-*/launch-reviewer.sh'
-herdr agent read <pane-id> --source recent-unwrapped --lines 40 --format text
-```
-
-A bare delegation boots a discovered agent with no initial task; drive it later with
-`shepherd prompt`.
-
----
-
-## What ships out of the box
-
-Functional subagents, ready to use, no setup:
-
-| Agent      | Purpose                          | Tools |
-|------------|----------------------------------|-------|
-| `scout`    | Fast codebase recon, returns compressed context | read, grep, find, ls |
-| `planner`  | Implementation plans, read-only  | read, grep, find, ls |
-| `reviewer` | Code review                      | read, grep, find, ls, bash |
-| `worker`   | General-purpose implementation   | all default tools |
-
-Workflow presets:
-
-| Prompt | Flow |
-|--------|------|
-| `/implement <query>` | scout → planner → worker |
-| `/scout-and-plan <query>` | scout → planner |
-| `/implement-and-review <query>` | worker → reviewer → worker |
-
----
-
-## Install
-
-The extension lives in `~/.pi/agent/extensions/pi-shepherd/`, so pi
-auto-discovers it on the next start or `/reload`.
-
-Requirements:
-
-- **pi** with the extension loader (extensions dir on disk, no build step —
-  edit `.ts` and reload).
-- **Herdr** — pi-shepherd is **Herdr-native**: the `herdr` CLI must be on PATH.
-  When pi runs inside Herdr it uses the current session; when launched from a
-  plain terminal it automatically starts/attaches the referenced headless Herdr
-  server and resolves a workspace for the new tab.
-
----
-
-## Configuration
-
-- **Settings menu** — `/shepherd settings` (or `/shepherd-settings`) opens
-  an **inline** settings list in the writing-field slot, exactly like pi's own
-  `/settings`: arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc
-  closes. Settings are stored at `~/.pi/agent/pi-shepherd/settings.json` and read
-  fresh (no reload needed). Every `shepherd` run falls back to these
-  values when a call doesn't pass them explicitly. Typing `/shepherd ` also
-  shows `list`/`herd`/`settings`/agents in the native autocomplete menu.
-
-### Persisted settings (`settings.json`)
-
-- **Agent scope** — `agentScope: "user" | "project" | "both"` (default `user`).
-  Enabling project agents loads repo-controlled prompts; only do this for repos
-  you trust.
-- **Confirm project agents** — `confirmProjectAgents` (default `true`): prompt
-  before running repo-controlled project agents.
-- **Agent locations** — the four discovery dirs above. User agents always load;
-  add files there to extend the built-in set (user agents override built-ins
-  with the same name).
-- **Delegation defaults** — `keepOpen` (default `true`: leave the tab open for
-  inspection; set `false` to auto-close), `stayOpen` (default `false`: the
-  subagent's pi process exits on completion while the tab remains available;
-  set `true` to keep it alive for follow-up) and `timeout` (ms, default 10 min).
-  Artifact-backed delegation creates or resumes a session under
-  `.shepherd/sessions/NNNN-name/`; pass the same `sessionName` on later calls to
-  continue it. Each delegated invocation gets an artifact and the session's
-  `shepherd.md` MOC. There is no project-level Shepherd index file.
-  `omitSystemPrompt` is an optional per-call `shepherd` boolean, not a persisted
-  setting. Resolution is explicit call option > agent frontmatter
-  `omit-system-prompt` (strict YAML boolean) > `false`. When `false`, pi's
-  built-in default and the discovered agent Markdown body are combined; when
-  `true`, the body replaces only pi's built-in default. Project `AGENTS.md` and
-  other context files, plus the fresh-session task/completion input, cwd, model,
-  and tools, remain in both modes.
-
----
-
-## Security notes
-
-- Subagents run with a delegated system prompt and full tool access for that
-  worker. User-level definitions are yours; **project-level definitions are
-  repo-controlled** — a malicious repo could instruct the model to run shell
-  commands. Keep `agentScope` conservative and confirm project agents.
-- The herd capability launches real pi agents in Herdr panes with your tools and
-  credentials. Only herd agents you trust.
-- A subagent's context is isolated, but its tools run with your local
-  permissions — the same blast radius as running pi normally.
-
----
-
-## Project layout
-
-```
-~/.pi/agent/extensions/pi-shepherd/
-├── index.ts          # extension entry: /shepherd command + tool registration
-├── discovery.ts      # agent discovery + VS Code .agent.md parsing (pure, testable)
-├── settings.ts       # persisted settings store (~/.pi/agent/pi-shepherd/settings.json)
-├── settings-ui.ts    # /shepherd settings menu (inline in the editor slot, SettingsList)
-├── subagent.ts       # delegation runner: runSingleAgent / executeDelegation (single/parallel/chain)
-├── shepherd.ts       # the `shepherd` tool: delegate + list/start/prompt/status/read/close/gc (imports herdr.ts)
-├── herdr.ts           # Herdr runtime: CLI wrappers, tab/pane helpers, runAgentInHerdr, created-panes registry
-├── test/             # verification: discovery fixtures + Herdr-independent launch checks
-├── .pi/agents/       # bundled built-in subagents (pi project format) — scout, planner, reviewer, worker
-├── .agents/agents/   # bundled built-in subagents (shared/cross-tool format, mirrors of the above)
-├── shepherd-done.ts  # in-tab extension: shepherd_done tool + completion sidecar on agent_end
-├── prompts/          # workflow presets (/implement, /scout-and-plan, ...)  [future]
-├── README.md         # this file
-└── PLAN.md           # implementation roadmap
-```
-
-See [PLAN.md](./PLAN.md) for the implementation roadmap.
+The tests cover discovery, launch configuration, opaque registry behavior,
+active-prompt enforcement, settlement/cancellation, and concurrent multi-wait.
+Live Herdr verification should additionally cover idle start, non-blocking
+prompt, result recovery, parallel prompts, iterative prompting, close, focus
+preservation, and ownership protection.

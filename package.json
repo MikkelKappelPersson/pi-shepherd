@@ -10,11 +10,10 @@
     "check": "echo 'nothing to check'",
     "discovery:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-discovery.mjs",
     "launch:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-launch.mjs",
-    "sentinel:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-sentinel.mjs",
-    "sessions:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-sessions.mjs",
-    "validation:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-validation.mjs",
+    "registry:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-registry.mjs",
+    "multi-wait:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-multi-wait.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
-    "test": "npm run discovery:test && npm run launch:test && npm run sentinel:test && npm run sessions:test && npm run validation:test"
+    "test": "npm run discovery:test && npm run launch:test && npm run registry:test && npm run multi-wait:test"
   }
 }

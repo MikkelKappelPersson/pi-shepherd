@@ -1,15 +1,14 @@
 /**
  * pi-shepherd — no-fuss pi extension: subagents + herding pi agents in Herdr.
  *
- * Phases 1-4: agent discovery (discovery.ts), isolated subagents
- * (subagent.ts), built-in agents (.pi/agents), and Herdr herding (herdr.ts).
+ * Agent discovery (discovery.ts), lifecycle primitives (lifecycle.ts), built-in
+ * agents (.pi/agents), and Herdr herding (herdr.ts).
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { discoverAgents, formatAgentList } from "./discovery.ts";
 import { loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
-import { subagentOnce } from "./subagent.ts";
 import { registerShepherdTool } from "./shepherd.ts";
 import { isHerdrAvailable, workingSubagents, type HerdrAgentSummary } from "./herdr.ts";
 
@@ -75,7 +74,7 @@ export default function (pi: ExtensionAPI) {
 	registerSubagentStatusWidget(pi);
 
 	pi.registerCommand("shepherd", {
-		description: "pi-shepherd: list | herd | settings | <agent> <task>",
+		description: "pi-shepherd: list | herd | settings",
 		// Native inline autocomplete for the subcommand slot — typing
 		// `/shepherd ` shows list/herd/settings + the built-in agents in the
 		// writing-field menu, arrow-selectable, like pi's own /model command.
@@ -119,24 +118,6 @@ export default function (pi: ExtensionAPI) {
 					"info",
 				);
 				return;
-			}
-
-			// Fallback: <agent> <task> → run one subagent.
-			const space = arg.indexOf(" ");
-			if (space > 0) {
-				const agent = arg.slice(0, space);
-				const task = arg.slice(space + 1).trim();
-				if (task) {
-					ctx.ui?.setStatus?.(`pi-shepherd: running ${agent}…`);
-					const result = await subagentOnce({ agent, task, cwd: ctx.cwd, model: ctx.model });
-					ctx.ui?.setStatus?.(undefined);
-					if (!result.ok) {
-						ctx.ui?.notify(`pi-shepherd: ${agent} failed — ${result.text.slice(0, 400)}`, "error");
-						return;
-					}
-					ctx.ui?.notify(`pi-shepherd ${agent}: ${result.text.slice(0, 2000)}`, "info");
-					return;
-				}
 			}
 
 			ctx.ui?.notify(
