@@ -38,7 +38,6 @@ export interface StartOptions {
   agentScope?: AgentScope;
   confirmProjectAgents?: boolean;
   omitSystemPrompt?: boolean;
-  timeout?: number;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
 }
@@ -61,7 +60,7 @@ export async function startAgent(
   await ensureHerdrRuntime();
   const { paneId, tabId } = createHerdrTab(name, cwd, getHerdrWorkspaceId());
   try {
-    await waitForHerdrShellReady(paneId, { timeoutMs: options.timeout ?? 15000 });
+    await waitForHerdrShellReady(paneId, { timeoutMs: 15_000 });
     const files = launchPiInPane(paneId, {
       name,
       persistent: true,
@@ -73,7 +72,7 @@ export async function startAgent(
     setCreatedPaneDir(paneId, files.dir);
     // Keep the launch directory registered while the persistent child is alive;
     // its completion sidecar is also the reliable fast-completion signal.
-    const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: options.timeout ?? 20000 });
+    const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
     if (!ready.detected) throw new Error(`Agent "${name}" did not become ready.`);
     return lifecycleRegistry.registerAgent(
       { agent: name, paneId, tabId, workspaceId: getHerdrWorkspaceId() },

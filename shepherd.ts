@@ -285,7 +285,10 @@ async function doAction(
     case 'start': {
       const a: any = args;
       const artifactSession = parentArtifactSession(ctx);
-      const handle = await startAgent(a.agent, { ...a, artifactSession }, ctx);
+      // Startup readiness has its own fixed internal grace periods; timeout
+      // settings apply only to submitted prompts and their waits.
+      const { timeout: _ignoredTimeout, ...startOptions } = a;
+      const handle = await startAgent(a.agent, { ...startOptions, artifactSession }, ctx);
       return textResult(
         `Started idle agent ${a.agent} (${handle.id}). Shared artifact session: ${artifactSession.sessionRelativePath}. Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
         { handle, artifactSession }

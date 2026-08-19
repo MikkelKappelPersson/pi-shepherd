@@ -16,7 +16,6 @@ export const StartParams = Type.Object({
   cwd: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
   omitSystemPrompt: Type.Optional(Type.Boolean()),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 const HandleObjectOptions = { additionalProperties: true } as const;
 
