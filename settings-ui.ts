@@ -37,7 +37,9 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
 			next.stayOpen = value === "on";
 			break;
 		case "timeout": {
-			const n = Number(value);
+			// The list displays values as e.g. "30 min", so parse the
+			// numeric portion rather than passing the decorated label to Number.
+			const n = Number.parseInt(value, 10);
 			if (Number.isFinite(n) && n > 0) next.timeout = n;
 			break;
 		}
