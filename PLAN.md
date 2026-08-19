@@ -13,6 +13,7 @@ index.ts          extension entry and /shepherd command
  lifecycle.ts     start, prompt, wait, status, and close primitives
  shepherd.ts      model-facing action-discriminated shepherd tool
  herdr.ts         Herdr CLI, launch, pane, and ownership helpers
+ artifact-sessions.ts durable parent-bound session, artifact, and MOC persistence
  shepherd-done.ts in-tab completion extension
  .pi/agents/      bundled pi-format agents
  .agents/agents/  bundled shared-format agents
@@ -43,8 +44,9 @@ modes. A one-shot operation is explicitly `start + prompt + wait + close`.
   structured per-prompt results, and supports concurrent multi-wait.
 - Status and close use handles and retain the created-pane ownership invariant.
 - Project agent scope remains opt-in and trust-gated.
-- Legacy `delegate`, workflow modes, `subagent.ts`, and artifact-backed
-  one-shot orchestration have been removed.
+- Legacy `delegate`, workflow modes, and `subagent.ts` have been removed.
+- Durable artifacts are allocated once per parent pi session/project binding,
+  with one MOC and distinct per-prompt artifact files.
 - README and focused registry/multi-wait tests document and verify the API.
 
 ## Verification
@@ -67,3 +69,4 @@ preservation, and ownership protection.
 - Background placement uses `--no-focus`.
 - Only panes recorded in the pi-shepherd created-pane registry may be closed.
 - Launch/session resources are removed only after the child pane is gone.
+- Artifact sessions are retained and never automatically cleaned up.

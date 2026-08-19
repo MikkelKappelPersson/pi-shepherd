@@ -113,6 +113,27 @@ User-level discovery is the default. Project definitions are repo-controlled,
 require explicit project/both scope, and require confirmation when interactive.
 Agents retain the host user's normal pi tool permissions.
 
+## Parent-bound artifact sessions
+
+All agents orchestrated by one parent pi session in the same project share one
+persistent artifact session under:
+
+```text
+.shepherd/sessions/NNNN-orchestrator-<id>/
+├── session.json
+├── shepherd.md
+└── <agent>-NN.md
+```
+
+The binding uses pi's parent `sessionManager.getSessionId()` and the parent
+project root. A second `start` or `prompt` reuses that directory; each prompt
+gets a distinct artifact linked from the single `shepherd.md` MOC. Child pi
+JSONL files, Herdr panes, and lifecycle handles are execution state only.
+Artifacts are retained after `wait`, `close`, timeout, and extension restart;
+pi-shepherd does not automatically delete, archive, commit, or check out them.
+Children receive the assigned artifact and shared MOC paths in their prompt
+context and must write only to their assigned artifact.
+
 ## Herdr runtime
 
 pi-shepherd uses the `herdr` CLI and never uses an invisible subprocess
