@@ -21,7 +21,7 @@ export interface ShepherdSettings {
 	keepOpen: boolean;
 	/** Keep the subagent's pi process alive after done, to keep driving it. */
 	stayOpen: boolean;
-	/** Default time limit (ms) for a Herdr run before it's reported timed out. */
+	/** Default time limit (minutes) for a Herdr run before it's reported timed out. */
 	timeout: number;
 }
 
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 	confirmProjectAgents: true,
 	keepOpen: true,
 	stayOpen: false,
-	timeout: 600_000,
+	timeout: 20,
 };
 
 export function settingsFile(): string {
@@ -62,13 +62,20 @@ export function loadSettings(): ShepherdSettings {
 				typeof parsed.keepOpen === "boolean" ? parsed.keepOpen : DEFAULT_SETTINGS.keepOpen,
 			stayOpen:
 				typeof parsed.stayOpen === "boolean" ? parsed.stayOpen : DEFAULT_SETTINGS.stayOpen,
-			timeout:
-				typeof parsed.timeout === "number" && Number.isFinite(parsed.timeout) && parsed.timeout > 0
-					? parsed.timeout
-					: DEFAULT_SETTINGS.timeout,
+			timeout: (() => {
+				const raw = parsed.timeout;
+				if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return DEFAULT_SETTINGS.timeout;
+				// Migration: old settings stored timeout in ms (e.g., 600000, 1200000).
+				// New settings use minutes. If value >= 1000, assume it's ms and convert.
+				return raw >= 1000 ? Math.round(raw / 60_000) : raw;
+			})(),
 		};
 		cache = merged;
 		cacheMtimeMs = mtime;
+		// Save migrated value back to disk (e.g., old ms -> minutes)
+		if (merged.timeout !== parsed.timeout) {
+			saveSettings(merged);
+		}
 		return merged;
 	} catch {
 		return { ...DEFAULT_SETTINGS };

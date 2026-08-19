@@ -90,6 +90,8 @@ interface PromptRecord {
   settled: boolean;
   resolve: (result: PromptResult) => void;
   promise: Promise<PromptResult>;
+  /** Active timeout handle from waitPrompts; cleared on settle. */
+  timeoutId?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -196,19 +198,20 @@ export class LifecycleRegistry {
     });
     agent.activePromptId = prompt.id;
     agent.state = 'working';
-    if (timeoutMs !== undefined && timeoutMs >= 0) {
-      setTimeout(
-        () =>
-          this.settlePrompt(prompt, {
-            promptId: prompt.id,
-            agentId: prompt.agentId,
-            status: 'timeout',
-            ok: false,
-            error: `Prompt timed out after ${timeoutMs}ms.`,
-          }),
-        timeoutMs
-      );
-    }
+    // Do not arm a timeout here; waitPrompts owns the timeout and will set/extend it.
+    // A very long safety net (1h) is set only if wait is never called.
+    const safetyTimeoutId = setTimeout(
+      () =>
+        this.settlePrompt(prompt, {
+          promptId: prompt.id,
+          agentId: prompt.agentId,
+          status: 'timeout',
+          ok: false,
+          error: 'Prompt timed out (safety net: wait never called).',
+        }),
+      3_600_000
+    );
+    this.prompts.get(prompt.id)!.timeoutId = safetyTimeoutId;
     return { ...prompt };
   }
 
@@ -283,6 +286,11 @@ export class LifecycleRegistry {
       ...(prompt.artifactSession ? { artifactSession: prompt.artifactSession } : {}),
     };
     prompt.settled = true;
+    // Clear any active timeout (safety net from createPrompt or waitPrompts).
+    if (prompt.timeoutId) {
+      clearTimeout(prompt.timeoutId);
+      prompt.timeoutId = undefined;
+    }
     try {
       prompt.onSettled?.({ ...prompt.result });
     } catch {

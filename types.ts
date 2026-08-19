@@ -16,7 +16,7 @@ export const StartParams = Type.Object({
   cwd: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
   omitSystemPrompt: Type.Optional(Type.Boolean()),
-  timeout: Type.Optional(Type.Integer({ default: 120000 })),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 const HandleObjectOptions = { additionalProperties: true } as const;
 
@@ -60,7 +60,7 @@ export const LifecyclePromptParams = Type.Object({
   }),
   handle: AgentHandleInputSchema,
   message: Type.String({ description: 'Message to submit to the started agent.' }),
-  timeout: Type.Optional(Type.Integer({ default: 120000 })),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 export const WaitParams = Type.Object({
   action: Type.Literal('wait', {
@@ -79,7 +79,7 @@ export const WaitParams = Type.Object({
         'One complete PromptHandle object, or a native array of complete PromptHandle objects.',
     }
   ),
-  timeout: Type.Optional(Type.Integer()),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 export const LifecycleStatusParams = Type.Object({
   action: Type.Literal('status'),

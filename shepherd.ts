@@ -25,6 +25,7 @@ import {
   LifecycleCloseParams,
 } from './types.ts';
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from './lifecycle.ts';
+import { loadSettings } from './settings.ts';
 import { lifecycleRegistry } from './orchestration.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from './artifact-sessions.ts';
 import type { DelegatorModel } from './discovery.ts';
@@ -292,7 +293,12 @@ async function doAction(
     }
     case 'prompt': {
       const a: any = args;
-      const handle = await promptAgent(a.handle, a.message, { timeout: a.timeout });
+      // Convert timeout from minutes to milliseconds for internal use.
+      // Default: from settings (20 minutes).
+      const defaultTimeout = loadSettings().timeout;
+      const timeoutMinutes = a.timeout ?? defaultTimeout;
+      const timeoutMs = timeoutMinutes * 60_000;
+      const handle = await promptAgent(a.handle, a.message, { timeout: timeoutMs });
       const artifact = lifecycleRegistry.promptArtifact(handle);
       return textResult(
         `Prompt submitted (${handle.id}); artifact: ${artifact.artifact?.relativePath ?? 'none'}. Call wait with the complete details.handle object natively. For parallel work, pass a native array of complete prompt handle objects.`,
@@ -305,7 +311,12 @@ async function doAction(
     }
     case 'wait': {
       const a: any = args;
-      const result = await waitPrompts(a.handle, { timeout: a.timeout });
+      // Convert timeout from minutes to milliseconds for internal use.
+      // Default: from settings (20 minutes).
+      const defaultTimeout = loadSettings().timeout;
+      const timeoutMinutes = a.timeout ?? defaultTimeout;
+      const timeoutMs = timeoutMinutes * 60_000;
+      const result = await waitPrompts(a.handle, { timeout: timeoutMs });
       return textResult(JSON.stringify(result), { result });
     }
     case 'status': {

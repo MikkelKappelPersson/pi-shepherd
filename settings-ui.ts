@@ -17,7 +17,8 @@ import { DynamicBorder, getSettingsListTheme } from "@earendil-works/pi-coding-a
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { type ShepherdSettings, loadSettings, saveSettings } from "./settings.ts";
 
-const TIMEOUT_CHOICES = ["60000", "120000", "300000", "600000", "1200000"];
+const TIMEOUT_CHOICES = [1, 2, 5, 10, 20, 30, 60];
+const TIMEOUT_DISPLAY = (n: number) => `${n} min`;
 
 /** Translate a settings change (string value from the list) back into state. */
 function applyValue(settings: ShepherdSettings, id: string, value: string): ShepherdSettings {
@@ -92,9 +93,9 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 		{
 			id: "timeout",
 			label: "Default run timeout",
-			description: "Time limit before a Herdr run is reported timed out.",
-			currentValue: String(settings.timeout),
-			values: TIMEOUT_CHOICES,
+			description: "Time limit in minutes before a Herdr run is reported timed out.",
+			currentValue: TIMEOUT_DISPLAY(settings.timeout),
+			values: TIMEOUT_CHOICES.map(TIMEOUT_DISPLAY),
 		},
 	];
 

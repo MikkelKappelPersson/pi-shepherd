@@ -145,7 +145,7 @@ export async function promptAgent(
     : undefined;
   const prompt = lifecycleRegistry.createPrompt(
     canonical,
-    options.timeout,
+    undefined, // waitPrompts owns the timeout; promptAgent must not arm one
     baselineStateChangeSeq,
     baselineCompletionSignalId
   );
@@ -199,6 +199,21 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
     if (record.settled) return lifecycleRegistry.wait(canonical);
     const agent = lifecycleRegistry.getAgent({ id: canonical.agentId } as AgentHandle);
     const signalPath = lifecycleRegistry.completionSignalPath(agent.handle);
+
+    // Arm/replace the timeout on the prompt record (clears safety net from createPrompt).
+    if (record.timeoutId) clearTimeout(record.timeoutId);
+    record.timeoutId = setTimeout(
+      () =>
+        lifecycleRegistry.settlePrompt(canonical, {
+          promptId: canonical.id,
+          agentId: canonical.agentId,
+          status: 'timeout',
+          ok: false,
+          error: `Timed out waiting for agent after ${timeoutMs >= 60000 ? Math.round(timeoutMs / 60000) + ' minutes' : Math.round(timeoutMs / 1000) + ' seconds'}`,
+        }),
+      timeoutMs
+    );
+
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       try {
@@ -244,13 +259,9 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
       } catch {}
       await new Promise(r => setTimeout(r, 500));
     }
-    return lifecycleRegistry.settlePrompt(canonical, {
-      promptId: canonical.id,
-      agentId: canonical.agentId,
-      status: 'timeout',
-      ok: false,
-      error: 'Timed out waiting for agent.',
-    });
+    // Loop exited without settling; the timeout callback will fire.
+    // wait() will return the timeout result set by settlePrompt.
+    return lifecycleRegistry.wait(canonical);
   } catch (error) {
     return failed(error);
   }
