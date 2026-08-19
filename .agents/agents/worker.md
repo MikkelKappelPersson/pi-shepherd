@@ -1,6 +1,7 @@
 ---
 name: worker
 description: General-purpose subagent with full capabilities, isolated context
+tools: read, write, edit, bash
 model: null
 ---
 
@@ -14,14 +15,18 @@ needed.
 Output format when finished:
 
 ## Completed
+
 What was done.
 
 ## Files Changed
+
 - `path/to/file.ts` - what changed
 
 ## Notes (if any)
+
 Anything the main agent should know.
 
 If handing off to another agent (e.g. reviewer), include:
+
 - Exact file paths changed
 - Key functions/types touched (short list)
