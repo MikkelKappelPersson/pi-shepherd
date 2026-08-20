@@ -1,4 +1,4 @@
-# Artifact-backed Shepherd Sessions
+# Note-backed Shepherd Sessions
 
 ## Status
 
@@ -8,23 +8,23 @@ Proposed specification.
 
 A Shepherd delegation workflow is backed by a durable, human-readable session
 folder under the project being worked on. The session contains a `shepherd.md`
-file acting as a map of content (MOC) and one artifact per delegated agent
+file acting as a map of content (fieldnotes) and one note per delegated agent
 invocation. A session may span multiple `shepherd` tool calls. Reusing the same
 session name continues the existing session rather than creating a new one.
 
 There is intentionally **no global or project-level `shepherd.md` index file**.
-The session's own `shepherd.md` is the only Shepherd MOC.
+The session's own `shepherd.md` is the only Shepherd fieldnotes index.
 
 ## Goals
 
 - Create a durable session automatically for delegated work.
 - Use meaningful, stable session names and monotonically allocated numbers.
 - Allow a session to span multiple single, parallel, and chain delegation calls.
-- Let a later delegation call consume and extend artifacts from earlier calls.
-- Give every agent a unique artifact path and enough session context to navigate
+- Let a later delegation call consume and extend notes from earlier calls.
+- Give every agent a unique note path and enough session context to navigate
   the work.
-- Keep the session MOC readable and useful to both agents and humans.
-- Support Markdown links between artifacts and to files, URLs, and other project
+- Keep the session fieldnotes readable and useful to both agents and humans.
+- Support Markdown links between notes and to files, URLs, and other project
   resources.
 - Preserve safe behavior when multiple agents run in parallel or multiple
   Shepherd calls happen close together.
@@ -33,11 +33,11 @@ The session's own `shepherd.md` is the only Shepherd MOC.
 ## Non-goals
 
 - No global `.shepherd/shepherd.md` index.
-- No requirement that agents edit the session MOC directly.
+- No requirement that agents edit the session fieldnotes directly.
 - No generic shared writable scratch file for parallel agents.
 - No second LLM call solely to generate a session name.
 - No attempt to make Markdown itself a transactional database.
-- No automatic commit, checkout, or cleanup of session artifacts.
+- No automatic commit, checkout, or cleanup of session notes.
 
 ## Directory layout
 
@@ -109,7 +109,7 @@ creates a new session using a deterministic slug derived from the first task,
 for example `fix-oauth-login` or `delegation`. The returned result must include
 the resolved session path and name so a later call can explicitly continue it.
 
-If a workflow needs to span calls, the orchestrator should pass the same
+If a workflow needs to span calls, the shepherd should pass the same
 `sessionName` on every call. An optional future `sessionId` can be added if a
 stable opaque identifier becomes necessary, but it is not required for this
 specification.
@@ -127,16 +127,16 @@ followed by mkdir is not sufficient. Use an exclusive filesystem operation
 A failed or abandoned allocation must not be reused within the normal
 allocation sequence.
 
-## Session MOC: `shepherd.md`
+## Session fieldnotes: `shepherd.md`
 
-Each session has one MOC at:
+Each session has one fieldnotes collection at:
 
 ```text
 .shepherd/sessions/NNNN-name/shepherd.md
 ```
 
-The orchestrator owns this file. Agents may read it but should not update it.
-MOC writes must be serialized and performed atomically (write a temporary file
+The shepherd owns this file. Agents may read it but should not update it.
+fieldnotes writes must be serialized and performed atomically (write a temporary file
 in the same directory, then rename it).
 
 Minimum content:
@@ -151,7 +151,7 @@ Minimum content:
 - **Project:** `.`
 - **Mode(s):** chain, parallel
 
-## Artifacts
+## Notes
 
 1. [Scout 01](./scout-01.md) — completed
 2. [Planner 01](./planner-01.md) — running
@@ -173,20 +173,20 @@ The exact presentation may evolve, but links should be relative whenever the
 link target is inside the session or project. External URLs remain ordinary
 Markdown links.
 
-The MOC should be updated when:
+The fieldnotes should be updated when:
 
 - the session is created;
 - a delegation invocation is registered;
-- an artifact is reserved;
+- a note is reserved;
 - an agent starts, completes, fails, times out, or is cancelled; and
 - the session reaches a terminal state, when that can be determined.
 
-A session spanning multiple tool calls should retain previous artifacts and
+A session spanning multiple tool calls should retain previous notes and
 append new entries rather than rewriting history away.
 
-## Artifacts
+## Notes
 
-Every delegated agent invocation receives one unique artifact file in the
+Every delegated agent invocation receives one unique note file in the
 session root:
 
 ```text
@@ -203,13 +203,13 @@ planner-01.md
 
 The ordinal is per agent name within the session and is never reused. If an
 agent name contains unsafe or awkward characters, derive a safe slug for the
-filename. If two artifact names still collide, add a deterministic suffix.
+filename. If two note names still collide, add a deterministic suffix.
 
-Artifacts should be reserved before their agent starts, especially in
+Notes should be reserved before their agent starts, especially in
 parallel and chain workflows, so the path is stable regardless of completion
 order.
 
-Each artifact should contain enough metadata to identify its provenance:
+Each note should contain enough metadata to identify its provenance:
 
 ```markdown
 ---
@@ -232,7 +232,7 @@ pane: w8:pY
 ```
 
 The final output, failure details, and relevant lifecycle information must be
-preserved in the artifact even if an agent does not write its own report.
+preserved in the note even if an agent does not write its own report.
 
 ## Agent context and ownership
 
@@ -241,12 +241,12 @@ The child task must include a session context block containing:
 - absolute session directory;
 - relative session directory from the project root;
 - absolute path to `shepherd.md`;
-- absolute path to the child's artifact;
-- relative path to the child's artifact;
-- instruction to read the MOC before working;
-- instruction to write detailed findings to the child's artifact when its role
+- absolute path to the child's note;
+- relative path to the child's note;
+- instruction to read the fieldnotes before working;
+- instruction to write detailed findings to the child's note when its role
   permits writing; and
-- instruction not to edit the MOC or another agent's artifact.
+- instruction not to edit the fieldnotes or another agent's note.
 
 Example:
 
@@ -254,47 +254,47 @@ Example:
 Shepherd session context:
 - Session: 0001-fix-oauth-login
 - Session directory: /repo/.shepherd/sessions/0001-fix-oauth-login
-- Session MOC: /repo/.shepherd/sessions/0001-fix-oauth-login/shepherd.md
-- Your artifact: /repo/.shepherd/sessions/0001-fix-oauth-login/scout-01.md
+- Session fieldnotes: /repo/.shepherd/sessions/0001-fix-oauth-login/shepherd.md
+- Your note: /repo/.shepherd/sessions/0001-fix-oauth-login/scout-01.md
 
-Read shepherd.md first. Keep your work in your assigned artifact. Do not edit
-shepherd.md or another agent's artifact. Use relative Markdown links for files
+Read shepherd.md first. Keep your work in your assigned note. Do not edit
+shepherd.md or another agent's note. Use relative Markdown links for files
 inside the project or session.
 ```
 
 The context must be added without accidentally replacing the delegated task or
 agent system prompt.
 
-### Artifact writing strategy
+### Note writing strategy
 
-The first implementation should guarantee artifact persistence from the
-orchestrator:
+The first implementation should guarantee note persistence from the
+shepherd:
 
-1. reserve and initialize the artifact before launch;
+1. reserve and initialize the note before launch;
 2. run the agent;
 3. after a safe terminal result, write the final assistant output and lifecycle
-   metadata to the artifact;
-4. update the MOC.
+   metadata to the note;
+4. update the fieldnotes.
 
 Read-only agents such as the bundled scout and planner therefore still produce
-artifacts. They do not need generic write access merely to satisfy the
-artifact contract.
+notes. They do not need generic write access merely to satisfy the
+note contract.
 
-A later implementation may add a restricted child-side artifact tool, but
+A later implementation may add a restricted child-side note tool, but
 prompt-level instructions are not a security boundary. If introduced, it must
-only permit writes to the assigned artifact path.
+only permit writes to the assigned note path.
 
-If an agent writes its own artifact, the orchestrator must define whether that
+If an agent writes its own note, the shepherd must define whether that
 content is authoritative. The recommended rule is: preserve agent-authored
-content, then add/update a clearly marked orchestrator metadata and output
+content, then add/update a clearly marked shepherd metadata and output
 section rather than silently overwriting it.
 
 ## Cross-call orchestration
 
 A later call using the same session name should receive a concise context block
-and be instructed to inspect the existing MOC and relevant artifacts. The
-orchestrator may also include selected prior output in `{previous}` for chain
-compatibility, but artifacts are the durable source of truth and should be
+and be instructed to inspect the existing fieldnotes and relevant notes. The
+shepherd may also include selected prior output in `{previous}` for chain
+compatibility, but notes are the durable source of truth and should be
 preferred for large reports.
 
 Example sequence:
@@ -307,44 +307,44 @@ Call 1:
 Call 2:
   sessionName: fix-oauth-login
   agent: worker
-  task: Read the session MOC and implement the approved plan.
+  task: Read the session fieldnotes and implement the approved plan.
 
 Call 3:
   sessionName: fix-oauth-login
   agent: reviewer
-  task: Review the implementation using the session artifacts and current diff.
+  task: Review the implementation using the session notes and current diff.
 ```
 
-The MOC after these calls links all five artifacts in one session.
+The fieldnotes after these calls links all five notes in one session.
 
 ## Lifecycle and Herdr safety
 
-Artifact-backed delegation uses `stayOpen: false` by default. This is the
+Note-backed delegation uses `stayOpen: false` by default. This is the
 simplest and safest lifecycle: the child exits after completion, the Herdr
 sentinel confirms that it has stopped writing, and only then does the parent
-parse the child session and finalize the artifact.
+parse the child session and finalize the note.
 
 `keepOpen` remains independent. With the default combination
 `stayOpen: false, keepOpen: true`, the pi process exits but the Herdr tab remains
 available for inspection. A caller may explicitly request `stayOpen: true` when
-interactive follow-up is more important than immediate artifact finalization.
+interactive follow-up is more important than immediate note finalization.
 
 The current Herdr runner may keep child pi alive when `stayOpen` is enabled.
-Artifact finalization must not read or delete a child session JSONL file while
+Note finalization must not read or delete a child session JSONL file while
 that child can still write it.
 
 Therefore:
 
-- durable artifact metadata may be updated while the child is running, but
+- durable note metadata may be updated while the child is running, but
   final child output must be captured only after a safe completion boundary;
 - with the default `stayOpen: false`, wait for the process-exit sentinel before
   parsing the child session and finalizing output;
 - with explicit `stayOpen: true`, either use a completion snapshot guaranteed to
   be immutable after signaling, or defer finalization until the child exits;
-- timeout and abort paths must leave the session and artifact marked as such,
+- timeout and abort paths must leave the session and note marked as such,
   without deleting files still owned by a live child;
 - a later call may continue a session containing timed-out or abandoned
-  artifacts.
+  notes.
 
 This preserves the invariant that nothing reads a child session before the
 child has exited.
@@ -364,7 +364,7 @@ The parameter is available on:
 - parallel delegation; and
 - chain delegation.
 
-For artifact-backed delegation, `stayOpen` defaults to `false`. The public
+For note-backed delegation, `stayOpen` defaults to `false`. The public
 `keepOpen` option still defaults to `true`, so completed tabs remain visible
 without leaving child pi processes alive. Explicit caller options continue to
 win over defaults.
@@ -395,25 +395,25 @@ but same-name continuation is the required behavior for the initial version.
 
 1. Add a pure filesystem-oriented `sessions.ts` module.
 2. Implement safe name normalization, exact session lookup, atomic numbered
-   allocation, artifact reservation, and atomic MOC/metadata writes.
-3. Make `stayOpen: false` the default for artifact-backed delegation while
+   allocation, note reservation, and atomic fieldnotes/metadata writes.
+3. Make `stayOpen: false` the default for note-backed delegation while
    keeping `keepOpen: true` as the default tab-inspection behavior.
 4. Add `sessionName` to `types.ts` and the public `shepherd` schema.
 5. Create or resolve the session at the beginning of `executeDelegation`, after
    parameter validation and project-agent confirmation where appropriate.
-6. Reserve one artifact per planned invocation and add session context to each
+6. Reserve one note per planned invocation and add session context to each
    child task.
 7. Update `runSingleAgent` and all single/parallel/chain paths to finalize
-   artifacts and MOC entries.
+   notes and fieldnotes entries.
 8. Preserve `{previous}` behavior for compatibility, while directing agents to
-   use session artifacts for durable context.
+   use session notes for durable context.
 9. Add filesystem-only verification covering:
    - safe slugging and traversal rejection;
    - same-name continuation;
    - different-name collision handling;
    - concurrent numbering;
    - per-agent ordinals and duplicate agent names;
-   - relative links in the MOC;
+   - relative links in the fieldnotes;
    - chain and parallel registration;
    - success, failure, timeout, and cancellation metadata; and
    - atomic write behavior.
@@ -427,10 +427,10 @@ but same-name continuation is the required behavior for the initial version.
   represent one workstream.
 - A session name reused for unrelated future work will append to old history.
   The UI/result should show that an existing session was resumed.
-- Agent-authored Markdown and orchestrator metadata need a clear merge policy.
+- Agent-authored Markdown and shepherd metadata need a clear merge policy.
 - `.shepherd/` version-control policy should remain an explicit project choice;
   the extension should not silently add it to `.gitignore`.
 - Absolute paths in `session.json` are useful locally but should be minimized or
-  accompanied by project-relative paths if artifacts are committed.
-- Session MOC updates from parallel completions require serialization to avoid
+  accompanied by project-relative paths if notes are committed.
+- Session fieldnotes updates from parallel completions require serialization to avoid
   lost updates.

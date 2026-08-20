@@ -2,15 +2,15 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 
 export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const, {
-  description: 'Which agent directories to use. Default: "user".',
+  description: 'Which sheep-definition directories to use. Default: "user".',
   default: 'user',
 });
 
 export const StartParams = Type.Object({
   action: Type.Literal('start', {
-    description: 'Start an idle persistent agent; does not submit work.',
+    description: 'Start an idle persistent sheep (agent/subagent); does not submit work.',
   }),
-  agent: Type.String({ description: 'Exact discovered agent name (case-sensitive).' }),
+  agent: Type.String({ description: 'Exact discovered sheep name (case-sensitive).' }),
   agentScope: Type.Optional(AgentScopeSchema),
   confirmProjectAgents: Type.Optional(Type.Boolean({ default: true })),
   cwd: Type.Optional(Type.String()),
@@ -38,7 +38,7 @@ export const AgentHandleInputSchema = Type.Object(
   },
   {
     ...HandleObjectOptions,
-    description: 'The complete AgentHandle object returned in details.handle by start.',
+    description: 'The complete sheep handle (AgentHandle) returned in details.handle by start.',
   }
 );
 export const PromptHandleInputSchema = Type.Object(
@@ -55,15 +55,15 @@ export const PromptHandleInputSchema = Type.Object(
 
 export const LifecyclePromptParams = Type.Object({
   action: Type.Literal('prompt', {
-    description: 'Submit one message and return a prompt handle without waiting.',
+    description: 'Submit one message to a sheep and return a prompt handle without waiting.',
   }),
   handle: AgentHandleInputSchema,
-  message: Type.String({ description: 'Message to submit to the started agent.' }),
+  message: Type.String({ description: 'Message to submit to the started sheep.' }),
   timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 export const WaitParams = Type.Object({
   action: Type.Literal('wait', {
-    description: 'Wait for one or more prompt handles; agents remain alive.',
+    description: 'Wait for one or more prompt handles; sheep remain alive.',
   }),
   handle: Type.Union(
     [
@@ -81,10 +81,10 @@ export const WaitParams = Type.Object({
   timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 export const LifecycleStatusParams = Type.Object({
-  action: Type.Literal('status'),
+  action: Type.Literal('status', { description: 'Inspect a sheep without focusing or mutating its Herdr pane.' }),
   handle: AgentHandleInputSchema,
 });
 export const LifecycleCloseParams = Type.Object({
-  action: Type.Literal('close'),
+  action: Type.Literal('close', { description: 'Close an owned sheep and cancel any unresolved prompt.' }),
   handle: AgentHandleInputSchema,
 });

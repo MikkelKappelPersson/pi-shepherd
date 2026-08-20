@@ -136,7 +136,7 @@ are complete.
   - Add `action: "prompt"` with agent handle and message.
   - Add `action: "wait"` with one or many prompt handles.
   - Update `status` and `close` to accept agent handles.
-  - Keep `agents`, `list`, `read`, and `gc`.
+  - Keep `sheep`, `herd`, `read`, and `prune`.
 
 - [x] **6.2 Update tool execution**
   - Route actions to the lifecycle primitives.

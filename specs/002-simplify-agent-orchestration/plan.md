@@ -15,7 +15,7 @@ close(agentHandle) -> void
 ```
 
 The model-facing `shepherd` tool remains action-discriminated. Existing
-operational actions such as `agents`, `list`, `read`, and `gc` remain available.
+operational actions such as `sheep`, `herd`, `read`, and `prune` remain available.
 Legacy `delegate` may be retained temporarily as a compatibility wrapper, but
 new orchestration guidance should use the primitives.
 
@@ -208,9 +208,9 @@ Update `types.ts` and `shepherd.ts`:
   starts/prompts followed by one `wait([...])` call.
 
 Retain `read`, because it is needed for diagnosing blocked agents and result
-recovery. Retain `agents`, `list`, and `gc`.
+recovery. Retain `sheep`, `herd`, and `prune`.
 
-## Phase 5 — Compatibility and subagent migration
+## Phase 5 — Compatibility and sheep migration
 
 ### 5.1 Compatibility wrapper
 
@@ -224,7 +224,7 @@ delegate(parallel) = multiple start/prompt + wait(all)
 delegate(chain)    = repeated start + prompt + wait
 ```
 
-The wrapper may preserve existing artifact/session behavior while migration is
+The wrapper may preserve existing note/session behavior while migration is
 underway. It must not add `stayOpen` to `start`; persistence is controlled by
 whether/when the wrapper calls `close`.
 

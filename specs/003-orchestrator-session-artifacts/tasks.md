@@ -1,4 +1,4 @@
-# Tasks: Orchestrator-bound Artifact Sessions
+# Tasks: Shepherd-bound Note Sessions
 
 Implement in order. Mark a task complete only after its code and focused
 verification pass.
@@ -11,11 +11,11 @@ verification pass.
   - Verify `getSessionFile()` is available when the session is persisted.
   - Document the fallback for non-persisted/in-memory sessions.
 
-- [ ] **1.2 Define artifact types**
-  - Add parent binding, artifact session, artifact reference, and lifecycle
+- [ ] **1.2 Define note types**
+  - Add parent binding, note session, note reference, and lifecycle
     metadata types.
   - Keep the parent identity opaque.
-  - Keep artifact filesystem types separate from public handle schemas.
+  - Keep note filesystem types separate from public handle schemas.
 
 - [ ] **1.3 Add binding resolver/cache**
   - Key by parent pi session ID plus canonical parent project root.
@@ -25,7 +25,7 @@ verification pass.
 
 ## Phase 2 — Filesystem persistence
 
-- [ ] **2.1 Add artifact session module**
+- [ ] **2.1 Add note session module**
   - Create `artifact-sessions.ts` or restore/adapt `sessions.ts`.
   - Keep it independent of pi, Herdr, and TUI imports.
 
@@ -41,33 +41,33 @@ verification pass.
   - Handle slug collisions deterministically.
   - Validate all generated paths as descendants of the project/session root.
 
-- [ ] **2.4 Implement session metadata and MOC**
+- [ ] **2.4 Implement session metadata and fieldnotes**
   - Create `session.json` and `shepherd.md` atomically.
-  - Record parent binding, status, modes, timestamps, and artifacts.
+  - Record parent binding, status, modes, timestamps, and notes.
   - Serialize updates from parallel callers.
 
-- [ ] **2.5 Implement artifact lifecycle**
+- [ ] **2.5 Implement note lifecycle**
   - Reserve per-agent ordinals and collision-safe filenames.
-  - Initialize artifacts before prompt submission.
+  - Initialize notes before prompt submission.
   - Mark running/status transitions.
   - Finalize output/errors without overwriting agent-authored content.
 
 ## Phase 3 — Lifecycle integration
 
 - [ ] **3.1 Associate sessions with agents**
-  - Extend internal `AgentRecord` metadata with the parent artifact session.
+  - Extend internal `AgentRecord` metadata with the parent note session.
   - Do not alter public handle identity or lifecycle UUID semantics.
 
 - [ ] **3.2 Resolve/reuse on `start`**
   - Resolve the parent binding before child launch.
   - Return the shared session details.
-  - Ensure a bare idle start creates no per-agent artifact.
+  - Ensure a bare idle start creates no per-agent note.
   - Ensure a second start reuses the first session directory.
 
 - [ ] **3.3 Reserve/inject on `prompt`**
-  - Reserve one artifact before submission.
+  - Reserve one note before submission.
   - Associate it with the prompt record.
-  - Append shared MOC/artifact context without replacing the task.
+  - Append shared fieldnotes/note context without replacing the task.
   - Finalize failed submission and return no prompt handle.
 
 - [ ] **3.4 Finalize on `wait`**
@@ -77,26 +77,26 @@ verification pass.
   - Make finalization idempotent.
 
 - [ ] **3.5 Preserve close/cleanup safety**
-  - Cancel unresolved prompt artifacts during close.
+  - Cancel unresolved prompt notes during close.
   - Retain shared session files after close, reload, timeout, and shutdown.
   - Delete only safe temporary child launch resources under existing rules.
 
 ## Phase 4 — Tool integration
 
-- [ ] **4.1 Expose artifact details**
+- [ ] **4.1 Expose note details**
   - Include shared session path in `start` details.
-  - Include artifact path in `prompt` details.
-  - Include artifact references in `wait` results.
+  - Include note path in `prompt` details.
+  - Include note references in `wait` results.
   - Preserve complete-native-handle requirements.
 
 - [ ] **4.2 Update model guidance**
-  - Explain one shared artifact session per parent pi session.
-  - Explain MOC/artifact ownership and retention.
+  - Explain one shared note session per parent pi session.
+  - Explain fieldnotes/note ownership and retention.
   - Do not expose a per-child force-new-session option.
 
 - [ ] **4.3 Verify completion signaling**
-  - Ensure `shepherd_done` updates parent-owned prompt/artifact state.
-  - Ensure child environment cannot allocate a new artifact session.
+  - Ensure `shepherd_done` updates parent-owned prompt/note state.
+  - Ensure child environment cannot allocate a new note session.
 
 ## Phase 5 — Tests
 
@@ -110,19 +110,19 @@ verification pass.
   - Lifecycle metadata and finalization.
 
 - [ ] **5.2 Add registry tests**
-  - Agent-to-session and prompt-to-artifact association.
+  - Agent-to-session and prompt-to-note association.
   - Lifecycle UUID independence.
   - Idempotent finalization.
   - Close cancellation and retention.
 
 - [ ] **5.3 Add orchestration regression test**
   - Two child invocations from one parent context produce one session path,
-    two artifact paths, and one MOC.
+    two note paths, and one fieldnotes collection.
   - Test calls separated by a simulated tool-call boundary.
 
 - [ ] **5.4 Run verification**
   - Run `git diff --check`.
-  - Run the new artifact tests.
+  - Run the new note tests.
   - Run `npm test`.
   - Perform live Herdr verification with two agents sharing one directory.
 
@@ -132,7 +132,7 @@ verification pass.
   - Document parent-session binding, layout, retention, and child context.
 
 - [ ] **6.2 Update PLAN.md**
-  - Document the artifact module and its integration boundaries.
+  - Document the note module and its integration boundaries.
 
 - [ ] **6.3 Review implementation against spec**
   - Confirm no per-child session allocation remains.

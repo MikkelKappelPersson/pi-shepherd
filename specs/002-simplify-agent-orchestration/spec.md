@@ -263,7 +263,7 @@ const second = await wait(await prompt(worker, "Run tests and fix failures"))
 
 ## Existing functionality and migration
 
-The existing Herdr management actions for `agents`, `list`, `read`, and `gc`
+The existing Herdr management actions for `sheep`, `herd`, `read`, and `gc`
 remain useful and may remain separate operational actions. `status` and
 `close` should be updated to accept `AgentHandle`s while retaining safe
 resolution of existing created-pane records during migration.

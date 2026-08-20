@@ -75,7 +75,7 @@ feat/parallel-agent-prompts
 - Preserve the project's security invariants, especially agent scope, pane
   ownership, and cleanup behavior.
 - Do not commit generated files, local configuration, credentials, or temporary
-  runtime artifacts.
+  runtime notes.
 
 Before committing, run the relevant tests. For the full focused suite, run:
 

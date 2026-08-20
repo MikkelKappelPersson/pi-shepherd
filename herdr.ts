@@ -481,7 +481,7 @@ export function writePiLaunchFiles(opts: {
 	}
 	if (opts.task !== undefined) {
 		const taskFile = path.join(dir, `task-${safe}.md`);
-		const task = `${opts.task}\n\n[Autonomous subagent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
+		const task = `${opts.task}\n\n[Autonomous sheep]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
 		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: "0600" });
 		args.push(`'@${taskFile}'`);
 	}

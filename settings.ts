@@ -19,7 +19,7 @@ export interface ShepherdSettings {
 	confirmProjectAgents: boolean;
 	/** Keep the Herdr tab open after completion, for inspection. */
 	keepOpen: boolean;
-	/** Keep the subagent's pi process alive after done, to keep driving it. */
+	/** Keep the sheep's pi process alive after done, to keep driving it. */
 	stayOpen: boolean;
 	/** Default time limit (minutes) for a Herdr run before it's reported timed out. */
 	timeout: number;
