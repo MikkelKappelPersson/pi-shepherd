@@ -494,6 +494,7 @@ export function writePiLaunchFiles(opts: {
 	task?: string;
 	systemPrompt?: string;
 	omitSystemPrompt?: boolean;
+	omitPiDocumentation?: boolean;
 	stayOpen?: boolean;
 	/** Persistent lifecycle agents remain alive and have no initial task. */
 	persistent?: boolean;
@@ -514,13 +515,14 @@ export function writePiLaunchFiles(opts: {
 			: undefined;
 	if (tools) args.push("--tools", tools);
 
+	let systemPromptFile: string | undefined;
 	if (opts.systemPrompt !== undefined) {
-		const sysFile = path.join(dir, `sysprompt-${safe}.md`);
-		fs.writeFileSync(sysFile, opts.systemPrompt, { encoding: "utf8", mode: 0o600 });
-		args.push(
-			opts.omitSystemPrompt ? "--system-prompt" : "--append-system-prompt",
-			shellQuote(sysFile),
-		);
+		systemPromptFile = path.join(dir, `sysprompt-${safe}.md`);
+		fs.writeFileSync(systemPromptFile, opts.systemPrompt, { encoding: "utf8", mode: 0o600 });
+		// In append mode shepherd-done puts the agent file context first and
+		// retains Pi's built-in prompt after it. Passing --append-system-prompt
+		// here would add the same context a second time.
+		if (opts.omitSystemPrompt) args.push("--system-prompt", shellQuote(systemPromptFile));
 	}
 	if (opts.task !== undefined) {
 		const taskFile = path.join(dir, `task-${safe}.md`);
@@ -532,6 +534,13 @@ export function writePiLaunchFiles(opts: {
 	const launchScript = [
 		"#!/bin/bash",
 		`export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
+		systemPromptFile
+			? `export PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE=${shellQuote(systemPromptFile)}`
+			: "unset PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE",
+		opts.omitPiDocumentation
+			? "export PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1"
+			: "unset PI_SHEPHERD_OMIT_PI_DOCUMENTATION",
+
 		`export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
 		opts.stayOpen || opts.persistent ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
 		`pi ${args.join(" ")}; echo '__SHEPHERD_DONE_'$?'__'`,
@@ -548,7 +557,17 @@ export function writePiLaunchFiles(opts: {
  */
 export function launchPiInPane(
 	paneId: string,
-	opts: { name: string; task?: string; stayOpen?: boolean; persistent?: boolean; systemPrompt?: string; omitSystemPrompt?: boolean; model?: string; tools?: string[] },
+	opts: {
+		name: string;
+		task?: string;
+		stayOpen?: boolean;
+		persistent?: boolean;
+		systemPrompt?: string;
+		omitSystemPrompt?: boolean;
+		omitPiDocumentation?: boolean;
+		model?: string;
+		tools?: string[];
+	},
 ): { dir: string; sessionFile: string; scriptFile: string } {
 	const files = writePiLaunchFiles(opts);
 	sendCommandInHerdr(paneId, `bash ${shellQuote(files.scriptFile)}`);

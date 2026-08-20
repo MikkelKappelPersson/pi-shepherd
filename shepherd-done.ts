@@ -20,7 +20,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { randomUUID } from "node:crypto";
-import { renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { omitPiDocumentation, replacePiIdentity } from "./system-prompt.ts";
 
 function writeSidecar(payload: Record<string, unknown>): void {
 	const sessionFile = process.env.PI_SHEPHERD_SESSION;
@@ -69,6 +70,26 @@ function latestAssistantOutcome(messages: any[] | undefined): AssistantOutcome {
 export default function (pi: ExtensionAPI) {
 	const autoExit = process.env.PI_SHEPHERD_AUTO_EXIT === "1";
 	const stayOpen = process.env.PI_SHEPHERD_STAY_OPEN === "1";
+	const agentSystemPromptFile = process.env.PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE;
+	const shouldOmitPiDocumentation = process.env.PI_SHEPHERD_OMIT_PI_DOCUMENTATION === "1";
+	let agentSystemPrompt = "";
+	if (agentSystemPromptFile) {
+		try {
+			agentSystemPrompt = readFileSync(agentSystemPromptFile, "utf8").trim();
+		} catch {
+			// The launch directory is retained for the lifetime of the child, but
+			// a missing file should not prevent the sheep from starting.
+		}
+	}
+
+	if (agentSystemPrompt || shouldOmitPiDocumentation) {
+		pi.on("before_agent_start", (event: any) => {
+			let systemPrompt = event.systemPrompt;
+			if (shouldOmitPiDocumentation) systemPrompt = omitPiDocumentation(systemPrompt);
+			if (agentSystemPrompt) systemPrompt = replacePiIdentity(systemPrompt, agentSystemPrompt);
+			return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
+		});
+	}
 
 	pi.on("agent_end", (event: any, ctx: { shutdown: () => void }) => {
 		// Persistent shepherd agents stay alive, but must still publish a

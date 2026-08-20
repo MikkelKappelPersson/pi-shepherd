@@ -15,6 +15,7 @@
     "artifact-sessions:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-artifact-sessions.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
+    "extract:system-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/extract-pi-system-prompt.mjs",
     "test": "npm run discovery:test && npm run launch:test && npm run registry:test && npm run multi-wait:test && npm run artifact-sessions:test"
   }
 }

@@ -159,6 +159,50 @@ slash-command alias for listing available sheep; the tool action is `sheep`.
 The slash command no longer accepts
 `<agent> <task>`; use the lifecycle tool protocol for work submission.
 
+## System-prompt diagnostic
+
+Use the standalone extractor when you need to inspect the fully assembled Pi
+system prompt, rather than only the Markdown contribution from an agent
+definition:
+
+```bash
+# The parent Pi session (the Shepherd)
+npm run extract:system-prompt -- shepherd
+
+# A discovered child agent (a sheep)
+npm run extract:system-prompt -- sheep scout --scope both --cwd /path/to/project
+
+# Save the raw prompt, or include diagnostic metadata as JSON
+npm run extract:system-prompt -- sheep scout --output /tmp/scout-system.md
+npm run extract:system-prompt -- shepherd --json
+```
+
+The script starts an ephemeral `pi --mode json` process, captures the prompt at
+Pi's `before_agent_start` hook, and terminates it before a provider request is
+made. It therefore does not need a model response or API call. Shepherd mode
+loads the parent extension; sheep mode uses the discovered definition's prompt,
+model, and tools. Only the requested pi-shepherd extension is loaded explicitly
+so the diagnostic is deterministic. `--output` contains raw prompt text and is
+written with restrictive permissions.
+
+When pi-shepherd launches a sheep normally, the Markdown body of its agent
+file replaces Pi's generic leading identity paragraph. For example, scout
+starts with `You are a scout. Quickly investigate a codebase ...`, rather than
+`You are an expert coding assistant ...`; the rest of Pi's built-in tools and
+instructions remain available. The body is inserted only once. An agent can opt out of Pi's documentation
+guidance with camelCase frontmatter; the default is `false`:
+
+```markdown
+---
+name: scout
+description: Fast codebase recon
+omitPiDocumentation: true
+---
+```
+
+This removes only the `Pi documentation ...` section from the built-in prompt;
+project instructions, skills, tools, and the agent file body remain available.
+
 ## Development and tests
 
 TypeScript runs directly; there is no build step. Run the focused suite with:

@@ -85,6 +85,7 @@ export async function startAgent(
       persistent: true,
       systemPrompt: found.systemPrompt,
       omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt,
+      omitPiDocumentation: found.omitPiDocumentation === true,
       model: options.model ?? found.model,
       tools: found.tools,
     });
