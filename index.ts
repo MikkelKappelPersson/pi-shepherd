@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 				const { agents, projectDirs } = discoverAgents(ctx.cwd, loadSettings().agentScope);
 				const { text, remaining } = formatAgentList(agents, 20);
 				ctx.ui?.notify(
-					`pi-shepherd agents (user scope, ${agents.length}): ${text}${
+					`pi-shepherd agents (${loadSettings().agentScope} scope, ${agents.length}): ${text}${
 						remaining > 0 ? ` (+${remaining} more)` : ""
 					}`,
 					"info",
