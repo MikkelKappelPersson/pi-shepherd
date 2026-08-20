@@ -27,6 +27,8 @@ export interface AgentConfig {
 	model?: string;
 	/** Omit pi's built-in default system prompt when delegating this agent. */
 	omitSystemPrompt?: boolean;
+	/** Omit Pi's built-in documentation guidance from the delegated prompt. */
+	omitPiDocumentation: boolean;
 	systemPrompt: string;
 	source: "user" | "project" | "bundled";
 	filePath: string;
@@ -166,6 +168,14 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
 				typeof frontmatter["omit-system-prompt"] === "boolean"
 					? frontmatter["omit-system-prompt"]
 					: undefined,
+			// This option intentionally defaults to false when absent. Accept the
+			// documented camelCase spelling and the conventional kebab-case alias.
+			omitPiDocumentation:
+				typeof frontmatter.omitPiDocumentation === "boolean"
+					? frontmatter.omitPiDocumentation
+					: typeof frontmatter["omit-pi-documentation"] === "boolean"
+						? frontmatter["omit-pi-documentation"]
+						: false,
 			// Pass-through fields, carried as-is when present.
 			userInvocable: frontmatter["user-invocable"],
 			disableModelInvocation: frontmatter["disable-model-invocation"],
