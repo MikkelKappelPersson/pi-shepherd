@@ -2,7 +2,7 @@ import { discoverAgents, type AgentScope } from './discovery.ts';
 import {
   ensureHerdrRuntime,
   getHerdrWorkspaceId,
-  createHerdrTab,
+  createHerdrInstance,
   waitForHerdrShellReady,
   waitForHerdrAgentDetected,
   launchPiInPane,
@@ -38,6 +38,8 @@ export interface StartOptions {
   agentScope?: AgentScope;
   confirmProjectAgents?: boolean;
   omitSystemPrompt?: boolean;
+  placement?: 'pane' | 'tab' | 'workspace';
+  direction?: 'right' | 'down';
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
 }
@@ -58,8 +60,21 @@ export async function startAgent(
     if (!ok) throw new Error('Project-local agent was not approved.');
   }
   await ensureHerdrRuntime();
-  const { paneId, tabId } = createHerdrTab(name, cwd, getHerdrWorkspaceId());
+  const placement = options.placement ?? 'tab';
+  let paneId = '';
+  let tabId = '';
+  let workspaceId = '';
   try {
+    const created = createHerdrInstance(
+      name,
+      cwd,
+      placement,
+      placement === 'workspace' ? undefined : getHerdrWorkspaceId(),
+      options.direction
+    );
+    paneId = created.paneId;
+    tabId = created.tabId;
+    workspaceId = created.workspaceId;
     await waitForHerdrShellReady(paneId, { timeoutMs: 15_000 });
     const files = launchPiInPane(paneId, {
       name,
@@ -75,17 +90,19 @@ export async function startAgent(
     const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
     if (!ready.detected) throw new Error(`Agent "${name}" did not become ready.`);
     return lifecycleRegistry.registerAgent(
-      { agent: name, paneId, tabId, workspaceId: getHerdrWorkspaceId() },
+      { agent: name, paneId, tabId, workspaceId },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         artifactSession: options.artifactSession,
       }
     );
   } catch (error) {
-    try {
-      herdrExecSync(['pane', 'close', paneId]);
-    } catch {}
-    if (!paneExists(paneId)) removeCreatedPaneDir(paneId);
+    if (paneId) {
+      try {
+        herdrExecSync(['pane', 'close', paneId]);
+      } catch {}
+      if (!paneExists(paneId)) removeCreatedPaneDir(paneId);
+    }
     throw error;
   }
 }

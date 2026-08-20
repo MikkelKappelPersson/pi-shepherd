@@ -19,7 +19,12 @@ The model-facing `shepherd` tool also retains diagnostic/operational actions:
 ## Lifecycle usage
 
 `start` launches an idle persistent sheep. It never submits a task and has no
-`stayOpen` option. The sheep remains alive until explicitly closed.
+`stayOpen` option. The sheep remains alive until explicitly closed. By default it
+creates a new background tab; pass `placement: "pane"` to split the current
+pane, or `placement: "workspace"` to create a new workspace. Pane placement
+uses a right split by default; pass `direction: "down"` for a pane below.
+Use pi-shepherd
+only when explicitly instructed because too many Herdr panes may crash pi.
 
 ```text
 agent = shepherd({ action: "start", agent: "scout", cwd: project })
@@ -54,7 +59,7 @@ Waiting never closes a sheep.
 
 | Action | Purpose |
 |---|---|
-| `start` | Create an idle persistent sheep in a background Herdr tab |
+| `start` | Create an idle persistent sheep in a background Herdr tab (or requested pane/workspace placement) |
 | `prompt` | Submit one message using an `AgentHandle`; returns immediately |
 | `wait` | Wait for one or many `PromptHandle`s |
 | `status` | Inspect a handle without focusing or mutating Herdr |
