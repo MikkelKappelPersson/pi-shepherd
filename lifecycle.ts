@@ -1,4 +1,5 @@
 import { discoverAgents, type AgentScope } from './discovery.ts';
+import { loadSettings } from './settings.ts';
 import {
   ensureHerdrRuntime,
   getHerdrWorkspaceId,
@@ -50,9 +51,12 @@ export async function startAgent(
   ctx: { cwd: string; hasUI?: boolean; ui?: any }
 ): Promise<AgentHandle> {
   const cwd = options.cwd ?? ctx.cwd;
-  const found = discoverAgents(cwd, options.agentScope ?? 'user').agents.find(a => a.name === name);
+  const settings = loadSettings();
+  const agentScope = options.agentScope ?? settings.agentScope;
+  const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
+  const found = discoverAgents(cwd, agentScope).agents.find(a => a.name === name);
   if (!found) throw new Error(`Unknown agent "${name}".`);
-  if (found.source === 'project' && options.confirmProjectAgents !== false && ctx.hasUI) {
+  if (found.source === 'project' && confirmProjectAgents && ctx.hasUI) {
     const ok = await ctx.ui.confirm(
       'Run project-local agent?',
       `Agent: ${name}\nSource: ${found.filePath}`

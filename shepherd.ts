@@ -287,10 +287,21 @@ async function doAction(
     case 'start': {
       const a: any = args;
       const artifactSession = parentArtifactSession(ctx);
+      const settings = loadSettings();
       // Startup readiness has its own fixed internal grace periods; timeout
-      // settings apply only to submitted prompts and their waits.
+      // settings apply only to submitted prompts and their waits. Undefined
+      // options inherit persisted settings; explicitly supplied options win.
       const { timeout: _ignoredTimeout, ...startOptions } = a;
-      const handle = await startAgent(a.agent, { ...startOptions, artifactSession }, ctx);
+      const handle = await startAgent(
+        a.agent,
+        {
+          ...startOptions,
+          agentScope: a.agentScope ?? settings.agentScope,
+          confirmProjectAgents: a.confirmProjectAgents ?? settings.confirmProjectAgents,
+          artifactSession,
+        },
+        ctx
+      );
       return textResult(
         `Started idle sheep ${a.agent} (${handle.id}). Shared fieldnotes session: ${artifactSession.sessionRelativePath}. Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
         { handle, artifactSession }
@@ -336,7 +347,7 @@ async function doAction(
     }
     case 'sheep': {
       // List available sheep definitions for the shepherd's herd.
-      const scope = args.agentScope ?? 'user';
+      const scope = args.agentScope ?? loadSettings().agentScope;
       const { agents, projectDirs } = discoverAgents(ctx.cwd, scope);
       if (agents.length === 0)
         return textResult('No sheep definitions found.', { agents: [], projectDirs, scope });

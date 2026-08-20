@@ -2,8 +2,7 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 
 export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const, {
-  description: 'Which sheep-definition directories to use. Default: "user".',
-  default: 'user',
+  description: 'Which sheep-definition directories to use. Defaults to the persisted Shepherd setting; an explicit value overrides it.',
 });
 
 export const StartPlacementSchema = StringEnum(['pane', 'tab', 'workspace'] as const, {
