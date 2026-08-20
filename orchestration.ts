@@ -69,7 +69,7 @@ interface AgentRecord {
   handle: AgentHandle;
   /** Completion sidecar emitted by the child for each completed prompt. */
   completionSignalPath?: string;
-  /** Durable artifact session owned by the parent pi session. */
+  /** Durable fieldnotes session owned by the parent pi session. */
   artifactSession?: ShepherdSession;
   state: AgentLifecycleState;
   activePromptId?: string;

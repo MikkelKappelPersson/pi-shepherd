@@ -1,0 +1,10 @@
+# Shepherd Concept Dictionary
+
+- **Shepherd**: The main orchestrator agent. The main pi session running the pi-shepherd extension. The shepherd is responsible for managing the lifecycle of his herd of sheep.
+- **Sheep**: Are agents created by the shepherd. Also called a subagent in other contexts. Sheep are the workers that perform tasks assigned by the shepherd. Each with a unique role defined by their markdown file.
+- **Herd**: The collection of sheep managed by the shepherd. The herd can consist of multiple sheep, each with their own unique role and responsibilities. A herd is tied to the shepherd's pi session.
+- **Fieldnotes**: A collection of notes tied to the session. in other frameworks this are sometimes called artifacts.
+- **Note**: A single note in the fieldnotes. Each note belongs to a specific sheep or shepherd. Notes are used to by its owner to track and convey information about their work, progress, and observations. The Shepherd´s notes are used to track the overall progress of the herd and to provide guidance and feedback to future sheep. Notes can be created, updated, and deleted by their owner. Notes can be shared with other sheep or the shepherd for collaboration and feedback.
+- **Sheep's note**: A note created by a sheep to track its work, observations, and progress, and to provide information for the shepherd and other sheep.
+- **Shepherd's note**: A note created by the shepherd to track the overall progress of the herd and to provide guidance, feedback, and a map to all present and future sheep.
+- **Session**: A session is tied to the shepherd's pi session and is used to track the state of the herd and its sheep.

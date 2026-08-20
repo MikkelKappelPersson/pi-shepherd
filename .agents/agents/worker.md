@@ -1,6 +1,6 @@
 ---
 name: worker
-description: General-purpose subagent with full capabilities, isolated context
+description: General-purpose sheep with full capabilities, isolated context
 tools: read, write, edit, bash
 model: null
 ---

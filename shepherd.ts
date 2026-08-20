@@ -2,10 +2,10 @@
  * Shepherd tool — the model-facing `shepherd` tool for the parent pi session.
  *
  * One tool surface:
- *   - start/prompt/wait/status/read/close/gc — manage pi agents living in
+ *   - start/prompt/wait/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
- * Registered by index.ts in the parent session only. Delegated children get
+ * Registered by index.ts in the parent session only. Sheep get
  * the separate in-tab `shepherd_done` tool from shepherd-done.ts instead.
  */
 
@@ -58,44 +58,44 @@ const SourceSchema = StringEnum(['visible', 'recent', 'recent-unwrapped', 'detec
   default: 'recent-unwrapped',
 });
 
-const ListParams = Type.Object({
-  action: Type.Literal('list', { description: 'List Herdr panes and detected agents.' }),
+const HerdParams = Type.Object({
+  action: Type.Literal('herd', { description: 'List the live herd: sheep detected in Herdr panes.' }),
 });
-const AgentsParams = Type.Object({
-  action: Type.Literal('agents', {
-    description: 'List available discovered agent definitions and their source metadata.',
+const SheepParams = Type.Object({
+  action: Type.Literal('sheep', {
+    description: 'List available sheep definitions (agent/subagent definitions) and their source metadata.',
   }),
   agentScope: Type.Optional(AgentScopeSchema),
 });
 const ReadParams = Type.Object({
   action: Type.Literal('read', {
-    description: 'Read recent terminal output from a pane or agent.',
+    description: 'Read recent terminal output from a sheep or pane.',
   }),
-  name: Type.String({ description: 'Agent name, Herdr pane id, or AgentHandle id of the target.' }),
+  name: Type.String({ description: 'Sheep name, Herdr pane id, or AgentHandle id of the target.' }),
   lines: Type.Optional(
     Type.Integer({ description: 'Number of recent lines for read (default 40)', default: 40 })
   ),
   source: Type.Optional(SourceSchema),
 });
-const GcParams = Type.Object({
-  action: Type.Literal('gc', { description: 'Prune stale pi-shepherd pane registrations.' }),
+const PruneParams = Type.Object({
+  action: Type.Literal('prune', { description: 'Remove stale pi-shepherd pane registrations.' }),
 });
 
 export const ShepherdParams = Type.Union(
   [
-    ListParams,
-    AgentsParams,
+    HerdParams,
+    SheepParams,
     StartParams,
     LifecyclePromptParams,
     WaitParams,
     LifecycleStatusParams,
     LifecycleCloseParams,
     ReadParams,
-    GcParams,
+    PruneParams,
   ],
   {
     description:
-      'Action-discriminated shepherd commands for delegating work and managing Herdr panes.',
+      'Action-discriminated shepherd commands for herding sheep (agents/subagents), managing their fieldnotes (artifacts), and controlling Herdr panes.',
   }
 );
 
@@ -104,7 +104,7 @@ type ShepherdArgs = Static<typeof ShepherdParams>;
 /**
  * Some model/provider tool-call transports encode nested JSON objects as a
  * string. Pi validates arguments after this hook, so normalize only known
- * transport-serialization artifacts here while keeping the public schema
+ * transport-serialization details here while keeping the public schema
  * strict and object-only for handles. Native handles and primitive values
  * remain the canonical form.
  */
@@ -209,7 +209,7 @@ function cliOption(name: string, value: unknown, maxLength = 80): string {
 function shepherdCallPreview(args: Record<string, any>, expanded = false): string {
   const valueLimit = expanded ? Number.POSITIVE_INFINITY : 80;
   const idLimit = expanded ? Number.POSITIVE_INFINITY : 48;
-  const tokens = ['shepherd', String(args.action ?? 'list')];
+  const tokens = ['shepherd', String(args.action ?? 'unknown')];
   const add = (name: string) => {
     const option = cliOption(name, args[name], valueLimit);
     if (option) tokens.push(option);
@@ -241,7 +241,7 @@ function shepherdCallPreview(args: Record<string, any>, expanded = false): strin
     case 'close':
       tokens.push(handlePreview(args.handle, idLimit));
       break;
-    case 'agents':
+    case 'sheep':
       add('agentScope');
       break;
     case 'read':
@@ -290,7 +290,7 @@ async function doAction(
       const { timeout: _ignoredTimeout, ...startOptions } = a;
       const handle = await startAgent(a.agent, { ...startOptions, artifactSession }, ctx);
       return textResult(
-        `Started idle agent ${a.agent} (${handle.id}). Shared artifact session: ${artifactSession.sessionRelativePath}. Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
+        `Started idle sheep ${a.agent} (${handle.id}). Shared fieldnotes session: ${artifactSession.sessionRelativePath}. Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
         { handle, artifactSession }
       );
     }
@@ -304,7 +304,7 @@ async function doAction(
       const handle = await promptAgent(a.handle, a.message, { timeout: timeoutMs });
       const artifact = lifecycleRegistry.promptArtifact(handle);
       return textResult(
-        `Prompt submitted (${handle.id}); artifact: ${artifact.artifact?.relativePath ?? 'none'}. Call wait with the complete details.handle object natively. For parallel work, pass a native array of complete prompt handle objects.`,
+        `Prompt submitted (${handle.id}); note: ${artifact.artifact?.relativePath ?? 'none'}. Call wait with the complete details.handle object natively. For parallel work, pass a native array of complete prompt handle objects.`,
         {
           handle,
           ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
@@ -330,25 +330,25 @@ async function doAction(
     case 'close': {
       const a: any = args;
       const handle = closeAgent(a.handle);
-      return textResult(`Closed agent ${handle.id}.`, { handle });
+      return textResult(`Closed sheep ${handle.id}.`, { handle });
     }
-    case 'agents': {
-      // List discovered agent definitions (for delegation).
+    case 'sheep': {
+      // List available sheep definitions for the shepherd's herd.
       const scope = args.agentScope ?? 'user';
       const { agents, projectDirs } = discoverAgents(ctx.cwd, scope);
       if (agents.length === 0)
-        return textResult('No agent definitions found.', { agents: [], projectDirs, scope });
+        return textResult('No sheep definitions found.', { agents: [], projectDirs, scope });
       const lines = agents.map(a => `${a.name} (${a.source}): ${a.description}`);
       return textResult(lines.join('\n'), { agents, projectDirs, scope });
     }
 
-    case 'list': {
+    case 'herd': {
       // Silently drop registrations for panes that no longer exist so a
       // long-lived session doesn't accumulate stale entries.
       pruneStaleCreatedPanes();
       const out = herdrExecSync(['agent', 'list']);
       const agents = agentSummaries(out);
-      if (agents.length === 0) return textResult('No agents detected in Herdr.', { agents });
+      if (agents.length === 0) return textResult('No sheep detected in Herdr.', { agents });
       return textResult(agents.map(formatSummary).join('\n'), { agents });
     }
 
@@ -431,43 +431,47 @@ async function doAction(
       }
     }
 
-    case 'gc': {
+    case 'prune': {
       const pruned = pruneStaleCreatedPanes();
       const remaining = loadCreatedPanes().length;
       return textResult(
         pruned === 0
-          ? `No stale pi-shepherd panes to prune (${remaining} registered).`
-          : `Pruned ${pruned} stale pane registration(s); ${remaining} remain.`,
+          ? `No stale pi-shepherd panes found (${remaining} registered).`
+          : `Removed ${pruned} stale pane registration(s); ${remaining} remain.`,
         { pruned, remaining }
       );
     }
 
     default:
-      return textResult(`Unknown herd action: ${action}`, {});
+      return textResult(`Unknown shepherd action: ${action}`, {});
   }
 }
 
 export const SHEPHERD_TOOL_DESCRIPTION = [
-  'Manage specialized agents inside Herdr panes.',
+  'Manage a herd of specialized sheep inside Herdr panes.',
+  'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of sheep; sheep are the created workers commonly called agents or subagents.',
+  'Fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each sheep invocation.',
+  'Use start to create an idle sheep, prompt to submit work, wait to collect its result, status to inspect it, and close to end it. Waiting does not close sheep automatically.',
   'Lifecycle handles must be passed as the complete native handle object returned in details.handle; never manually stringify, replace it with an id, or reconstruct it.',
   'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
 ].join(' ');
 
-export const SHEPHERD_TOOL_PROMPT_SNIPPET = 'Manage specialized agents inside Herdr panes.';
+export const SHEPHERD_TOOL_PROMPT_SNIPPET =
+  'Shepherd (orchestrator): manage a herd of sheep (agents/subagents) and their fieldnotes (durable artifacts) inside Herdr panes.';
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
-  'Always start a session with shepherd action=agents to retrieve available agent definitions.',
-  'Workflow: Start an idle agent, then prompt it. Wait with the complete prompt details.',
-  'Sequential work is better for work that needs context from the previous agents. fx plan and implement this feature: planner -> worker -> reviewer.',
-  'Parallel work is better for work that can be done independently. fx research these three topics, or scout these three repos.',
-  'For parallel work, call shepherd wait with an array of handle objects.',
-  'Agents remain alive after wait and must be explicitly closed. after task is done, close the agent unless told otherwise.',
+  'Keep every sheep\'s complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.',
+  'For note-producing prompts, read the shared shepherd.md fieldnotes index first and write only to the assigned note.',
+  'Use shepherd action=sheep to retrieve available sheep definitions and source metadata before choosing a sheep.',
+  'Workflow: start an idle sheep, prompt it, then wait with the complete prompt handle. A bare start submits no task.',
+  'For sequential work, wait for one result before including its text in the next prompt. For independent work, start and prompt multiple sheep, then call wait with one native array of complete prompt handles.',
+  'Waiting does not close a sheep. Close each sheep explicitly when it is no longer needed; close also cancels its unresolved prompt.',
 ];
 
 export function registerShepherdTool(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'shepherd',
-    label: 'Shepherd (manage Herdr agents)',
+    label: 'Shepherd (manage Herdr sheep/agents)',
     description: SHEPHERD_TOOL_DESCRIPTION,
     promptSnippet: SHEPHERD_TOOL_PROMPT_SNIPPET,
     promptGuidelines: SHEPHERD_TOOL_PROMPT_GUIDELINES,
@@ -489,7 +493,7 @@ export function registerShepherdTool(pi: ExtensionAPI) {
     },
 
     renderCall(args, theme, context) {
-      const action = String(args.action ?? 'list');
+      const action = String(args.action ?? 'unknown');
       const command = shepherdCallPreview(args as Record<string, any>, context.expanded);
       const prefix = `shepherd ${action}`;
       const component = reusableText(context.lastComponent);

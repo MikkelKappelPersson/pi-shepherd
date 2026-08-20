@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Inspect the model-facing Shepherd tool registration used by the parent
- * (orchestrator) pi session.
+ * (shepherd) pi session.
  *
  * Usage:
  *   node --experimental-strip-types scripts/show-shepherd-orchestrator.mjs
@@ -45,7 +45,7 @@ if (json) {
 	process.exit(0);
 }
 
-console.log("=== Parent/orchestrator Shepherd tool ===");
+console.log("=== Parent/shepherd Shepherd tool ===");
 console.log(`Name: ${registration.name}`);
 console.log(`Label: ${registration.label}`);
 console.log("\n=== Textual system-prompt contribution ===\n");

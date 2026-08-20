@@ -1,5 +1,5 @@
 /**
- * Filesystem persistence for artifact-backed Shepherd sessions.
+ * Filesystem persistence for Shepherd fieldnotes sessions.
  *
  * This module deliberately has no pi/Herdr dependencies.  All mutations use
  * small exclusive lock files and same-directory rename operations so it is
@@ -72,7 +72,7 @@ interface SessionRecord extends ShepherdSession {
 	artifacts: ArtifactReservation[];
 }
 
-/** A validated, parent-bound persistent artifact session. */
+/** A validated, parent-bound persistent fieldnotes session. */
 export type ArtifactSession = ShepherdSession & {
 	artifactSessionVersion: 2;
 	parentPiSession: ParentPiSessionBinding;
@@ -255,9 +255,9 @@ function renderMoc(record: SessionRecord): string {
 		: "legacy/unbound";
 	const artifacts = record.artifacts.length
 		? record.artifacts.map((a, i) => `${i + 1}. [${displayName(a.agent)} ${String(a.ordinal).padStart(2, "0")}](./${a.fileName}) — ${a.status}`).join("\n")
-		: "_No artifacts reserved yet._";
+		: "_No notes reserved yet._";
 	const flow = record.artifacts.length ? record.artifacts.map((a) => `[${a.fileName.replace(/\.md$/, "")}](./${a.fileName})`).join(" → ") : "_No flow yet._";
-	return `# Session ${String(record.ordinal).padStart(4, "0")} — ${displayName(record.sessionName)}\n\n- **Status:** ${record.status}\n- **Session name:** \`${record.sessionName}\`\n- **Artifact session version:** ${record.artifactSessionVersion ?? "legacy"}\n- **Parent binding:** ${binding}\n- **Started:** ${record.startedAt}\n- **Updated:** ${record.updatedAt}\n- **Project:** .\n- **Mode(s):** ${modes || "pending"}\n\n## Artifacts\n\n${artifacts}\n\n## Flow\n\n${flow}\n`;
+	return `# Session ${String(record.ordinal).padStart(4, "0")} — ${displayName(record.sessionName)}\n\n- **Status:** ${record.status}\n- **Session name:** \`${record.sessionName}\`\n- **Fieldnotes session version:** ${record.artifactSessionVersion ?? "legacy"}\n- **Parent binding:** ${binding}\n- **Started:** ${record.startedAt}\n- **Updated:** ${record.updatedAt}\n- **Project:** .\n- **Mode(s):** ${modes || "pending"}\n\n## Notes\n\n${artifacts}\n\n## Flow\n\n${flow}\n`;
 }
 function writeMoc(record: SessionRecord): void { atomicWrite(path.join(record.sessionPath, "shepherd.md"), renderMoc(record)); }
 function updateRecordAndMoc(record: SessionRecord): void { record.updatedAt = now(); writeRecord(record.sessionPath, record); writeMoc(record); }
@@ -385,7 +385,7 @@ function artifactFrontmatter(a: ArtifactReservation, session: SessionRecord, ext
 		const safe = /^[A-Za-z0-9._-]+$/.test(value) ? value : JSON.stringify(value);
 		return `${key}: ${safe}`;
 	});
-	return `---\n${lines.join("\n")}\n---\n\n# ${displayName(a.agent)} ${String(a.ordinal).padStart(2, "0")}\n\n<!-- Agent output or agent-maintained report follows. -->\n`;
+	return `---\n${lines.join("\n")}\n---\n\n# ${displayName(a.agent)} ${String(a.ordinal).padStart(2, "0")}\n\n<!-- Sheep's note or sheep-maintained report follows. -->\n`;
 }
 function initializeArtifact(a: ArtifactReservation, session: SessionRecord): void { atomicWrite(a.filePath, artifactFrontmatter(a, session) + "\n"); }
 
@@ -462,7 +462,7 @@ export function finalizeArtifact(session: ShepherdSession, artifact: ArtifactRes
 	} finally { release(); }
 }
 
-/** Update session status/modes and atomically regenerate its MOC. */
+/** Update session status/modes and atomically regenerate its fieldnotes index. */
 export function updateSessionMoc(session: ShepherdSession, update: { mode?: SessionMode; status?: string } = {}): ShepherdSession {
 	const release = lock(path.join(session.sessionPath, ".session.lock"));
 	try {
@@ -488,7 +488,7 @@ export interface ParentArtifactSessionOptions {
 }
 
 /**
- * Resolve the one durable artifact session owned by a parent pi session and
+ * Resolve the one durable fieldnotes session owned by a parent pi session and
  * project root. This deliberately does not use createOrResumeSession's
  * human-facing name matching: legacy unbound sessions and sessions belonging
  * to another parent are never silently claimed.

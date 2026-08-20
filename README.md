@@ -1,8 +1,9 @@
 # pi-shepherd
 
-A Herdr-native pi extension for explicit agent lifecycle orchestration.
-Agents are visible in Herdr and are controlled through five composable
-primitives:
+A Herdr-native pi extension for explicit sheep lifecycle orchestration.
+The Shepherd is the parent pi session and orchestrator. Its herd is made up of
+sheep—created workers conventionally called agents or subagents—visible in Herdr
+and controlled through five composable primitives:
 
 ```text
 start(agent, options) -> AgentHandle
@@ -13,12 +14,12 @@ close(agentHandle) -> void
 ```
 
 The model-facing `shepherd` tool also retains diagnostic/operational actions:
-`agents`, `list`, `read`, and `gc`.
+`sheep`, `herd`, `read`, and `prune`.
 
 ## Lifecycle usage
 
-`start` launches an idle persistent agent. It never submits a task and has no
-`stayOpen` option. The agent remains alive until explicitly closed.
+`start` launches an idle persistent sheep. It never submits a task and has no
+`stayOpen` option. The sheep remains alive until explicitly closed.
 
 ```text
 agent = shepherd({ action: "start", agent: "scout", cwd: project })
@@ -32,7 +33,7 @@ shepherd({ action: "close", handle: agent.handle })
 ```
 
 Prompt submission is non-blocking. `wait` is the synchronization point. For
-parallel work, start multiple agents, prompt each one, then wait on the array:
+parallel work, start multiple sheep, prompt each one, then wait on the array:
 
 ```text
 scoutA = start("scout", options)
@@ -44,26 +45,26 @@ close(scoutA)
 close(scoutB)
 ```
 
-Arrays wait concurrently and preserve input order. A single agent may have
+Arrays wait concurrently and preserve input order. A single sheep may have
 only one unresolved prompt. Sequential chains are composed by the caller:
 wait for one result, include its text in the next prompt, and wait again.
-Waiting never closes an agent.
+Waiting never closes a sheep.
 
 ## Shepherd actions
 
 | Action | Purpose |
 |---|---|
-| `start` | Create an idle persistent discovered agent in a background Herdr tab |
+| `start` | Create an idle persistent sheep in a background Herdr tab |
 | `prompt` | Submit one message using an `AgentHandle`; returns immediately |
 | `wait` | Wait for one or many `PromptHandle`s |
 | `status` | Inspect a handle without focusing or mutating Herdr |
-| `close` | Explicitly close an owned agent and cancel unresolved prompts |
-| `agents` | List discovered agent definitions and source metadata |
-| `list` | List live Herdr agents |
+| `close` | Explicitly close an owned sheep and cancel unresolved prompts |
+| `sheep` | List available sheep (agent/subagent) definitions and source metadata |
+| `herd` | List the live herd: sheep detected in Herdr panes |
 | `read` | Read recent output for diagnostics |
-| `gc` | Prune stale pi-shepherd pane registrations |
+| `prune` | Remove stale pi-shepherd pane registrations |
 
-`read` accepts an agent name, a Herdr pane id such as `w9:p18`, or a recorded
+`read` accepts a sheep name, a Herdr pane id such as `w9:p18`, or a recorded
 Shepherd pane id. Herdr's opaque internal pane handle (for example, `pane-14`)
 is not a pane target and cannot be read. `recent` and `recent-unwrapped` may
 return empty output for idle panes with no scrollback; use `visible` for the
@@ -97,7 +98,7 @@ manually stringify the array. If the tool reports an invalid handle shape, retry
 the exact native object from `details.handle`. `close` refuses any pane not recorded
 in the pi-shepherd created-pane registry.
 
-## Agent discovery and security
+## Sheep discovery and security
 
 Definitions use VS Code custom-agent Markdown (`.md` or `.agent.md`) with YAML
 frontmatter and a Markdown system prompt. Discovery precedence is:
@@ -111,12 +112,12 @@ frontmatter and a Markdown system prompt. Discovery precedence is:
 
 User-level discovery is the default. Project definitions are repo-controlled,
 require explicit project/both scope, and require confirmation when interactive.
-Agents retain the host user's normal pi tool permissions.
+Sheep retain the host user's normal pi tool permissions.
 
-## Parent-bound artifact sessions
+## Parent-bound note sessions
 
-All agents orchestrated by one parent pi session in the same project share one
-persistent artifact session under:
+All sheep orchestrated by one parent pi session in the same project share one
+persistent note session under:
 
 ```text
 .shepherd/sessions/NNNN-orchestrator-<id>/
@@ -127,12 +128,12 @@ persistent artifact session under:
 
 The binding uses pi's parent `sessionManager.getSessionId()` and the parent
 project root. A second `start` or `prompt` reuses that directory; each prompt
-gets a distinct artifact linked from the single `shepherd.md` MOC. Child pi
+gets a distinct note linked from the `shepherd.md` fieldnotes collection. Child pi
 JSONL files, Herdr panes, and lifecycle handles are execution state only.
-Artifacts are retained after `wait`, `close`, timeout, and extension restart;
+Notes are retained after `wait`, `close`, timeout, and extension restart;
 pi-shepherd does not automatically delete, archive, commit, or check out them.
-Children receive the assigned artifact and shared MOC paths in their prompt
-context and must write only to their assigned artifact.
+Children receive the assigned note and shared fieldnotes paths in their prompt
+context and must write only to their assigned note.
 
 ## Herdr runtime
 
@@ -148,7 +149,9 @@ truth for safe close operations.
 ## Slash command
 
 `/shepherd list`, `/shepherd agents`, `/shepherd herd`, and
-`/shepherd settings` remain available. The slash command no longer accepts
+`/shepherd settings` remain available. Here, `/shepherd agents` is the
+slash-command alias for listing available sheep; the tool action is `sheep`.
+The slash command no longer accepts
 `<agent> <task>`; use the lifecycle tool protocol for work submission.
 
 ## Development and tests

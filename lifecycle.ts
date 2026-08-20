@@ -92,13 +92,13 @@ export async function startAgent(
 
 function artifactContext(session: ShepherdSession, artifact: ArtifactReservation): string {
   return [
-    '\n\n--- Shepherd artifact context ---',
+    '\n\n--- Shepherd fieldnotes context ---',
     `Shared session: ${session.sessionPath}`,
-    `Session MOC: ${session.mocPath}`,
-    `Assigned artifact: ${artifact.filePath}`,
-    `Project-relative artifact: ${artifact.relativePath}`,
-    'Read the shared MOC before working. Write your findings only to the assigned artifact; do not create another Shepherd session.',
-    '--- End Shepherd artifact context ---',
+    `Shared fieldnotes: ${session.mocPath}`,
+    `Assigned note: ${artifact.filePath}`,
+    `Project-relative note: ${artifact.relativePath}`,
+    'Read the shared fieldnotes before working. Write your findings only to the assigned note; do not create another Shepherd session.',
+    '--- End Shepherd fieldnotes context ---',
   ].join('\n');
 }
 
