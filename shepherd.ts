@@ -220,6 +220,8 @@ function shepherdCallPreview(args: Record<string, any>, expanded = false): strin
       tokens.push(cliValue(args.agent, valueLimit));
       for (const name of [
         'agentScope',
+        'placement',
+        'direction',
         'confirmProjectAgents',
         'cwd',
         'model',
@@ -452,6 +454,7 @@ export const SHEPHERD_TOOL_DESCRIPTION = [
   'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of sheep; sheep are the created workers commonly called agents or subagents.',
   'Fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each sheep invocation.',
   'Use start to create an idle sheep, prompt to submit work, wait to collect its result, status to inspect it, and close to end it. Waiting does not close sheep automatically.',
+  'Do not use this tool unless explicitly instructed: too many Herdr panes may crash pi.',
   'Lifecycle handles must be passed as the complete native handle object returned in details.handle; never manually stringify, replace it with an id, or reconstruct it.',
   'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
 ].join(' ');
@@ -463,7 +466,7 @@ export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
   'Keep every sheep\'s complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.',
   'For note-producing prompts, read the shared shepherd.md fieldnotes index first and write only to the assigned note.',
   'Use shepherd action=sheep to retrieve available sheep definitions and source metadata before choosing a sheep.',
-  'Workflow: start an idle sheep, prompt it, then wait with the complete prompt handle. A bare start submits no task.',
+  'Workflow: start an idle sheep, prompt it, then wait with the complete prompt handle. A bare start submits no task. Start defaults to a new tab; use placement pane or workspace only when explicitly requested. For pane placement, direction defaults to right and can be set to down.',
   'For sequential work, wait for one result before including its text in the next prompt. For independent work, start and prompt multiple sheep, then call wait with one native array of complete prompt handles.',
   'Waiting does not close a sheep. Close each sheep explicitly when it is no longer needed; close also cancels its unresolved prompt.',
 ];

@@ -6,12 +6,24 @@ export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const,
   default: 'user',
 });
 
+export const StartPlacementSchema = StringEnum(['pane', 'tab', 'workspace'] as const, {
+  description:
+    'Where to create the sheep: pane splits the current pane, tab creates a new tab, workspace creates a new workspace. Default: tab.',
+  default: 'tab',
+});
+export const StartDirectionSchema = StringEnum(['right', 'down'] as const, {
+  description: 'Pane split direction when placement is pane. Default: right.',
+  default: 'right',
+});
+
 export const StartParams = Type.Object({
   action: Type.Literal('start', {
     description: 'Start an idle persistent sheep (agent/subagent); does not submit work.',
   }),
   agent: Type.String({ description: 'Exact discovered sheep name (case-sensitive).' }),
   agentScope: Type.Optional(AgentScopeSchema),
+  placement: Type.Optional(StartPlacementSchema),
+  direction: Type.Optional(StartDirectionSchema),
   confirmProjectAgents: Type.Optional(Type.Boolean({ default: true })),
   cwd: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),

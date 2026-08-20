@@ -344,39 +344,82 @@ function shellQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
-/** Create a new tab in a workspace and return its root pane + tab ids. */
+export type HerdrPlacement = 'pane' | 'tab' | 'workspace';
+
+/**
+ * Create the requested Herdr container and return the pane running the sheep.
+ * The default is a new tab; all placements stay in the background.
+ */
+export function createHerdrInstance(
+	label: string,
+	cwd: string,
+	placement: HerdrPlacement = 'tab',
+	workspaceId?: string,
+	direction: 'right' | 'down' = 'right',
+): { paneId: string; tabId: string; workspaceId: string } {
+	let out: any;
+	if (placement === 'pane') {
+		const args = ['pane', 'split', '--direction', direction, '--cwd', cwd, '--no-focus'];
+		if (process.env.HERDR_PANE_ID) args.push('--pane', process.env.HERDR_PANE_ID);
+		else throw new Error('Pane placement requires HERDR_PANE_ID for the calling Herdr pane.');
+		out = herdrExecSync(args);
+	} else if (placement === 'workspace') {
+		out = herdrExecSync(['workspace', 'create', '--label', label, '--cwd', cwd, '--no-focus']);
+	} else {
+		const args = ['tab', 'create', '--label', label, '--cwd', cwd, '--no-focus'];
+		if (workspaceId) args.splice(2, 0, '--workspace', workspaceId);
+		out = herdrExecSync(args);
+	}
+
+	const result = out?.result;
+	const root = result?.root_pane as Record<string, unknown> | undefined;
+	const pane = result?.pane as Record<string, unknown> | undefined;
+	const paneId =
+		(typeof root?.pane_id === 'string' && root.pane_id) ||
+		(typeof pane?.pane_id === 'string' && pane.pane_id) ||
+		undefined;
+	const tabId =
+		(typeof root?.tab_id === 'string' && root.tab_id) ||
+		(typeof result?.tab?.tab_id === 'string' && result.tab.tab_id) ||
+		(typeof pane?.tab_id === 'string' && pane.tab_id) ||
+		'';
+	const resolvedWorkspaceId =
+		(typeof root?.workspace_id === 'string' && root.workspace_id) ||
+		(typeof pane?.workspace_id === 'string' && pane.workspace_id) ||
+		(typeof result?.workspace?.workspace_id === 'string' && result.workspace.workspace_id) ||
+		(typeof result?.workspace_id === 'string' && result.workspace_id) ||
+		(typeof result?.tab?.workspace_id === 'string' && result.tab.workspace_id) ||
+		(placement !== 'workspace' ? workspaceId || process.env.HERDR_WORKSPACE_ID || '' : '');
+	if (!paneId || !resolvedWorkspaceId) {
+		// A successful create with an unexpected response must not leave an
+		// unowned background pane behind. If Herdr gave us a pane id, close it
+		// before reporting the malformed response.
+		if (paneId) {
+			try {
+				herdrExecSync(['pane', 'close', paneId]);
+			} catch {
+				/* best effort; the caller still receives the creation error */
+			}
+		}
+		throw new Error(`Unexpected herdr ${placement} create output: ${JSON.stringify(out)}`);
+	}
+	try {
+		herdrExecSync(['pane', 'rename', paneId, label]);
+	} catch {
+		/* cosmetic */
+	}
+	recordCreatedPane({ paneId, tabId, name: label, cwd, createdAt: Date.now() });
+	return { paneId, tabId, workspaceId: resolvedWorkspaceId };
+}
+
+/** Backwards-compatible helper for callers that always want a new tab. */
 export function createHerdrTab(
 	label: string,
 	cwd: string,
 	workspaceId?: string,
 ): { paneId: string; tabId: string } {
-	const args = ["tab", "create", "--label", label, "--cwd", cwd, "--no-focus"];
-	if (workspaceId) args.splice(2, 0, "--workspace", workspaceId);
-	const out = herdrExecSync(args) as any;
-	const result = out?.result;
-	const root = result?.root_pane as Record<string, unknown> | undefined;
-	const paneId =
-		typeof root?.pane_id === "string" && root.pane_id ? root.pane_id : undefined;
-	const tabId =
-		typeof root?.tab_id === "string" && root.tab_id
-			? root.tab_id
-			: (result?.tab?.tab_id as string | undefined);
-	if (!paneId) {
-		throw new Error(`Unexpected herdr tab create output: ${JSON.stringify(out)}`);
-	}
-	try {
-		herdrExecSync(["pane", "rename", paneId, label]);
-	} catch {
-		/* cosmetic */
-	}
-	recordCreatedPane({
-		paneId,
-		tabId: tabId ?? "",
-		name: label,
-		cwd,
-		createdAt: Date.now(),
-	});
-	return { paneId, tabId: tabId ?? "" };
+	const created = createHerdrInstance(label, cwd, 'tab', workspaceId);
+	return { paneId: created.paneId, tabId: created.tabId };
 }
 
 /** Wait until the freshly created pane's foreground shell is at a prompt. */
