@@ -194,6 +194,9 @@ instead of manual commands.
 
 ## System-prompt diagnostic
 
+For the complete diagnostic workflow, options, prompt-composition details, and
+troubleshooting, see the [Diagnostics guide](docs/diagnostics.md).
+
 Use the standalone extractor when you need to inspect the fully assembled Pi
 system prompt, rather than only the Markdown contribution from an agent
 definition:
