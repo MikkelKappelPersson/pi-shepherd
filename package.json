@@ -17,5 +17,12 @@
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
     "extract:system-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/extract-pi-system-prompt.mjs",
     "test": "npm run discovery:test && npm run launch:test && npm run registry:test && npm run multi-wait:test && npm run artifact-sessions:test"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "^0.84.2",
+    "@earendil-works/pi-ai": "^0.84.2",
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
+    "typebox": "^1.3.7"
   }
 }

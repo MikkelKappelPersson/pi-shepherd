@@ -19,10 +19,10 @@ steps helps keep contributions focused and easy to review.
 pi-shepherd is a TypeScript pi extension that runs directly and does not require
 a build step.
 
-The test files import the pi runtime package `@earendil-works/pi-coding-agent`,
-which is provided by the pi host rather than declared as an npm dependency of
-this extension. Run the tests from an environment where that package is
-available.
+The extension imports several packages from the pi runtime. They are supplied
+by the pi host at runtime, and are also listed as development dependencies so
+that the verification suite can run from a clean checkout. Install them with
+`npm install` (or `npm ci`) before running the tests.
 
 1. Fork the repository on GitHub.
 2. Clone your fork and enter the project directory.
