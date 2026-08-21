@@ -151,13 +151,46 @@ Temporary launch/session files are retained while pi is alive and cleaned only
 after the pane is confirmed gone. The pane ownership registry is the source of
 truth for safe close operations.
 
-## Slash command
+## Manual commands
 
-`/shepherd list`, `/shepherd agents`, `/shepherd herd`, and
-`/shepherd settings` remain available. Here, `/shepherd agents` is the
-slash-command alias for listing available sheep; the tool action is `sheep`.
-The slash command no longer accepts
-`<agent> <task>`; use the lifecycle tool protocol for work submission.
+Sometimes you do not want the Shepherd to delegate a one-shot task and collect
+a result. If you want to collaborate directly with a specific sheep—for
+example, inspect its role, ask follow-up questions, guide its investigation, or
+keep it available as an interactive partner—start an idle sheep manually:
+
+```text
+/shepherd sheep                 # list available definitions
+/shepherd start worker          # start an idle, interactive worker
+```
+
+`start` creates a persistent Herdr tab without submitting a task or focusing the
+new tab. Switch to it in Herdr and use the child pi session directly. The child
+has the selected agent's Markdown system prompt, configured tools, project
+working directory, and the parent Shepherd's current model (unless the agent
+definition specifies a model). It also loads the normal project context for
+that working directory, but it does not inherit the Shepherd's conversation
+history or an implicit task.
+
+The slash command uses the same action vocabulary as the model-facing
+`shepherd` tool for the supported manual actions:
+
+```text
+/shepherd sheep                 # list available definitions
+/shepherd sheep both            # include project definitions
+/shepherd herd                  # list live Herdr agents
+/shepherd start worker          # start an interactive worker
+/shepherd settings
+```
+
+`/shepherd list` and `/shepherd agents` remain accepted as compatibility
+aliases for `/shepherd sheep`, but `sheep` is canonical. Optional `start` flags
+include `--scope user|project|both`, `--placement pane|tab|workspace`,
+`--direction right|down`, `--cwd <path>`, `--model <provider/model>`, and
+`--omit-system-prompt`.
+
+For one-shot delegation, prompting, waiting, parallel work, and opaque
+handle-safe lifecycle control, use the structured `shepherd` tool protocol
+instead of manual commands.
 
 ## System-prompt diagnostic
 

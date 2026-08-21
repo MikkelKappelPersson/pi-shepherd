@@ -1,4 +1,4 @@
-import { discoverAgents, type AgentScope } from './discovery.ts';
+import { discoverAgents, resolveDelegatedModel, type AgentScope } from './discovery.ts';
 import { loadSettings } from './settings.ts';
 import {
   ensureHerdrRuntime,
@@ -48,7 +48,12 @@ export interface StartOptions {
 export async function startAgent(
   name: string,
   options: StartOptions = {},
-  ctx: { cwd: string; hasUI?: boolean; ui?: any }
+  ctx: {
+    cwd: string;
+    model?: { provider: string; id: string };
+    hasUI?: boolean;
+    ui?: any;
+  }
 ): Promise<AgentHandle> {
   const cwd = options.cwd ?? ctx.cwd;
   const settings = loadSettings();
@@ -86,7 +91,10 @@ export async function startAgent(
       systemPrompt: found.systemPrompt,
       omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt,
       omitPiDocumentation: found.omitPiDocumentation === true,
-      model: options.model ?? found.model,
+      // An explicit start option wins, then the agent definition, then the
+      // parent Shepherd's current provider/model. This keeps slash-command
+      // starts and model-facing starts on the same resolution path.
+      model: resolveDelegatedModel(options.model ?? found.model, ctx.model),
       tools: found.tools,
     });
     setCreatedPaneDir(paneId, files.dir);
