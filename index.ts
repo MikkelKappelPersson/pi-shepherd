@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { discoverAgents } from "./discovery.ts";
-import { loadSettings } from "./settings.ts";
+import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
 import { registerShepherdTool } from "./shepherd.ts";
 import { startAgent } from "./lifecycle.ts";
@@ -135,6 +135,7 @@ function parseStartCommand(tokens: string[]):
 }
 
 function parentArtifactSessionForCommand(ctx: ExtensionCommandContext) {
+	if (!fieldnotesEnabled()) return undefined;
 	const parentPiSessionId = ctx.sessionManager?.getSessionId?.();
 	if (!parentPiSessionId) return undefined;
 	return resolveOrCreateParentArtifactSession({
@@ -152,6 +153,9 @@ export default function (pi: ExtensionAPI) {
 	let shepherdCommandCwd = process.cwd();
 	pi.on("session_start", (_event, ctx) => {
 		shepherdCommandCwd = ctx.cwd;
+		// Fieldnotes are intentionally session-scoped. Persisted setting changes
+		// are applied when the next parent pi session starts.
+		initializeSessionSettings();
 	});
 
 	// Tools for natural-language use.

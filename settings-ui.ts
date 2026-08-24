@@ -36,6 +36,9 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
 		case "stayOpen":
 			next.stayOpen = value === "on";
 			break;
+		case "fieldnotes":
+			next.fieldnotes = value === "on";
+			break;
 		case "timeout": {
 			// The list displays values as e.g. "30 min", so parse the
 			// numeric portion rather than passing the decorated label to Number.
@@ -59,6 +62,7 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 	let settings = loadSettings();
 	const [keepOpenValue, keepOpenValues] = booleans(settings.keepOpen);
 	const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
+	const [fieldnotesValue, fieldnotesValues] = booleans(settings.fieldnotes);
 	const [confirmValue, confirmValues] = booleans(settings.confirmProjectAgents);
 
 	// All labels ≤ 30 chars — the SettingsList pads to the widest label (capped
@@ -93,6 +97,13 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 			values: stayOpenValues,
 		},
 		{
+			id: "fieldnotes",
+			label: "Enable fieldnotes",
+			description: "Create durable notes for delegated prompts. Takes effect next pi session.",
+			currentValue: fieldnotesValue,
+			values: fieldnotesValues,
+		},
+		{
 			id: "timeout",
 			label: "Default run timeout",
 			description: "Time limit in minutes before a Herdr run is reported timed out.",
@@ -117,6 +128,8 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 					const note =
 						id === "agentScope" && settings.agentScope !== "user"
 							? `${id} = ${value} (project agents are repo-controlled)`
+						: id === "fieldnotes"
+							? `${id} = ${value} (takes effect next pi session)`
 							: `${id} = ${value}`;
 					ctx.ui?.notify?.(note, "info");
 				},

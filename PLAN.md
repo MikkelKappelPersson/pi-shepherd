@@ -45,8 +45,10 @@ modes. A one-shot operation is explicitly `start + prompt + wait + close`.
 - Status and close use handles and retain the created-pane ownership invariant.
 - Project agent scope remains opt-in and trust-gated.
 - Legacy `delegate`, workflow modes, and `subagent.ts` have been removed.
-- Durable notes are allocated once per parent pi session/project binding,
-  with one fieldnotes collection collection and distinct per-prompt note files.
+- When enabled, durable notes are allocated once per parent pi session/project
+  binding, with one fieldnotes collection and distinct per-prompt note files.
+- Fieldnotes can be disabled in settings; the setting is snapshotted when a
+  parent pi session starts.
 - README and focused registry/multi-wait tests document and verify the API.
 
 ## Verification

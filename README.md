@@ -121,8 +121,8 @@ Sheep retain the host user's normal pi tool permissions.
 
 ## Parent-bound note sessions
 
-All sheep orchestrated by one parent pi session in the same project share one
-persistent note session under:
+When fieldnotes are enabled, all sheep orchestrated by one parent pi session
+in the same project share one persistent note session under:
 
 ```text
 .shepherd/sessions/NNNN-orchestrator-<id>/
@@ -192,6 +192,18 @@ For one-shot delegation, prompting, waiting, parallel work, and opaque
 handle-safe lifecycle control, use the structured `shepherd` tool protocol
 instead of manual commands.
 
+## Settings
+
+Open `/shepherd settings` (or `/shepherd-settings`) to configure pi-shepherd.
+The menu includes an **Enable fieldnotes** toggle. It defaults to enabled and,
+when enabled, creates the durable `shepherd.md` index and one note per delegated
+prompt. When disabled, new sheep receive no fieldnotes context and delegated
+prompts do not create or update note files; existing notes are retained. The
+toggle is intentionally
+session-scoped: save the setting and start a new parent pi session for it to
+apply. Sheep already running in the current session retain the current
+fieldnotes behavior.
+
 ## System-prompt diagnostic
 
 For the complete diagnostic workflow, options, prompt-composition details, and
@@ -252,9 +264,9 @@ omitContextFiles: true
 
 This passes Pi's `--no-context-files` option and prevents automatic loading of
 `AGENTS.md` and `CLAUDE.md` for that child session. It does not remove the
-agent Markdown body, task/user prompts, Shepherd fieldnotes context, tools, or
-model configuration. The property defaults to `false` and must be a YAML
-boolean; quoted values such as `"true"` are ignored.
+agent Markdown body, task/user prompts, Shepherd fieldnotes context (when
+fieldnotes are enabled), tools, or model configuration. The property defaults
+to `false` and must be a YAML boolean; quoted values such as `"true"` are ignored.
 
 ## Development and tests
 

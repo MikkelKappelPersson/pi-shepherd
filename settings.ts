@@ -4,7 +4,9 @@
  *
  * These are the *defaults* used when a tool call doesn't pass an explicit
  * value. They're read fresh from disk (with a cheap mtime cache) so edits made
- * from the `/shepherd settings` popup take effect immediately.
+ * from the `/shepherd settings` popup take effect immediately. Fieldnotes are
+ * the exception: their enabled/disabled state is snapshotted for each parent
+ * pi session and takes effect when the next session starts.
  */
 
 import * as fs from "node:fs";
@@ -21,6 +23,8 @@ export interface ShepherdSettings {
 	keepOpen: boolean;
 	/** Keep the sheep's pi process alive after done, to keep driving it. */
 	stayOpen: boolean;
+	/** Create and attach durable fieldnotes to delegated prompts. */
+	fieldnotes: boolean;
 	/** Default time limit (minutes) for a Herdr run before it's reported timed out. */
 	timeout: number;
 }
@@ -30,6 +34,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 	confirmProjectAgents: true,
 	keepOpen: true,
 	stayOpen: false,
+	fieldnotes: true,
 	timeout: 20,
 };
 
@@ -62,6 +67,8 @@ export function loadSettings(): ShepherdSettings {
 				typeof parsed.keepOpen === "boolean" ? parsed.keepOpen : DEFAULT_SETTINGS.keepOpen,
 			stayOpen:
 				typeof parsed.stayOpen === "boolean" ? parsed.stayOpen : DEFAULT_SETTINGS.stayOpen,
+			fieldnotes:
+				typeof parsed.fieldnotes === "boolean" ? parsed.fieldnotes : DEFAULT_SETTINGS.fieldnotes,
 			timeout: (() => {
 				const raw = parsed.timeout;
 				if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return DEFAULT_SETTINGS.timeout;
@@ -80,6 +87,19 @@ export function loadSettings(): ShepherdSettings {
 	} catch {
 		return { ...DEFAULT_SETTINGS };
 	}
+}
+
+// Fieldnotes are session-scoped: changing the setting while a parent pi
+// session is running must not leave some sheep with notes and others without
+// them. A new pi session snapshots the persisted value.
+let sessionFieldnotesEnabled: boolean | undefined;
+
+export function initializeSessionSettings(): void {
+	sessionFieldnotesEnabled = loadSettings().fieldnotes;
+}
+
+export function fieldnotesEnabled(): boolean {
+	return sessionFieldnotesEnabled ?? loadSettings().fieldnotes;
 }
 
 export function saveSettings(settings: ShepherdSettings): void {

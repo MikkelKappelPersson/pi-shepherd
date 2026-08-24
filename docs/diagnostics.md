@@ -155,7 +155,7 @@ omitContextFiles: true
 This makes both a normal Shepherd launch and this diagnostic pass
 `--no-context-files`, disabling automatic `AGENTS.md` and `CLAUDE.md` loading
 for the child Pi session. The agent Markdown body, task/user prompt, Shepherd
-fieldnotes context, configured tools, and model are unchanged. The property
+fieldnotes context (when fieldnotes are enabled), configured tools, and model are unchanged. The property
 is `false` by default; `omitContextFiles: false` leaves normal loading enabled,
 and quoted values such as `"true"` are ignored.
 

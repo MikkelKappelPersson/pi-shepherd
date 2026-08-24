@@ -25,7 +25,7 @@ import {
   LifecycleCloseParams,
 } from './types.ts';
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from './lifecycle.ts';
-import { loadSettings } from './settings.ts';
+import { fieldnotesEnabled, loadSettings } from './settings.ts';
 import { lifecycleRegistry } from './orchestration.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from './artifact-sessions.ts';
 import type { DelegatorModel } from './discovery.ts';
@@ -267,7 +267,11 @@ type ShepherdContext = {
   sessionManager?: { getSessionId(): string; getSessionFile?(): string | undefined };
 };
 
-function parentArtifactSession(ctx: ShepherdContext): ShepherdSession {
+function parentArtifactSession(ctx: ShepherdContext): ShepherdSession | undefined {
+  // The setting is snapshotted when the parent pi session starts. This means
+  // disabling fieldnotes does not change the contract of sheep already
+  // running in this session; start a new pi session to stop using them.
+  if (!fieldnotesEnabled()) return undefined;
   const parentPiSessionId = ctx.sessionManager?.getSessionId();
   if (!parentPiSessionId) throw new Error('Unable to resolve the parent pi session identity.');
   return resolveOrCreateParentArtifactSession({
@@ -303,8 +307,8 @@ async function doAction(
         ctx
       );
       return textResult(
-        `Started idle sheep ${a.agent} (${handle.id}). Shared fieldnotes session: ${artifactSession.sessionRelativePath}. Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
-        { handle, artifactSession }
+        `Started idle sheep ${a.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'} Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
+        { handle, ...(artifactSession ? { artifactSession } : {}) }
       );
     }
     case 'prompt': {
@@ -463,7 +467,7 @@ async function doAction(
 export const SHEPHERD_TOOL_DESCRIPTION = [
   'Manage a herd of specialized sheep inside Herdr panes.',
   'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of sheep; sheep are the created workers commonly called agents or subagents.',
-  'Fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each sheep invocation.',
+  'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each sheep invocation.',
   'Use start to create an idle sheep, prompt to submit work, wait to collect its result, status to inspect it, and close to end it. Waiting does not close sheep automatically.',
   'Do not use this tool unless explicitly instructed: too many Herdr panes may crash pi.',
   'Lifecycle handles must be passed as the complete native handle object returned in details.handle; never manually stringify, replace it with an id, or reconstruct it.',
@@ -471,11 +475,12 @@ export const SHEPHERD_TOOL_DESCRIPTION = [
 ].join(' ');
 
 export const SHEPHERD_TOOL_PROMPT_SNIPPET =
-  'Shepherd (orchestrator): manage a herd of sheep (agents/subagents) and their fieldnotes (durable artifacts) inside Herdr panes.';
+  'Shepherd (orchestrator): manage a herd of sheep (agents/subagents) and, when enabled, their fieldnotes (durable artifacts) inside Herdr panes.';
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
   'Keep every sheep\'s complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.',
-  'For note-producing prompts, read the shared shepherd.md fieldnotes index first and write only to the assigned note.',
+  'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index first and write only to the assigned note for note-producing prompts.',
+  'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
   'Use shepherd action=sheep to retrieve available sheep definitions and source metadata before choosing a sheep.',
   'Workflow: start an idle sheep, prompt it, then wait with the complete prompt handle. A bare start submits no task. Start defaults to a new tab; use placement pane or workspace only when explicitly requested. For pane placement, direction defaults to right and can be set to down.',
   'For sequential work, wait for one result before including its text in the next prompt. For independent work, start and prompt multiple sheep, then call wait with one native array of complete prompt handles.',
