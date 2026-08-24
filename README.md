@@ -168,8 +168,8 @@ new tab. Switch to it in Herdr and use the child pi session directly. The child
 has the selected agent's Markdown system prompt, configured tools, project
 working directory, and the parent Shepherd's current model (unless the agent
 definition specifies a model). It also loads the normal project context for
-that working directory, but it does not inherit the Shepherd's conversation
-history or an implicit task.
+that working directory unless its definition sets `omitContextFiles: true`,
+but it does not inherit the Shepherd's conversation history or an implicit task.
 
 The slash command uses the same action vocabulary as the model-facing
 `shepherd` tool for the supported manual actions:
@@ -238,6 +238,23 @@ omitPiDocumentation: true
 
 This removes only the `Pi documentation ...` section from the built-in prompt;
 project instructions, skills, tools, and the agent file body remain available.
+
+To disable Pi's automatic project context-file loading for a child session, use
+`omitContextFiles: true`:
+
+```markdown
+---
+name: tester
+description: Runs and evaluates GUI tests
+omitContextFiles: true
+---
+```
+
+This passes Pi's `--no-context-files` option and prevents automatic loading of
+`AGENTS.md` and `CLAUDE.md` for that child session. It does not remove the
+agent Markdown body, task/user prompts, Shepherd fieldnotes context, tools, or
+model configuration. The property defaults to `false` and must be a YAML
+boolean; quoted values such as `"true"` are ignored.
 
 ## Development and tests
 

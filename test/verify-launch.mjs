@@ -8,7 +8,7 @@ function assert(condition, label) {
   if (condition) console.log(`PASS  ${label}`);
   else { failures++; console.log(`FAIL  ${label}`); }
 }
-function check(label, omit, includeOption = true, model) {
+function check(label, omit, includeOption = true, model, omitContextFiles) {
   const name = label;
   const options = {
     name,
@@ -19,6 +19,7 @@ function check(label, omit, includeOption = true, model) {
     omitPiDocumentation: true,
   };
   if (model !== undefined) options.model = model;
+  if (omitContextFiles !== undefined) options.omitContextFiles = omitContextFiles;
   if (includeOption) options.omitSystemPrompt = omit;
   let files;
   try {
@@ -32,6 +33,7 @@ function check(label, omit, includeOption = true, model) {
     assert(script.includes("shepherd-done.ts") && script.includes("--tools read,shepherd_done"), `${label}: completion extension wiring`);
     assert(script.includes("PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE='"), `${label}: agent system prompt wiring`);
     assert(script.includes("PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1"), `${label}: Pi documentation omission wiring`);
+    assert(script.includes("--no-context-files") === (omitContextFiles === true), `${label}: context-file omission argument`);
     assert(script.includes("--model 'anthropic/claude-sonnet-4-5'") === (model !== undefined), `${label}: model argument`);
     assert(fs.existsSync(`${files.dir}/sysprompt-${name}.md`), `${label}: system prompt file`);
     assert(fs.readFileSync(`${files.dir}/sysprompt-${name}.md`, "utf8") === "agent Markdown body", `${label}: prompt file content`);
@@ -42,6 +44,9 @@ function check(label, omit, includeOption = true, model) {
 check("default", false);
 check("implicit-default", false, false);
 check("omit", true);
+check("context-true", false, true, undefined, true);
+check("context-false", false, true, undefined, false);
+check("context-absent", false, false);
 check("model", false, true, "anthropic/claude-sonnet-4-5");
 // Inheritance is resolved before launch; absent model must omit --model.
 if (failures) process.exit(1);

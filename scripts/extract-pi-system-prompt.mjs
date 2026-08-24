@@ -193,6 +193,7 @@ const args = [
 ];
 
 if (agent?.model || model) args.push("--model", model ?? agent.model);
+if (agent?.omitContextFiles === true) args.push("--no-context-files");
 if (agent?.tools?.length) args.push("--tools", [...agent.tools, ...(role === "sheep" ? ["shepherd_done"] : [])].join(","));
 if (agent?.omitSystemPrompt) args.push("--system-prompt", agentSystemPromptFile);
 args.push(diagnosticPrompt);

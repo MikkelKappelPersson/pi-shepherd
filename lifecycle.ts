@@ -91,6 +91,7 @@ export async function startAgent(
       systemPrompt: found.systemPrompt,
       omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt,
       omitPiDocumentation: found.omitPiDocumentation === true,
+      omitContextFiles: found.omitContextFiles === true,
       // An explicit start option wins, then the agent definition, then the
       // parent Shepherd's current provider/model. This keeps slash-command
       // starts and model-facing starts on the same resolution path.

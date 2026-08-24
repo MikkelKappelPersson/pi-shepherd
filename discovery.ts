@@ -29,6 +29,8 @@ export interface AgentConfig {
 	omitSystemPrompt?: boolean;
 	/** Omit Pi's built-in documentation guidance from the delegated prompt. */
 	omitPiDocumentation: boolean;
+	/** Omit Pi's automatic AGENTS.md/CLAUDE.md context-file loading. */
+	omitContextFiles: boolean;
 	systemPrompt: string;
 	source: "user" | "project" | "bundled";
 	filePath: string;
@@ -176,6 +178,11 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
 					: typeof frontmatter["omit-pi-documentation"] === "boolean"
 						? frontmatter["omit-pi-documentation"]
 						: false,
+			// Only a YAML boolean is accepted; quoted strings default to false.
+			omitContextFiles:
+				typeof frontmatter.omitContextFiles === "boolean"
+					? frontmatter.omitContextFiles
+					: false,
 			// Pass-through fields, carried as-is when present.
 			userInvocable: frontmatter["user-invocable"],
 			disableModelInvocation: frontmatter["disable-model-invocation"],

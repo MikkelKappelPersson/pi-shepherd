@@ -495,6 +495,7 @@ export function writePiLaunchFiles(opts: {
 	systemPrompt?: string;
 	omitSystemPrompt?: boolean;
 	omitPiDocumentation?: boolean;
+	omitContextFiles?: boolean;
 	stayOpen?: boolean;
 	/** Persistent lifecycle agents remain alive and have no initial task. */
 	persistent?: boolean;
@@ -509,6 +510,7 @@ export function writePiLaunchFiles(opts: {
 
 	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
 	if (opts.model) args.push("--model", shellQuote(opts.model));
+	if (opts.omitContextFiles) args.push("--no-context-files");
 	const tools =
 		opts.tools && opts.tools.length > 0
 			? [...opts.tools, "shepherd_done"].join(",")
@@ -565,6 +567,7 @@ export function launchPiInPane(
 		systemPrompt?: string;
 		omitSystemPrompt?: boolean;
 		omitPiDocumentation?: boolean;
+		omitContextFiles?: boolean;
 		model?: string;
 		tools?: string[];
 	},

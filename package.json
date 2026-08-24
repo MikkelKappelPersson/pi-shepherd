@@ -10,13 +10,14 @@
     "check": "echo 'nothing to check'",
     "discovery:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-discovery.mjs",
     "launch:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-launch.mjs",
+    "effective-prompt:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-effective-prompt.mjs",
     "registry:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-registry.mjs",
     "multi-wait:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-multi-wait.mjs",
     "artifact-sessions:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-artifact-sessions.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
     "extract:system-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/extract-pi-system-prompt.mjs",
-    "test": "npm run discovery:test && npm run launch:test && npm run registry:test && npm run multi-wait:test && npm run artifact-sessions:test"
+    "test": "npm run discovery:test && npm run launch:test && npm run effective-prompt:test && npm run registry:test && npm run multi-wait:test && npm run artifact-sessions:test"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "^0.84.2",
