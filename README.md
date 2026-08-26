@@ -8,11 +8,11 @@ control tool plus six composable lifecycle tools:
 
 ```text
 shepherd({ action: "agents" | "herd" | "prune" })
-shepherd_spawn(agent, options) -> AgentHandle
-shepherd_prompt(agentHandle, message, options) -> PromptHandle
-shepherd_wait(promptHandle | promptHandles) -> Result | Result[]
-shepherd_status(agentHandle) -> Status
-shepherd_close(agentHandle) -> void
+shepherd_spawn(agent, options) -> agent id
+shepherd_prompt(agent id, message, options) -> prompt id
+shepherd_wait(prompt id | prompt ids) -> Result | Result[]
+shepherd_status(agent id) -> Status
+shepherd_close(agent id) -> void
 shepherd_read(target, options) -> terminal output
 ```
 
@@ -33,25 +33,25 @@ panes may crash pi.
 ```text
 agent = shepherd_spawn({ agent: "scout", cwd: project })
 prompt = shepherd_prompt({
-  handle: agent.handle,
+  id: agent.id,
   message: "Research the authentication code",
 })
-result = shepherd_wait({ handle: prompt.handle })
-shepherd_close({ handle: agent.handle })
+result = shepherd_wait({ id: prompt.id })
+shepherd_close({ id: agent.id })
 ```
 
 Prompt submission is non-blocking. `shepherd_wait` is the synchronization point.
 For parallel work, spawn multiple agents, prompt each one, then wait on the
-native array of prompt handles:
+array of prompt ids:
 
 ```text
 scoutA = shepherd_spawn({ agent: "scout", ...options })
 scoutB = shepherd_spawn({ agent: "scout", ...options })
-promptA = shepherd_prompt({ handle: scoutA.handle, message: "Research authentication" })
-promptB = shepherd_prompt({ handle: scoutB.handle, message: "Research authorization" })
-[resultA, resultB] = shepherd_wait({ handle: [promptA.handle, promptB.handle] })
-shepherd_close({ handle: scoutA.handle })
-shepherd_close({ handle: scoutB.handle })
+promptA = shepherd_prompt({ id: scoutA.id, message: "Research authentication" })
+promptB = shepherd_prompt({ id: scoutB.id, message: "Research authorization" })
+[resultA, resultB] = shepherd_wait({ id: [promptA.id, promptB.id] })
+shepherd_close({ id: scoutA.id })
+shepherd_close({ id: scoutB.id })
 ```
 
 Arrays wait concurrently and preserve input order. A single agent may have
@@ -68,10 +68,10 @@ needed.
 | `shepherd` (`herd`) | List the live herd: agents detected in Herdr panes |
 | `shepherd` (`prune`) | Remove stale pi-shepherd pane registrations |
 | `shepherd_spawn` | Create an idle persistent agent in a background Herdr tab (or requested pane/workspace placement) |
-| `shepherd_prompt` | Submit one message using an `AgentHandle`; returns immediately |
-| `shepherd_wait` | Wait for one or many `PromptHandle`s |
-| `shepherd_status` | Inspect a handle without focusing or mutating Herdr |
-| `shepherd_close` | Explicitly close an owned agent and cancel unresolved prompts |
+| `shepherd_prompt` | Submit one message using an agent id; returns a prompt id immediately |
+| `shepherd_wait` | Wait for one or many prompt ids |
+| `shepherd_status` | Inspect an agent id without focusing or mutating Herdr |
+| `shepherd_close` | Explicitly close an owned agent id and cancel unresolved prompts |
 | `shepherd_read` | Read recent output for diagnostics |
 
 `read` accepts an agent name, a Herdr pane id such as `w9:p18`, or a recorded
@@ -80,37 +80,71 @@ is not a pane target and cannot be read. `recent` and `recent-unwrapped` may
 return empty output for idle panes with no scrollback; use `visible` for the
 current viewport or `detection` for Herdr's detection view.
 
-Handles are stable objects returned in the tool result's `details.handle`.
-The canonical handle syntax is to pass that complete native object unchanged
-to the next lifecycle action. Do not pass only its `id`, manually JSON-encode it,
-or reconstruct it from raw Herdr pane IDs. The model-facing tool has a narrow
-transport-compatibility step that recovers when a provider encodes the nested
-`handle` field as JSON text before validation. It also normalizes stringified
-boolean and integer option values from transports that incorrectly serialize
-primitive arguments; native JSON booleans and numbers remain preferred. For example:
+Lifecycle operations use short, opaque, session-scoped ids rather than public
+handle objects. `shepherd_spawn` returns an agent id; `shepherd_prompt` accepts
+that id and returns a prompt id; `shepherd_wait` accepts the prompt id. Status
+and close accept the agent id.
 
 ```json
-{
-  "handle": {
-    "id": "shepherd-agent-...",
-    "agent": "worker",
-    "paneId": "..."
-  },
-  "message": "Say hi"
-}
+{"id":"shepherd-agent-abc123","message":"Inspect the authentication code."}
 ```
 
-Do not pass a different field such as `name`, `task`, an id string, a JSON
-string, or a raw Herdr pane ID. For parallel `wait`, pass one native array of
-the complete prompt handle objects returned by the two `prompt` actions; do not
-manually stringify the array. If the tool reports an invalid handle shape, retry using
-the exact native object from `details.handle`. `close` refuses any pane not recorded
-in the pi-shepherd created-pane registry.
+For parallel `wait`, pass an array of prompt ids:
+
+```json
+{"id":["shepherd-prompt-one","shepherd-prompt-two"]}
+```
+
+The ids are not Herdr pane ids. A pane id is only a diagnostic target for
+`shepherd_read`; it is not valid for prompt, wait, status, or close. If a
+lifecycle id is unknown, it may belong to another parent session or the agent
+may already be gone; spawn a replacement rather than deriving an id from a
+pane. `close` still refuses any pane not recorded in the pi-shepherd created-pane
+registry.
+
+Some providers wrap these arguments in an outer transport envelope such as
+`{"name":"shepherd_prompt","arguments":{...}}`; that `arguments` wrapper
+belongs to the provider, not Shepherd. Pass the lifecycle id as a string inside
+the argument object, not as a nested handle object or quoted JSON object. If an
+agent name is rejected, use `shepherd({ action: "agents" })` and copy an exact
+name from that list; names are case-sensitive and depend on the selected scope.
+
+### XML transport example
+
+The XML wrapper belongs to the provider or adapter. Shepherd's own arguments are
+still the small JSON objects shown above. For an adapter that uses an
+OpenAI-style envelope, a complete sequence looks like this (the ids are
+illustrative; copy the actual ids from each result):
+
+```xml
+<tool_call>
+{"name":"shepherd_spawn","arguments":{"agent":"scout"}}
+</tool_call>
+
+<tool_call>
+{"name":"shepherd_prompt","arguments":{"id":"shepherd-agent-abc123","message":"Inspect the authentication implementation."}}
+</tool_call>
+
+<tool_call>
+{"name":"shepherd_wait","arguments":{"id":"shepherd-prompt-def456"}}
+</tool_call>
+
+<tool_call>
+{"name":"shepherd_close","arguments":{"id":"shepherd-agent-abc123"}}
+</tool_call>
+```
+
+An adapter may instead use a flat XML envelope such as
+`<tool_call name="shepherd_prompt">{"id":"...","message":"..."}</tool_call>`;
+the adapter must unwrap it before invoking the tool. Do not add `name`,
+`action`, or `arguments` to Shepherd's registered parameter schema.
 
 ## Agent discovery and security
 
 Definitions use VS Code custom-agent Markdown (`.md` or `.agent.md`) with YAML
-frontmatter and a Markdown system prompt. Discovery precedence is:
+frontmatter and a Markdown system prompt. The bundled defaults are `scout`,
+`planner`, `worker`, and `reviewer`; user/project definitions can add or
+override names. Discovery precedence is:
 
 1. `~/.pi/agent/agents/`
 2. `~/.agents/agents/`
@@ -194,8 +228,8 @@ include `--scope user|project|both`, `--placement pane|tab|workspace`,
 `--direction right|down`, `--cwd <path>`, `--model <provider/model>`, and
 `--omit-system-prompt`.
 
-For one-shot delegation, prompting, waiting, parallel work, and opaque
-handle-safe lifecycle control, use the structured `shepherd_*` tool protocol
+For one-shot delegation, prompting, waiting, parallel work, and opaque-id
+lifecycle control, use the structured `shepherd_*` tool protocol
 instead of manual commands. The old single-tool form such as
 `shepherd({ action: "prompt", ... })` is no longer supported.
 
@@ -288,7 +322,7 @@ TypeScript runs directly; there is no build step. Run the focused suite with:
 npm test
 ```
 
-The tests cover discovery, launch configuration, strict handle-shape validation,
+The tests cover discovery, launch configuration, lifecycle id validation,
 active-prompt enforcement, settlement/cancellation, and concurrent multi-wait.
 Live Herdr verification should additionally cover idle spawn, non-blocking
 prompt, result recovery, parallel prompts, iterative prompting, close, focus

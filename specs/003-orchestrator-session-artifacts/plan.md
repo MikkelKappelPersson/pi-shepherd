@@ -288,13 +288,13 @@ needed but never deletes the persistent note directory.
 Update `shepherd.ts` result details so note-producing actions expose the
 shared session without making callers reconstruct paths:
 
-- `start`: `handle` plus `noteSession`/`sessionPath`;
-- `prompt`: `handle` plus reserved `note` and shared session path;
+- `start`: opaque `id` plus `noteSession`/`sessionPath`;
+- `prompt`: opaque `id` plus reserved `note` and shared session path;
 - `wait`: result(s) including note reference where available.
 
 Use relative paths for project-internal links and absolute paths where the
-child needs to write. Keep public lifecycle handle schemas compatible with the
-current complete-object contract.
+child needs to write. Keep the public lifecycle id schemas compatible with the opaque-id contract;
+full handles remain internal implementation state.
 
 ### 4.2 Update tool descriptions and previews
 
@@ -304,7 +304,7 @@ as needed to explain:
 - all agents started by one parent share one note session;
 - prompt notes are reserved before submission;
 - children must read the shared fieldnotes and write only their assigned note;
-- handles still must be passed as complete native objects; and
+- lifecycle ids must be passed as top-level strings (or an array of strings for multi-wait); and
 - notes are retained and not automatically cleaned up.
 
 Do not expose a user option that lets an individual child force a new

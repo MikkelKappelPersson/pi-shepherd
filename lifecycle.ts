@@ -59,8 +59,18 @@ export async function startAgent(
   const settings = loadSettings();
   const agentScope = options.agentScope ?? settings.agentScope;
   const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
-  const found = discoverAgents(cwd, agentScope).agents.find(a => a.name === name);
-  if (!found) throw new Error(`Unknown agent "${name}".`);
+  const discovered = discoverAgents(cwd, agentScope).agents;
+  const found = discovered.find(a => a.name === name);
+  if (!found) {
+    const available = discovered.map(a => a.name).join(', ');
+    const suggestion = discovered.find(a => a.name.toLowerCase() === name.trim().toLowerCase());
+    throw new Error(
+      `Unknown agent "${name}" in ${agentScope} scope.` +
+        (suggestion ? ` Did you mean "${suggestion.name}"?` : '') +
+        (available ? ` Available agents: ${available}.` : ' No agents are available.') +
+        ' Call shepherd with action "agents" to list exact names.'
+    );
+  }
   if (found.source === 'project' && confirmProjectAgents && ctx.hasUI) {
     const ok = await ctx.ui.confirm(
       'Run project-local agent?',

@@ -311,15 +311,18 @@ as cancelled without allocating another session directory.
 
 ## API and integration requirements
 
-The low-level public lifecycle shapes remain:
+The low-level lifecycle operations use opaque ids at the model-facing boundary:
 
 ```text
-start(agent, options) -> AgentHandle
-prompt(handle, message, options) -> PromptHandle
-wait(handle | handles, options) -> Result | Result[]
-status(handle) -> Status
-close(handle) -> AgentHandle
+start(agent, options) -> agent id
+prompt(agent id, message, options) -> prompt id
+wait(prompt id | prompt ids, options) -> Result | Result[]
+status(agent id) -> Status
+close(agent id) -> agent id
 ```
+
+The implementation may retain full handle objects internally for registry state
+and Herdr placement metadata.
 
 Note context is internal to the parent `shepherd` tool and is not a child
 supplied option. The public result details for note-producing operations

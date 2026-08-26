@@ -22,11 +22,12 @@ export interface AgentHandle {
 }
 
 /**
- * The model-facing tool accepts the complete object returned by the previous
- * lifecycle action. Keep this as an object rather than accepting IDs or JSON
- * strings so malformed transport shapes are rejected clearly.
+ * The model-facing tools use opaque ids. The registry still accepts full
+ * internal handles for implementation callers and maintains the complete
+ * object behind each id.
  */
-export type AgentHandleInput = AgentHandle;
+/** Public lifecycle calls use the opaque id; internal callers may still hold the full handle. */
+export type AgentHandleInput = AgentHandle | string;
 
 export interface PromptHandle {
   id: string;
@@ -34,7 +35,8 @@ export interface PromptHandle {
   createdAt: number;
 }
 
-export type PromptHandleInput = PromptHandle;
+/** Public lifecycle calls use the opaque id; internal callers may still hold the full handle. */
+export type PromptHandleInput = PromptHandle | string;
 
 export interface AgentStatus {
   handle: AgentHandle;
@@ -95,26 +97,25 @@ interface PromptRecord {
 }
 
 /**
- * In-memory registry for one extension process. IDs are opaque and include a
- * random component, so callers never need to know Herdr pane identifiers.
+ * In-memory registry for one extension process. Public ids are opaque and
+ * include a random component, so callers never need to know Herdr pane ids.
  */
 function handleId(input: unknown, kind: 'AgentHandle' | 'PromptHandle'): string {
   if (
-    !input ||
-    typeof input !== 'object' ||
-    Array.isArray(input) ||
-    typeof (input as { id?: unknown }).id !== 'string'
+    (typeof input !== 'string' &&
+      (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as { id?: unknown }).id !== 'string')) ||
+    (typeof input === 'string' && input.trim().length === 0)
   ) {
     const syntax =
       kind === 'PromptHandle'
-        ? `Correct syntax: { action: "wait", handle: details.handle } (or { action: "wait", handle: [promptA.details.handle, promptB.details.handle] } for parallel wait).`
-        : `Correct syntax: { action: "prompt", handle: details.handle, message: "..." }.`;
+        ? `Correct syntax: { id: "shepherd-prompt-..." } (or { id: ["prompt-a", "prompt-b"] } for parallel wait).`
+        : `Correct syntax: { id: "shepherd-agent-..." }.`;
     throw new LifecycleError(
       'invalid_handle',
-      `Expected the complete ${kind} object returned in details.handle; do not pass an id, JSON string, or array. ${syntax}`
+      `Expected the opaque ${kind === 'PromptHandle' ? 'prompt' : 'agent'} id as a string. Do not pass a quoted JSON object, array, or Herdr pane id. ${syntax}`
     );
   }
-  return (input as { id: string }).id;
+  return typeof input === 'string' ? input : (input as { id: string }).id;
 }
 
 export class LifecycleRegistry {
@@ -143,7 +144,11 @@ export class LifecycleRegistry {
   getAgent(input: AgentHandleInput | unknown): AgentRecord {
     const id = handleId(input, 'AgentHandle');
     const record = this.agents.get(id);
-    if (!record) throw new LifecycleError('unknown_handle', `Unknown agent handle "${id}".`);
+    if (!record)
+      throw new LifecycleError(
+        'unknown_handle',
+        `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result. A Herdr pane id is not an agent id.`
+      );
     return record;
   }
 
@@ -218,7 +223,11 @@ export class LifecycleRegistry {
   getPrompt(input: PromptHandleInput | unknown): PromptRecord {
     const id = handleId(input, 'PromptHandle');
     const record = this.prompts.get(id);
-    if (!record) throw new LifecycleError('unknown_handle', `Unknown prompt handle "${id}".`);
+    if (!record)
+      throw new LifecycleError(
+        'unknown_handle',
+        `Unknown prompt id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest prompt result, not an agent id or Herdr pane id.`
+      );
     return record;
   }
 

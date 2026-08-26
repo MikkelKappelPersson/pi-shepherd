@@ -17,10 +17,14 @@ agent invocation receives its own note.
 - TypeScript runs directly by pi. There is no build step or bundler.
 - Herdr integration shells out to the `herdr` CLI.
 - `discovery.ts` is pure and reads agent files fresh on each invocation.
-- `orchestration.ts` contains opaque serializable handles and session-scoped
-  registries.
+- `orchestration.ts` contains internal opaque serializable handles and
+  session-scoped registries; model-facing lifecycle tools expose only ids.
 - `lifecycle.ts` implements `spawn`, `prompt`, `wait`, `status`, and `close`.
 - `shepherd.ts` exposes the umbrella control tool and separate lifecycle tools.
+- Every `pi.registerTool({ ... })` declaration must spell out `name`, `label`,
+  `description`, `promptSnippet`, and `parameters` directly in that registration.
+  Do not hide or generate those tool-definition fields through nested factories,
+  object spreads, or shared registration helpers.
 - `herdr.ts` owns Herdr launch, pane, and created-pane registry operations.
 - `shepherd-done.ts` is the in-tab completion extension.
 
@@ -30,6 +34,8 @@ agent invocation receives its own note.
   bundled pi agents, bundled shared agents.
 - User agent discovery is the default. Project agent definitions are
   repo-controlled and require explicit scope and interactive confirmation.
+- Model-facing lifecycle tools accept opaque agent/prompt ids; internal handles
+  must never be confused with raw Herdr pane IDs.
 - Only panes recorded in `~/.pi/agent/pi-shepherd/created-panes.json` may be
   closed by pi-shepherd. Raw pane IDs must not bypass ownership checks.
 - Background Herdr placement uses `--no-focus`.

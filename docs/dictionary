@@ -10,7 +10,8 @@
 - **Session**: A session is tied to the shepherd's pi session and is used to track the state of the herd and its sheep.
 - **Control-plane tool**: The model-facing `shepherd` tool. It handles cheap meta-actions: `agents`, `herd`, and `prune`, and serves as the guidance hub for the Shepherd tool family.
 - **Lifecycle tools**: The separate model-facing tools `shepherd_spawn`, `shepherd_prompt`, `shepherd_wait`, `shepherd_status`, `shepherd_close`, and `shepherd_read`. Each has a flat object schema and delegates to the shared `doAction()` core.
-- **Model-facing surface**: The structured `shepherd` control tool plus the six `shepherd_<verb>` lifecycle tools. Lifecycle handles must be passed as complete native objects between these tools.
+- **Model-facing surface**: The structured `shepherd` control tool plus the six `shepherd_<verb>` lifecycle tools. Lifecycle tools accept opaque scalar ids; the provider may wrap their argument object in its own transport envelope.
 - **Command surface**: The human `/shepherd` command. It supports `agents`, `herd`, `spawn`, `status`, `read`, and `settings`; prompt/wait/close remain model-only for now.
-- **AgentHandle**: The complete native object returned by `shepherd_spawn` that identifies an owned agent. Preserve and pass it unchanged to `shepherd_prompt`, `shepherd_status`, or `shepherd_close`.
-- **PromptHandle**: The complete native object returned by `shepherd_prompt` that identifies submitted work. Preserve and pass it unchanged to `shepherd_wait`.
+- **Agent id**: An opaque, session-scoped id returned by `shepherd_spawn` that identifies an owned agent. It is distinct from any Herdr pane id and is accepted by `shepherd_prompt`, `shepherd_status`, and `shepherd_close`.
+- **Prompt id**: An opaque, session-scoped id returned by `shepherd_prompt` that identifies submitted work. It is accepted by `shepherd_wait`; an array of prompt ids requests parallel waiting.
+- **Internal AgentHandle/PromptHandle**: Full objects retained inside the lifecycle registry and TypeScript implementation. They are not part of the recommended model-facing protocol.

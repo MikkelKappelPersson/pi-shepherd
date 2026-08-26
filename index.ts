@@ -291,7 +291,11 @@ async function runCommandAction(args: ShepherdArgs, ctx: ExtensionCommandContext
 			hasUI: true,
 		});
 		const text = result.content.find((c) => c.type === "text")?.text ?? "(no output)";
-		ctx.ui?.notify(text, result.isError ? "error" : "info");
+		const hasError =
+			typeof result.details === "object" &&
+			result.details !== null &&
+			"error" in result.details;
+		ctx.ui?.notify(text, hasError ? "error" : "info");
 	} catch (error: any) {
 		ctx.ui?.notify(`pi-shepherd: ${error?.message ?? error}`, "error");
 	}
@@ -435,7 +439,7 @@ export default function (pi: ExtensionAPI) {
 							// in args makes doAction honor the explicit value instead of
 							// requiring one.
 							artifactSession: parentArtifactSessionForCommand(ctx),
-						} as ShepherdArgs,
+						} as unknown as ShepherdArgs,
 						ctx,
 					);
 				} finally {

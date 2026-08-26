@@ -43,7 +43,7 @@ shepherd_wait + shepherd_close`.
 
 ## Completed implementation
 
-- Agent and prompt handles are stable session-scoped objects returned in tool details; callers use those complete native objects (or a native array of complete prompt objects for multi-wait), never IDs or manually stringified handles. The model-facing boundary tolerates provider-level JSON encoding of the nested handle field before validation.
+- Agent and prompt lifecycle references are opaque session-scoped ids exposed in tool arguments and result text. Full handle objects remain internal registry state; legacy nested handles are migrated at the model boundary during the transition.
 - Registries enforce one unresolved prompt per agent, idempotent settlement, and
   deterministic cancellation.
 - Persistent Herdr tabs launch pi with discovered system prompt, tools, model,
@@ -51,7 +51,7 @@ shepherd_wait + shepherd_close`.
 - Prompt submission is non-blocking and requires Herdr detection.
 - Wait ignores pre-submit idle state, tracks post-submit transitions, returns
   structured per-prompt results, and supports concurrent multi-wait.
-- Status and close use handles and retain the created-pane ownership invariant.
+- Status and close use lifecycle ids and retain the created-pane ownership invariant.
 - Project agent scope remains opt-in and trust-gated.
 - Legacy `delegate`, workflow modes, and `subagent.ts` have been removed.
 - When enabled, durable notes are allocated once per parent pi session/project

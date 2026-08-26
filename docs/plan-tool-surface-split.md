@@ -21,9 +21,9 @@ emit `{}` for every call, unrecoverably. Models served behind soft-guidance APIs
 
 Secondary issues surfaced by the investigation:
 
-- Cross-field rules (`wait` requires `handle`) are enforced by JSON Schema today, but
+- Cross-field rules (`wait` requires a prompt `id`) are enforced by JSON Schema today, but
   any flattening loses that unless handled explicitly.
-- The unified conceptual narrative (sheep, handles, lifecycle ordering) lives inside the
+- The unified conceptual narrative (sheep, ids, lifecycle ordering) lives inside the
   single tool description, coupling "what shepherd is" to "how one tool is shaped".
 - The existing `/shepherd` command duplicates logic (`agents`/`herd`/`start` re-implement
   what `doAction` already does) instead of delegating to the same core.
@@ -31,7 +31,7 @@ Secondary issues surfaced by the investigation:
 ## 2. Goals
 
 1. No bare-`anyOf` root anywhere on the wire → works on constrained backends.
-2. Declarative requiredness (`handle: required`) via separate flat-schema tools.
+2. Declarative requiredness (`id: required`) via separate flat-schema tools.
 3. Preserve user ergonomics: `/shepherd spawn worker` (renamed from `start`) keeps working, gains coverage.
 4. Single source of truth for behavior: both tools and command delegate to core.
 5. Unified meta-description ("subagent framework for native Herdr orchestration") kept
@@ -52,14 +52,14 @@ Secondary issues surfaced by the investigation:
    model surface (flat tools)         user surface (/shepherd cmd)     future RPC?
    ├─ shepherd        (herd|agents|prune)         ├─ agents, herd, spawn      (existing, renamed)
    ├─ shepherd_spawn  (agent, options…)           ├─ status, read             (new)
-   ├─ shepherd_prompt (handle, message, timeout)  └─ prompt/wait/close         (new, see §5)
-   ├─ shepherd_wait   (handle[], timeout)
-   ├─ shepherd_status (handle)
-   ├─ shepherd_close  (handle)
+   ├─ shepherd_prompt (id, message, timeout)     └─ prompt/wait/close         (new, see §5)
+   ├─ shepherd_wait   (id[], timeout)
+   ├─ shepherd_status (id)
+   ├─ shepherd_close  (id)
    └─ shepherd_read   (name, lines, source)
 ```
 
-Schema fragments shared across tools: `HandleSchema`, timeout/lines/source optionals.
+Schema fragments shared across tools: opaque agent/prompt id schemas, timeout/lines/source optionals.
 
 ## 4. Phases
 
@@ -117,7 +117,7 @@ schema confirmed flat (`type: object`, enum action) ✅.
 
 Files: `shepherd.ts`. ✅ Done
 
-### Phase 3 — Extract handle-centric tools
+### Phase 3 — Extract lifecycle tools
 
 One registration helper, six declarative tools. All roots are plain objects.
 
@@ -126,22 +126,24 @@ One registration helper, six declarative tools. All roots are plain objects.
         `confirmProjectAgents`, `cwd`, `model`, `omitSystemPrompt`. ✅ (deliberately no
         `timeout`: startup readiness uses fixed internal grace periods; timeout only
         applies to prompts/waits — see the start-case comment in `doAction`)
-      - `shepherd_prompt`: `handle` (required), `message` (required), `timeout` ✅
-      - `shepherd_wait`: `handle` (required; object or native array of objects), `timeout` ✅
-      - `shepherd_status`: `handle` (required) ✅
-      - `shepherd_close`: `handle` (required) ✅
+      - `shepherd_prompt`: `id` (required agent id), `message` (required), `timeout` ✅
+      - `shepherd_wait`: `id` (required prompt id or array of prompt ids), `timeout` ✅
+      - `shepherd_status`: `id` (required agent id) ✅
+      - `shepherd_close`: `id` (required agent id) ✅
       - `shepherd_read`: `name` (required), `lines`?, `source`? ✅
       - Note: the core action `start` was renamed to `spawn` (`SpawnParams`) to match the
         tool naming scheme; the `/shepherd` command verb was renamed in Phase 4.
-- [x] Share `HandleSchema`, timeout, and completion-state enums across definitions.
-      ✅ Done by deriving each tool schema with `Type.Omit(<LifecycleParams>, ['action'])`,
-      which reuses the existing `AgentHandleInputSchema`/`PromptHandleInputSchema` and
-      the shared timeout/enum definitions from `types.ts` — zero duplicated field schemas.
+- [x] Share lifecycle id, timeout, and completion-state schemas across definitions.
+      ✅ Originally derived with `Type.Omit(<LifecycleParams>, ['action'])`; superseded by the
+      AGENTS.md convention that every registration spells out its fields inline, so each
+      tool registration now declares its full `Type.Object` directly (identical fields and
+      descriptions; the shared `*Params` schemas in `types.ts` remain the internal
+      union/`doAction` contract only).
 - [x] Each tool delegates to `doAction({action: '<verb>', ...params}, ...)`.
       ✅ Via a shared `executeShepherd(label, args, ctx, ...)` wrapper (Herdr gate +
       try/catch to a friendly text result).
 - [x] Per-tool `description`: short, operational; cross-references siblings
-      ("Pass the complete native agent handle from shepherd_spawn" etc.). ✅
+      ("Pass the agent id returned by shepherd_spawn" etc.). ✅
 - [x] `renderCall`: per-tool CLI-style call preview reusing `shepherdCallPreview`
       internals (e.g. `shepherd_spawn scout --cwd …`), plus a shared `renderToolResult`. ✅
 - [x] Split `promptSnippet`/`promptGuidelines`: lifecycle tools share one snippet line;
@@ -179,10 +181,10 @@ Bring the human surface up to parity, scoped sensibly.
 - [x] Extend `getArgumentCompletions`: actions first; for `status`/`read`, complete
       discovered agent names (reuse the pattern already used for `spawn`).
       ✅ Action list now includes `status`/`read`; both also complete live
-      AgentHandle ids from the session registry; 3-char-prefix candidates
+      agent ids from the session registry; 3-char-prefix candidates
       (`/shepherd spo` → `spawn <agent>`) preserved for spawn/status/read.
-- [x] `status` target resolution: `statusHandleTarget` maps agent name / handle id /
-      pane id to the complete handle object (live-registry lookup, id-only fallback).
+- [x] `status` target resolution: `statusHandleTarget` maps agent name / lifecycle id /
+      pane id to the opaque lifecycle id (live-registry lookup, id fallback).
 
 Acceptance: `/shepherd status <agent>` prints summary ✅ (live: state `idle` after
 spawn); unknown input prints the updated hint line ✅ (`parseShepherdCli` error +
@@ -202,8 +204,8 @@ injecting it into the global parent system prompt.
       `wait`, `status`, `close`, and `read`). ✅ Its description and prompt guidelines
       now document the control-plane actions and the full lifecycle.
 - [x] Put shared lifecycle guidance on the umbrella tool: wait for independent work
-      concurrently when possible, waiting does not close agents, preserve complete
-      handles unchanged, and follow the shared `shepherd.md` fieldnotes contract. ✅
+      concurrently when possible, waiting does not close agents, pass lifecycle ids
+      unchanged, and follow the shared `shepherd.md` fieldnotes contract. ✅
 - [x] Keep individual lifecycle tool descriptions short and operational; retain only
       tool-specific usage hints and parameter expectations there. ✅ Removed duplicated
       wait/close lifecycle guidance from the split tool descriptions.
@@ -259,7 +261,7 @@ Files: `shepherd.ts`, `index.ts`, `test/verify-parent-surface.mjs`, `package.jso
 | Tool naming scheme | **Resolved:** `shepherd_<verb>`, lifecycle verbs are `spawn`, `prompt`, `wait`, `status`, `close`, `read` |
 | `start` vs `spawn` in `/shepherd` command | **Resolved:** `/shepherd spawn worker` fully replaces `/shepherd start worker`; no alias |
 | `read` placement | **Resolved:** own tool `shepherd_read(name, lines?, source?)` |
-| Handle representation | **Resolved:** accept string-or-object handles (arrays of either for wait); normalize in `prepareShepherdArguments` |
+| Lifecycle reference representation | **Resolved:** public tools accept opaque string ids (an array of ids for wait); full handles remain internal, with legacy nested handles migrated in `prepareShepherdArguments` |
 | Old single-tool form | **Resolved:** hard remove; grep sweep covers stragglers |
 | `prompt`/`wait`/`close` via command | **Resolved:** model-only initially; revisit after real-world use |
 | General lifecycle guidance location | **Resolved:** umbrella `shepherd` tool guidance; do not use the global system prompt initially |

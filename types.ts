@@ -19,7 +19,7 @@ export const SpawnParams = Type.Object({
   action: Type.Literal('spawn', {
     description: 'Spawn an idle persistent agent; does not submit work.',
   }),
-  agent: Type.String({ description: 'Exact discovered agent name (case-sensitive).' }),
+  agent: Type.String({ description: 'Exact discovered agent name (case-sensitive). If unsure, call shepherd with action "agents" first.' }),
   agentScope: Type.Optional(AgentScopeSchema),
   placement: Type.Optional(SpawnPlacementSchema),
   direction: Type.Optional(SpawnDirectionSchema),
@@ -28,74 +28,45 @@ export const SpawnParams = Type.Object({
   model: Type.Optional(Type.String()),
   omitSystemPrompt: Type.Optional(Type.Boolean()),
 });
-const HandleObjectOptions = { additionalProperties: true } as const;
-
-/**
- * Lifecycle actions have one public handle representation: the complete
- * handle object returned by the preceding action's `details.handle`.
- *
- * The canonical protocol is object-only. The model-facing tool has a narrow
- * prepareArguments compatibility step for transports that encode this nested
- * field as JSON text before schema validation; callers should still pass the
- * native object and never stringify it themselves.
- */
-export const AgentHandleInputSchema = Type.Object(
-  {
-    id: Type.String({ description: 'Handle id from details.handle returned by spawn.' }),
-    agent: Type.Optional(Type.String()),
-    paneId: Type.Optional(Type.String()),
-    tabId: Type.Optional(Type.String()),
-    workspaceId: Type.Optional(Type.String()),
-  },
-  {
-    ...HandleObjectOptions,
-    description: 'The complete agent handle (AgentHandle) returned in details.handle by spawn.',
-  }
-);
-export const PromptHandleInputSchema = Type.Object(
-  {
-    id: Type.String({ description: 'Handle id from details.handle returned by prompt.' }),
-    agentId: Type.Optional(Type.String()),
-    createdAt: Type.Optional(Type.Number()),
-  },
-  {
-    ...HandleObjectOptions,
-    description: 'The complete PromptHandle object returned in details.handle by prompt.',
-  }
-);
+export const AgentIdSchema = Type.String({
+  description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
+});
+export const PromptIdSchema = Type.String({
+  description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or Herdr pane id.',
+});
 
 export const LifecyclePromptParams = Type.Object({
   action: Type.Literal('prompt', {
-    description: 'Submit one message to an agent and return a prompt handle without waiting.',
+    description: 'Submit one message to an agent and return a prompt id without waiting.',
   }),
-  handle: AgentHandleInputSchema,
-  message: Type.String({ description: 'Message to submit to the spawned agent.' }),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
+  id: AgentIdSchema,
+  message: Type.String({ description: 'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.' }),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. The completion timeout belongs to shepherd_wait.' })),
 });
 export const WaitParams = Type.Object({
   action: Type.Literal('wait', {
-    description: 'Wait for one or more prompt handles; agents remain alive.',
+    description: 'Wait for one or more prompt ids; agents remain alive.',
   }),
-  handle: Type.Union(
+  id: Type.Union(
     [
-      PromptHandleInputSchema,
-      Type.Array(PromptHandleInputSchema, {
+      PromptIdSchema,
+      Type.Array(PromptIdSchema, {
         minItems: 1,
-        description: 'Native array of complete PromptHandle objects for parallel wait.',
+        description: 'Array of opaque prompt ids for parallel waiting.',
       }),
     ],
     {
       description:
-        'One complete PromptHandle object, or a native array of complete PromptHandle objects.',
+        'One opaque prompt id returned by shepherd_prompt, or an array of prompt ids for parallel work. Do not pass an agent id or pane id.',
     }
   ),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.' })),
 });
 export const LifecycleStatusParams = Type.Object({
   action: Type.Literal('status', { description: 'Inspect an agent without focusing or mutating its Herdr pane.' }),
-  handle: AgentHandleInputSchema,
+  id: AgentIdSchema,
 });
 export const LifecycleCloseParams = Type.Object({
   action: Type.Literal('close', { description: 'Close an owned agent and cancel any unresolved prompt.' }),
-  handle: AgentHandleInputSchema,
+  id: AgentIdSchema,
 });

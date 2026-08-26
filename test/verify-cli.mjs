@@ -69,16 +69,16 @@ function okReadChecks() {
 }
 
 const okStatus = parsed(['status', 'worker']);
-check(!isError(okStatus) && typeof okStatus.args.handle === 'object' && okStatus.args.handle.id === 'worker',
-	'status: unknown target degrades to id-only handle');
+check(!isError(okStatus) && okStatus.args.id === 'worker',
+	'status: unknown target degrades to opaque id');
 
 // statusHandleTarget resolves a live agent by name or pane id.
 const liveAgent = lifecycleRegistry.registerAgent({ agent: 'live-scout', paneId: 'wT:p1' });
 check(
-	statusHandleTarget('live-scout').id === liveAgent.id && statusHandleTarget('live-scout').paneId === 'wT:p1',
+	statusHandleTarget('live-scout') === liveAgent.id,
 	'status target resolves live agent by name',
 );
-check(statusHandleTarget('wT:p1').id === liveAgent.id, 'status target resolves live agent by pane id');
+check(statusHandleTarget('wT:p1') === liveAgent.id, 'status target resolves live agent by pane id');
 
 // ── Negative parses ─────────────────────────────────────────────────────────
 

@@ -10,11 +10,11 @@ Replace workflow-oriented delegation as the primary orchestration model with a
 small set of low-level agent lifecycle primitives:
 
 ```text
-start(agent, options) -> AgentHandle
-prompt(handle, message, options) -> PromptHandle
-wait(promptHandle | PromptHandle[]) -> Result | Result[]
-status(handle) -> Status
-close(handle) -> void
+start(agent, options) -> agent id
+prompt(agent id, message, options) -> prompt id
+wait(prompt id | prompt ids) -> Result | Result[]
+status(agent id) -> Status
+close(agent id) -> void
 ```
 
 Starting an agent must not submit work. Work is submitted explicitly with
@@ -27,10 +27,10 @@ caller rather than being special delegation modes in pi-shepherd.
 - Make agent orchestration small, explicit, and composable.
 - Separate agent lifecycle from work submission and result synchronization.
 - Allow an agent to be started without an initial task.
-- Support parallel work by waiting on multiple prompt handles.
+- Support parallel work by waiting on multiple prompt ids.
 - Preserve Herdr-native execution and visibility.
 - Keep agent placement and launch configuration in `start` options.
-- Return stable, serializable handles suitable for later tool calls.
+- Return stable, serializable opaque ids suitable for later tool calls.
 - Preserve pi-shepherd's safety invariant: only panes created by pi-shepherd
   may be closed through pi-shepherd.
 - Make failures and partial results observable rather than hiding them inside
@@ -45,7 +45,7 @@ caller rather than being special delegation modes in pi-shepherd.
 - No implicit `{previous}` substitution or chain-specific result plumbing.
 - No requirement that pi-shepherd implement arbitrary workflow composition.
 - No simultaneous unresolved prompts for one agent in the initial version.
-- No requirement to expose Herdr pane IDs as the public handle format.
+- No requirement to expose Herdr pane IDs as the public lifecycle-id format.
 - No automatic closing of agents after a prompt completes.
 - No `stayOpen` option on `start`; started agents remain alive until `close`.
 
@@ -96,9 +96,10 @@ requirements are not satisfied, Herdr cannot be reached or started, the pane
 cannot be created, or pi cannot become ready. A failed start must not return a
 usable handle.
 
-### `prompt(handle, message, options) -> PromptHandle`
+### `prompt(agent id, message, options) -> prompt id`
 
-`prompt` sends exactly one user message to an already-started agent and returns
+`prompt` sends exactly one user message to an already-started agent identified by
+its opaque id and returns
 immediately after the message has been accepted for processing. It does not
 wait for the agent's turn to settle.
 
@@ -108,10 +109,9 @@ const operation = prompt(agent, "Review the current diff", {
 })
 ```
 
-The returned `PromptHandle` identifies this particular submitted operation and
-can be passed to `wait`. At the model-facing tool boundary, callers must pass
-the complete handle object returned in `details.handle`; passing only its ID,
-JSON text, or a raw pane ID is invalid.
+The returned prompt id identifies this particular submitted operation and can
+be passed to `wait`. At the model-facing tool boundary, pass it as the top-level
+`id` string; a raw Herdr pane ID is invalid.
 
 The initial implementation must reject a prompt when the agent already has an
 unresolved prompt. This prevents ambiguous result association. Parallel work
@@ -134,11 +134,10 @@ const result = await wait(operation)
 const results = await wait([researchA, researchB])
 ```
 
-For the model-facing `shepherd` tool, `operation`, `researchA`, and
-`researchB` mean the complete `details.handle` objects returned by `prompt`,
-not their IDs or JSON representations. A multi-wait must use one native array
-of those objects; do not stringify the array. This is the only accepted tool
-input syntax for lifecycle handles.
+For the model-facing `shepherd` tools, `operation`, `researchA`, and `researchB`
+are prompt id strings returned by `prompt`. A multi-wait uses one array of prompt
+ids. The provider may wrap the argument object in its own transport envelope,
+but the lifecycle argument itself is always an opaque id.
 
 For an array, the default behavior is **wait for all**. Results preserve the
 same order as the input handles, regardless of completion order. Waiting for
@@ -151,7 +150,7 @@ It therefore has `Promise.allSettled`-like failure behavior at the result level.
 A future version may support options such as `until: "any"`, but first version
 behavior is only wait-for-all.
 
-### `status(handle) -> Status`
+### `status(agent id) -> Status`
 
 `status` performs a non-blocking inspection of the agent's current state.
 Possible lifecycle states should reflect Herdr's recognized states:
@@ -161,12 +160,12 @@ idle | working | blocked | done | unknown | failed | closed
 ```
 
 The returned status should include stable identity and placement metadata where
-available, such as agent name, handle ID, pane ID, tab ID, and workspace ID.
+available, such as agent name, lifecycle id, pane ID, tab ID, and workspace ID.
 `status` must not focus the agent or otherwise alter user-visible Herdr state.
 
-### `close(handle) -> void`
+### `close(agent id) -> void`
 
-`close` closes the Herdr pane/tab represented by the handle and releases its
+`close` resolves the agent id to its owned Herdr pane/tab and releases its
 pi-shepherd resources. It must refuse to close a pane that pi-shepherd did not
 create, even if a caller supplies a matching raw pane ID.
 
@@ -174,17 +173,16 @@ Closing an agent with unresolved prompts should be explicit and deterministic.
 The initial implementation should mark those prompts as failed/cancelled and
 ensure subsequent `wait` calls return those results rather than hanging.
 
-Close should be idempotent for a handle that has already been closed, while a
-handle from another session or an unknown handle should produce a clear error.
+Close should be idempotent for an agent that has already been closed, while an
+id from another session or an unknown id should produce a clear error.
 
 ## Data model
 
-Handles are stable objects returned in tool result details and are intended to
-be passed back unchanged across model/tool calls. Internal representations may
-contain Herdr identifiers, but callers must not reconstruct handles from pane
-IDs or reduce them to an ID string. The model-facing tool deliberately accepts
-one handle syntax only: the complete returned object; for multiple prompts,
-a native array of complete prompt handle objects.
+Lifecycle ids are stable opaque strings returned in tool result text and are
+intended to be passed back across model/tool calls. Full handle objects may be
+used internally and may contain Herdr identifiers, but they are not part of the
+recommended model-facing protocol. Callers must not derive lifecycle ids from
+pane ids.
 
 Illustrative shapes:
 
@@ -231,12 +229,10 @@ const promptB = await prompt(researcherB, "Research authorization")
 const [resultA, resultB] = await wait([promptA, promptB])
 ```
 
-When composing this through `shepherd`, use the returned objects exactly:
-`wait({ handle: promptA.details.handle })` for one prompt, or
-`wait({ handle: [promptA.details.handle, promptB.details.handle] })` for two.
-Never use `[promptA.details.handle.id, promptB.details.handle.id]` or a
-stringified version of either form. If the tool reports an invalid handle
-shape, retry with the exact object from `details.handle`.
+When composing this through `shepherd`, pass the returned ids directly:
+`wait({ id: promptA.id })` for one prompt, or
+`wait({ id: [promptA.id, promptB.id] })` for two. Do not substitute Herdr pane
+ids or quote an entire argument object as a string.
 
 ### Sequential chain
 

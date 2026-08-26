@@ -61,7 +61,7 @@ const SPAWN_OPTION_KEYS = ['agentScope', 'placement', 'direction', 'confirmProje
 const READ_OPTION_KEYS = ['lines', 'source'];
 
 const USAGE =
-  'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|handle-id> | read <target> [options] | settings>\n' +
+  'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
   '  spawn options: --scope user|project|both, --placement pane|tab|workspace, --direction right|down, --cwd <path>, --model <provider/model>, --omit-system-prompt, --confirm-project-agents true|false\n' +
   '  read options: --lines <n>, --source ' + SOURCE_VALUES.join('|');
 
@@ -177,18 +177,17 @@ function parseFlags(
 }
 
 /**
- * Resolve a human status target (agent name, AgentHandle id, or pane id) to
- * the complete handle object doAction's status verb expects. Falls back to an
- * id-only handle so the registry reports an unknown target with its own
- * useful error instead of failing the parse.
+ * Resolve a human status target (agent name, lifecycle id, or pane id) to the
+ * opaque lifecycle id the status action uses. Falls back to the supplied value
+ * so the registry can return its useful unknown-id error.
  */
-export function statusHandleTarget(target: string): Record<string, unknown> {
+export function statusHandleTarget(target: string): string {
   for (const handle of lifecycleRegistry.allAgents()) {
     if (handle.id === target || handle.agent === target || handle.paneId === target) {
-      return { ...handle };
+      return handle.id;
     }
   }
-  return { id: target };
+  return target;
 }
 
 /**
@@ -233,8 +232,8 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
   if (action === 'status') {
     if (tokens.length > 2) return { error: `/shepherd status takes exactly one target.\n${USAGE}` };
     const target = tokens[1];
-    if (!target) return { error: `status requires an agent name or handle id.\n${USAGE}` };
-    return { action: 'status', args: { action: 'status', handle: statusHandleTarget(target) } };
+    if (!target) return { error: `status requires an agent name or lifecycle id.\n${USAGE}` };
+    return { action: 'status', args: { action: 'status', id: statusHandleTarget(target) } };
   }
 
   if (action === 'read') {
@@ -242,7 +241,7 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
     const { options, error } = parseFlags(tokens, 1, READ_OPTION_KEYS, positional);
     if (error) return { error: `${error}\n${USAGE}` };
     const [name, ...extra] = positional;
-    if (!name) return { error: `read requires a target (agent name, pane id, or handle id).\n${USAGE}` };
+    if (!name) return { error: `read requires a target (agent name, pane id, or lifecycle id).\n${USAGE}` };
     if (extra.length > 0) return { error: `Unexpected argument "${extra[0]}".\n${USAGE}` };
     return { action: 'read', args: { action: 'read', name, ...options } };
   }
@@ -262,7 +261,7 @@ function previewText(value: unknown, maxLength = 40): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
-/** Render opaque lifecycle handles as CLI-like ids instead of [object Object]. */
+/** Render opaque lifecycle ids as compact CLI-like values. */
 function handlePreview(value: unknown, maxLength = 40): string {
   if (Array.isArray(value)) {
     return `[${value.map(item => handlePreview(item, maxLength)).join(', ')}]`;
@@ -272,7 +271,7 @@ function handlePreview(value: unknown, maxLength = 40): string {
     return previewText((value as { id?: unknown }).id, maxLength);
   }
 
-  // A few providers serialize nested handle arguments before they reach the
+  // A few providers serialize nested legacy handle arguments before they reach the
   // renderer. Keep the display useful even though prepareArguments normalizes
   // them before execution.
   if (typeof value === 'string') {
@@ -315,7 +314,7 @@ export interface ShepherdCommandRender {
  * shows. Flags come from the shared OPTION_SPECS table so every rendered line
  * parses back with `parseShepherdCli`. Defaults that were not supplied are
  * intentionally omitted, which keeps options like --scope visible without
- * dumping handle implementation details (paneId, tabId, workspaceId).
+ * dumping internal implementation details (paneId, tabId, workspaceId).
  */
 export function formatShepherdCommand(
   verb: string,
@@ -336,17 +335,17 @@ export function formatShepherdCommand(
       for (const key of SPAWN_OPTION_KEYS) add(key);
       break;
     case 'prompt':
-      tokens.push(handlePreview(options.handle, idLimit));
+      tokens.push(handlePreview(options.id, idLimit));
       if (options.message !== undefined) tokens.push(cliValue(options.message, valueLimit));
       add('timeout');
       break;
     case 'wait':
-      tokens.push(handlePreview(options.handle, idLimit));
+      tokens.push(handlePreview(options.id, idLimit));
       add('timeout');
       break;
     case 'status':
     case 'close':
-      tokens.push(handlePreview(options.handle, idLimit));
+      tokens.push(handlePreview(options.id, idLimit));
       break;
     case 'agents':
       add('agentScope');
