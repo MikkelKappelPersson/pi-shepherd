@@ -3,71 +3,76 @@
 A Herdr-native pi extension for explicit agent lifecycle orchestration.
 The Shepherd is the parent pi session and orchestrator. Its herd is made up of
 specialized agents (also called sheep), created from their Markdown
-definitions and visible in Herdr, controlled through five composable primitives:
+definitions and visible in Herdr. The model-facing surface has one umbrella
+control tool plus six composable lifecycle tools:
 
 ```text
-start(agent, options) -> AgentHandle
-prompt(agentHandle, message, options) -> PromptHandle
-wait(promptHandle | promptHandles) -> Result | Result[]
-status(agentHandle) -> Status
-close(agentHandle) -> void
+shepherd({ action: "agents" | "herd" | "prune" })
+shepherd_spawn(agent, options) -> AgentHandle
+shepherd_prompt(agentHandle, message, options) -> PromptHandle
+shepherd_wait(promptHandle | promptHandles) -> Result | Result[]
+shepherd_status(agentHandle) -> Status
+shepherd_close(agentHandle) -> void
+shepherd_read(target, options) -> terminal output
 ```
 
-The model-facing `shepherd` tool also retains diagnostic/operational actions:
-`agent`, `herd`, `read`, and `prune`.
+The umbrella `shepherd` tool handles cheap control-plane actions and provides
+shared lifecycle guidance. The split `shepherd_<verb>` tools handle agent
+creation, prompting, waiting, inspection, closing, and terminal reads.
 
 ## Lifecycle usage
 
-`start` launches an idle persistent agent. It never submits a task and has no
-`stayOpen` option. The agent remains alive until explicitly closed. By default it
-creates a new background tab; pass `placement: "pane"` to split the current
-pane, or `placement: "workspace"` to create a new workspace. Pane placement
-uses a right split by default; pass `direction: "down"` for a pane below.
-Use pi-shepherd
-only when explicitly instructed because too many Herdr panes may crash pi.
+`shepherd_spawn` launches an idle persistent agent. It never submits a task
+and has no `stayOpen` option. The agent remains alive until explicitly closed.
+By default it creates a new background tab; pass `placement: "pane"` to split
+the current pane, or `placement: "workspace"` to create a new workspace. Pane
+placement uses a right split by default; pass `direction: "down"` for a pane
+below. Use pi-shepherd only when explicitly instructed because too many Herdr
+panes may crash pi.
 
 ```text
-agent = shepherd({ action: "start", agent: "scout", cwd: project })
-prompt = shepherd({
-  action: "prompt",
+agent = shepherd_spawn({ agent: "scout", cwd: project })
+prompt = shepherd_prompt({
   handle: agent.handle,
   message: "Research the authentication code",
 })
-result = shepherd({ action: "wait", handle: prompt.handle })
-shepherd({ action: "close", handle: agent.handle })
+result = shepherd_wait({ handle: prompt.handle })
+shepherd_close({ handle: agent.handle })
 ```
 
-Prompt submission is non-blocking. `wait` is the synchronization point. For
-parallel work, start multiple agents, prompt each one, then wait on the array:
+Prompt submission is non-blocking. `shepherd_wait` is the synchronization point.
+For parallel work, spawn multiple agents, prompt each one, then wait on the
+native array of prompt handles:
 
 ```text
-scoutA = start("scout", options)
-scoutB = start("scout", options)
-promptA = prompt(scoutA, "Research authentication")
-promptB = prompt(scoutB, "Research authorization")
-[resultA, resultB] = wait([promptA, promptB])
-close(scoutA)
-close(scoutB)
+scoutA = shepherd_spawn({ agent: "scout", ...options })
+scoutB = shepherd_spawn({ agent: "scout", ...options })
+promptA = shepherd_prompt({ handle: scoutA.handle, message: "Research authentication" })
+promptB = shepherd_prompt({ handle: scoutB.handle, message: "Research authorization" })
+[resultA, resultB] = shepherd_wait({ handle: [promptA.handle, promptB.handle] })
+shepherd_close({ handle: scoutA.handle })
+shepherd_close({ handle: scoutB.handle })
 ```
 
 Arrays wait concurrently and preserve input order. A single agent may have
 only one unresolved prompt. Sequential chains are composed by the caller:
 wait for one result, include its text in the next prompt, and wait again.
-Waiting never closes an agent.
+Waiting never closes an agent; close agents explicitly when they are no longer
+needed.
 
-## Shepherd actions
+## Shepherd tools
 
-| Action | Purpose |
+| Tool | Purpose |
 |---|---|
-| `start` | Create an idle persistent agent in a background Herdr tab (or requested pane/workspace placement) |
-| `prompt` | Submit one message using an `AgentHandle`; returns immediately |
-| `wait` | Wait for one or many `PromptHandle`s |
-| `status` | Inspect a handle without focusing or mutating Herdr |
-| `close` | Explicitly close an owned agent and cancel unresolved prompts |
-| `agents` | List all available agents (also called sheep) and source metadata |
-| `herd` | List the live herd: agents detected in Herdr panes |
-| `read` | Read recent output for diagnostics |
-| `prune` | Remove stale pi-shepherd pane registrations |
+| `shepherd` (`agents`) | List all available agents (also called sheep) and source metadata |
+| `shepherd` (`herd`) | List the live herd: agents detected in Herdr panes |
+| `shepherd` (`prune`) | Remove stale pi-shepherd pane registrations |
+| `shepherd_spawn` | Create an idle persistent agent in a background Herdr tab (or requested pane/workspace placement) |
+| `shepherd_prompt` | Submit one message using an `AgentHandle`; returns immediately |
+| `shepherd_wait` | Wait for one or many `PromptHandle`s |
+| `shepherd_status` | Inspect a handle without focusing or mutating Herdr |
+| `shepherd_close` | Explicitly close an owned agent and cancel unresolved prompts |
+| `shepherd_read` | Read recent output for diagnostics |
 
 `read` accepts an agent name, a Herdr pane id such as `w9:p18`, or a recorded
 Shepherd pane id. Herdr's opaque internal pane handle (for example, `pane-14`)
@@ -86,7 +91,6 @@ primitive arguments; native JSON booleans and numbers remain preferred. For exam
 
 ```json
 {
-  "action": "prompt",
   "handle": {
     "id": "shepherd-agent-...",
     "agent": "worker",
@@ -132,7 +136,7 @@ in the same project share one persistent note session under:
 ```
 
 The binding uses pi's parent `sessionManager.getSessionId()` and the parent
-project root. A second `start` or `prompt` reuses that directory; each prompt
+project root. A second `spawn` or `prompt` reuses that directory; each prompt
 gets a distinct note linked from the `shepherd.md` fieldnotes collection. Child pi
 JSONL files, Herdr panes, and lifecycle handles are execution state only.
 Notes are retained after `wait`, `close`, timeout, and extension restart;
@@ -156,14 +160,14 @@ truth for safe close operations.
 Sometimes you do not want the Shepherd to delegate a one-shot task and collect
 a result. If you want to collaborate directly with a specific agent—for
 example, inspect its role, ask follow-up questions, guide its investigation, or
-keep it available as an interactive partner—start an idle agent manually:
+keep it available as an interactive partner—spawn an idle agent manually:
 
 ```text
 /shepherd agents                # list available definitions
-/shepherd start worker          # start an idle, interactive worker
+/shepherd spawn worker          # spawn an idle, interactive worker
 ```
 
-`start` creates a persistent Herdr tab without submitting a task or focusing the
+`spawn` creates a persistent Herdr tab without submitting a task or focusing the
 new tab. Switch to it in Herdr and use the child pi session directly. The child
 has the selected agent's Markdown system prompt, configured tools, project
 working directory, and the parent Shepherd's current model (unless the agent
@@ -178,19 +182,22 @@ The slash command uses the same action vocabulary as the model-facing
 /shepherd agents                # list available definitions
 /shepherd agents both           # include project definitions
 /shepherd herd                  # list live Herdr agents
-/shepherd start worker          # start an interactive worker
+/shepherd spawn worker          # spawn an interactive worker
+/shepherd status worker         # inspect an agent
+/shepherd read worker --lines=20
 /shepherd settings
 ```
 
 `/shepherd list` and `/shepherd agents` remain accepted as compatibility
-aliases for `/shepherd agents`, but `agents` is canonical. Optional `start` flags
+aliases for `/shepherd agents`, but `agents` is canonical. Optional `spawn` flags
 include `--scope user|project|both`, `--placement pane|tab|workspace`,
 `--direction right|down`, `--cwd <path>`, `--model <provider/model>`, and
 `--omit-system-prompt`.
 
 For one-shot delegation, prompting, waiting, parallel work, and opaque
-handle-safe lifecycle control, use the structured `shepherd` tool protocol
-instead of manual commands.
+handle-safe lifecycle control, use the structured `shepherd_*` tool protocol
+instead of manual commands. The old single-tool form such as
+`shepherd({ action: "prompt", ... })` is no longer supported.
 
 ## Settings
 
@@ -283,6 +290,6 @@ npm test
 
 The tests cover discovery, launch configuration, strict handle-shape validation,
 active-prompt enforcement, settlement/cancellation, and concurrent multi-wait.
-Live Herdr verification should additionally cover idle start, non-blocking
+Live Herdr verification should additionally cover idle spawn, non-blocking
 prompt, result recovery, parallel prompts, iterative prompting, close, focus
 preservation, and ownership protection.

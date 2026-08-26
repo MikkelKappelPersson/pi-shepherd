@@ -156,15 +156,15 @@ Herdr pane, or occurs in a later tool call. In particular:
 
 ```text
 parent pi session P:
-  start scout   -> .shepherd/sessions/0007-task/
+  spawn scout   -> .shepherd/sessions/0007-task/
   prompt scout  -> .shepherd/sessions/0007-task/scout-01.md
-  start planner -> .shepherd/sessions/0007-task/
+  spawn planner -> .shepherd/sessions/0007-task/
   prompt planner -> .shepherd/sessions/0007-task/planner-01.md
-  start worker  -> .shepherd/sessions/0007-task/
+  spawn worker  -> .shepherd/sessions/0007-task/
   prompt worker -> .shepherd/sessions/0007-task/worker-01.md
 ```
 
-The second `start` must not allocate `0008-*` solely because the agent differs
+The second `spawn` must not allocate `0008-*` solely because the agent differs
 from the first one. A new numbered directory is allowed only when the parent
 pi session identity or effective project root is different, or when the
 existing binding is invalid and recovery follows the rules below.

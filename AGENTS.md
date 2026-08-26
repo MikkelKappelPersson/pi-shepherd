@@ -2,9 +2,9 @@
 
 A no-fuss pi extension for explicit agent (sheep) lifecycle orchestration and herding
 pi agents inside Herdr. See `README.md` and `docs/dictionary` for terminology
-and user-facing usage. The model-facing tool definition is the source of truth
-for actions and lifecycle guidance; this file contains repository constraints
-only.
+and user-facing usage. Core semantics live in `doAction()`/`lifecycle.ts`; the
+model-facing tools and `/shepherd` command are thin adapters. This file contains
+repository constraints only.
 
 ## Project conventions
 
@@ -19,8 +19,8 @@ agent invocation receives its own note.
 - `discovery.ts` is pure and reads agent files fresh on each invocation.
 - `orchestration.ts` contains opaque serializable handles and session-scoped
   registries.
-- `lifecycle.ts` implements `start`, `prompt`, `wait`, `status`, and `close`.
-- `shepherd.ts` exposes the action-discriminated model-facing tool.
+- `lifecycle.ts` implements `spawn`, `prompt`, `wait`, `status`, and `close`.
+- `shepherd.ts` exposes the umbrella control tool and separate lifecycle tools.
 - `herdr.ts` owns Herdr launch, pane, and created-pane registry operations.
 - `shepherd-done.ts` is the in-tab completion extension.
 
@@ -42,6 +42,6 @@ agent invocation receives its own note.
 
 ## Verification
 
-Run `npm test`. Live Herdr verification should cover idle start, non-blocking
+Run `npm test`. Live Herdr verification should cover idle spawn, non-blocking
 prompt, single wait/result recovery, concurrent multi-wait, iterative prompting,
 status, close cancellation, focus preservation, and ownership protection.

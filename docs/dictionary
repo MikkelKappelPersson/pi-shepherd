@@ -8,3 +8,9 @@
 - **Sheep's note**: A note created by a sheep to track its work, observations, and progress, and to provide information for the shepherd and other sheep.
 - **Shepherd's note**: A note created by the shepherd to track the overall progress of the herd and to provide guidance, feedback, and a map to all present and future sheep.
 - **Session**: A session is tied to the shepherd's pi session and is used to track the state of the herd and its sheep.
+- **Control-plane tool**: The model-facing `shepherd` tool. It handles cheap meta-actions: `agents`, `herd`, and `prune`, and serves as the guidance hub for the Shepherd tool family.
+- **Lifecycle tools**: The separate model-facing tools `shepherd_spawn`, `shepherd_prompt`, `shepherd_wait`, `shepherd_status`, `shepherd_close`, and `shepherd_read`. Each has a flat object schema and delegates to the shared `doAction()` core.
+- **Model-facing surface**: The structured `shepherd` control tool plus the six `shepherd_<verb>` lifecycle tools. Lifecycle handles must be passed as complete native objects between these tools.
+- **Command surface**: The human `/shepherd` command. It supports `agents`, `herd`, `spawn`, `status`, `read`, and `settings`; prompt/wait/close remain model-only for now.
+- **AgentHandle**: The complete native object returned by `shepherd_spawn` that identifies an owned agent. Preserve and pass it unchanged to `shepherd_prompt`, `shepherd_status`, or `shepherd_close`.
+- **PromptHandle**: The complete native object returned by `shepherd_prompt` that identifies submitted work. Preserve and pass it unchanged to `shepherd_wait`.

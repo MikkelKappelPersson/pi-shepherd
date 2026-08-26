@@ -224,19 +224,22 @@ Files: `shepherd.ts`, `index.ts`, `test/verify-parent-surface.mjs`, `package.jso
 
 ### Phase 6 — Docs & conventions
 
-- [ ] AGENTS.md: replace "the model-facing tool definition is the source of truth"
+- [x] AGENTS.md: replace "the model-facing tool definition is the source of truth"
       with "core semantics live in `doAction()`/`lifecycle.ts`; tools and `/shepherd`
-      are thin adapters."
-- [ ] `docs/dictionary`: add entries for the split tool names and note the two surfaces.
-- [ ] README: update invocation examples (both `shepherd_wait …` and `/shepherd …`),
-      add a compatibility note (old `shepherd action=prompt` form is gone).
-- [ ] Grep sweep for stale references: `shepherd action=`, `action=start` etc. in
-      docs, skills, prompts, and test fixtures.
+      are thin adapters." ✅
+- [x] `docs/dictionary`: add entries for the split tool names and note the two surfaces. ✅
+- [x] README: update invocation examples (both `shepherd_wait …` and `/shepherd …`),
+      add a compatibility note (old `shepherd action=prompt` form is gone). ✅
+- [x] Grep sweep for stale references: `shepherd action=`, `action=start` etc. in
+      active docs, skills, prompts, and test fixtures. ✅ Current public docs and
+      implementation references are clean; the archived Phase 2 design records
+      retain historical `start` terminology, while current Phase 3 artifact examples
+      use `spawn`.
 
 ### Phase 7 — Verification
 
 - [ ] `npm test` fully green including new schema-invariant test.
-- [ ] Live Herdr checklist (per AGENTS.md): idle start, non-blocking prompt,
+- [ ] Live Herdr checklist (per AGENTS.md): idle spawn, non-blocking prompt,
       single wait/result, concurrent multi-wait, iterative prompting, status,
       close cancellation, focus preservation, ownership protection.
 - [ ] Constrained-backend check: run a session with `stealth/ox-alpha` (or any backend
@@ -261,6 +264,6 @@ Files: `shepherd.ts`, `index.ts`, `test/verify-parent-surface.mjs`, `package.jso
 - **Largest regression risk**: Phase 3 splitting — mitigated by keeping every tool a
   pure `doAction` delegate and reusing verify scripts unchanged.
 - **Prompt-quality risk**: models accustomed to one tool may mis-select between
-  `prompt`/`wait`; mitigated by cross-referencing descriptions + system-prompt guidance.
+  `prompt`/`wait`; mitigated by cross-referencing descriptions + umbrella-tool guidance.
 - **Doc drift**: two surfaces double the places to update; the grep sweep in Phase 6 is
   the safety net.

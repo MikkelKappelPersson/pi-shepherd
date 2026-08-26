@@ -10,8 +10,8 @@ fallback.
 index.ts          extension entry and /shepherd command
  discovery.ts     fresh agent discovery and frontmatter parsing
  orchestration.ts opaque serializable handles and in-memory registries
- lifecycle.ts     start, prompt, wait, status, and close primitives
- shepherd.ts      model-facing action-discriminated shepherd tool
+ lifecycle.ts     spawn, prompt, wait, status, and close primitives
+ shepherd.ts      umbrella control tool plus separate lifecycle tools
  herdr.ts         Herdr CLI, launch, pane, and ownership helpers
  artifact-sessions.ts durable parent-bound session, note, and fieldnotes persistence
  shepherd-done.ts in-tab completion extension
@@ -21,16 +21,25 @@ index.ts          extension entry and /shepherd command
 
 ## Public lifecycle API
 
-- `start(agent, options)` creates an idle persistent agent and submits no task.
-- `prompt(handle, message, options)` submits one message and returns immediately.
-- `wait(promptHandle | promptHandles)` waits for one or all prompts; arrays are
-  concurrent and preserve input order.
-- `status(handle)` performs non-mutating inspection.
-- `close(handle)` explicitly terminates an owned agent and cancels unresolved
-  prompts.
+- `shepherd_spawn({ agent, ...options })` creates an idle persistent agent and
+  submits no task.
+- `shepherd_prompt({ handle, message, ...options })` submits one message and
+  returns immediately.
+- `shepherd_wait({ handle })` waits for one or all prompts; arrays are concurrent
+  and preserve input order.
+- `shepherd_status({ handle })` performs non-mutating inspection.
+- `shepherd_close({ handle })` explicitly terminates an owned agent and cancels
+  unresolved prompts.
+- `shepherd_read({ name, lines?, source? })` reads recent terminal output.
+
+The umbrella `shepherd` control tool handles `agents`, `herd`, and `prune` and
+contains the shared lifecycle and fieldnotes guidance. The `/shepherd` command
+supports the human-facing `agents`, `herd`, `spawn`, `status`, `read`, and
+`settings` actions.
 
 Parallel work and chains are caller composition, not first-class workflow
-modes. A one-shot operation is explicitly `start + prompt + wait + close`.
+modes. A one-shot operation is explicitly `shepherd_spawn + shepherd_prompt +
+shepherd_wait + shepherd_close`.
 
 ## Completed implementation
 
@@ -59,7 +68,7 @@ Run:
 npm test
 ```
 
-Live Herdr checks cover idle start, non-blocking prompt, wait/result recovery,
+Live Herdr checks cover idle spawn, non-blocking prompt, wait/result recovery,
 parallel multi-wait, iterative prompting, cancellation on close, focus
 preservation, and ownership protection.
 

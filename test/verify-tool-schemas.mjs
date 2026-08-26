@@ -5,8 +5,8 @@
 // sampling backends, which emit `{}` arguments for every call
 // (see docs/plan-tool-surface-split.md §1).
 //
-// Expected state: FAILS while the union-based `ShepherdParams` is still in
-// place; becomes the permanent guard once phases 2–3 land.
+// This is the permanent guard for the flat-object schema invariant introduced
+// during phases 2–3; every registered model-facing tool is listed below.
 import assert from 'node:assert/strict';
 import { Type } from 'typebox';
 import { ShepherdParams, SourceSchema } from '../shepherd.ts';
