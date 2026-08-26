@@ -27,6 +27,7 @@ import {
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from './lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './settings.ts';
 import { lifecycleRegistry } from './orchestration.ts';
+import { formatShepherdCommand } from './cli.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from './artifact-sessions.ts';
 import type { DelegatorModel } from './discovery.ts';
 import { discoverAgents, formatAgentList } from './discovery.ts';
@@ -177,103 +178,6 @@ function textResult(
   details: Record<string, unknown>
 ): AgentToolResult<Record<string, unknown>> {
   return { content: [{ type: 'text' as const, text }], details };
-}
-
-/** Keep tool-call previews compact without rendering an empty placeholder. */
-function previewText(value: unknown, maxLength = 40): string {
-  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : String(value ?? '');
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
-}
-
-/** Render opaque lifecycle handles as CLI-like ids instead of [object Object]. */
-function handlePreview(value: unknown, maxLength = 40): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(item => handlePreview(item, maxLength)).join(', ')}]`;
-  }
-
-  if (value && typeof value === 'object' && 'id' in value) {
-    return previewText((value as { id?: unknown }).id, maxLength);
-  }
-
-  // A few providers serialize nested handle arguments before they reach the
-  // renderer. Keep the display useful even though prepareArguments normalizes
-  // them before execution.
-  if (typeof value === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      if (parsed && typeof parsed === 'object') return handlePreview(parsed, maxLength);
-    } catch {
-      // It may simply be an id, so fall through.
-    }
-  }
-
-  return previewText(value, maxLength);
-}
-
-/** Quote values that would otherwise be ambiguous in a command-like preview. */
-function cliValue(value: unknown, maxLength = 80): string {
-  const text = previewText(value, maxLength);
-  return /[\s"'=]/.test(text) ? JSON.stringify(text) : text;
-}
-
-function cliOption(name: string, value: unknown, maxLength = 80): string {
-  if (value === undefined || value === null) return '';
-  return `--${name}=${cliValue(value, maxLength)}`;
-}
-
-/**
- * Show the actual supplied arguments in a compact, CLI-like form. Defaults
- * that were not supplied by the model are intentionally omitted; this makes
- * options such as --timeout visible without dumping handle implementation
- * details (paneId, tabId, workspaceId).
- */
-function shepherdCallPreview(args: Record<string, any>, expanded = false): string {
-  const valueLimit = expanded ? Number.POSITIVE_INFINITY : 80;
-  const idLimit = expanded ? Number.POSITIVE_INFINITY : 48;
-  const tokens = ['shepherd', String(args.action ?? 'unknown')];
-  const add = (name: string) => {
-    const option = cliOption(name, args[name], valueLimit);
-    if (option) tokens.push(option);
-  };
-
-  switch (args.action) {
-    case 'spawn':
-      tokens.push(cliValue(args.agent, valueLimit));
-      for (const name of [
-        'agentScope',
-        'placement',
-        'direction',
-        'confirmProjectAgents',
-        'cwd',
-        'model',
-        'omitSystemPrompt',
-        'timeout',
-      ])
-        add(name);
-      break;
-    case 'prompt':
-      tokens.push(handlePreview(args.handle, idLimit));
-      if (args.message !== undefined) tokens.push(cliValue(args.message, valueLimit));
-      add('timeout');
-      break;
-    case 'wait':
-      tokens.push(handlePreview(args.handle, idLimit));
-      add('timeout');
-      break;
-    case 'status':
-    case 'close':
-      tokens.push(handlePreview(args.handle, idLimit));
-      break;
-    case 'agents':
-      add('agentScope');
-      break;
-    case 'read':
-      tokens.push(cliValue(args.name, valueLimit));
-      for (const name of ['lines', 'source']) add(name);
-      break;
-  }
-
-  return tokens.filter(Boolean).join(' ');
 }
 
 function reusableText(lastComponent: unknown): Text {
@@ -552,14 +456,12 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     },
 
     renderCall(args, theme, context) {
-      const action = String(args.action ?? 'unknown');
-      const command = shepherdCallPreview(args as Record<string, any>, context.expanded);
-      const prefix = `shepherd ${action}`;
+      const render = formatShepherdCommand(String(args.action ?? 'unknown'), args as Record<string, any>, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd ')) +
-          theme.fg('accent', action) +
-          theme.fg('dim', command.slice(prefix.length))
+          theme.fg('accent', render.verb) +
+          (render.rest ? theme.fg('dim', ` ${render.rest}`) : '')
       );
       return component;
     },
@@ -567,13 +469,13 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     renderResult: (result, options, theme, context) => renderToolResult(result, options, theme, context),
   });
 
-  const lifecycleRenderers = (action: string) => ({
+  const lifecycleRenderers = (verb: string) => ({
     renderCall(args: Record<string, any>, theme: any, context: any) {
-      const command = shepherdCallPreview({ ...args, action } as Record<string, any>, context.expanded);
+      const render = formatShepherdCommand(verb, args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
-        theme.fg('toolTitle', theme.bold(`${action} `)) +
-          theme.fg('dim', command.slice(action.length + 1))
+        theme.fg('toolTitle', theme.bold(`${verb} `)) +
+          (render.rest ? theme.fg('dim', render.rest) : '')
       );
       return component;
     },

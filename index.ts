@@ -11,6 +11,8 @@ import { discoverAgents } from "./discovery.ts";
 import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
 import { doAction, registerShepherdTools, type ShepherdArgs } from "./shepherd.ts";
+import { parseShepherdCli, tokenizeCli } from "./cli.ts";
+import { lifecycleRegistry } from "./orchestration.ts";
 import { resolveOrCreateParentArtifactSession } from "./artifact-sessions.ts";
 import {
 	isHerdrAvailable,
@@ -263,65 +265,6 @@ function borderLine(
 	return `${teal("│")}${theme.fg("muted", truncLeft)}${" ".repeat(pad)}${theme.fg("muted", right)}${teal("│")}`;
 }
 
-type StartCommandOptions = {
-	agentScope?: "user" | "project" | "both";
-	placement?: "pane" | "tab" | "workspace";
-	direction?: "right" | "down";
-	cwd?: string;
-	model?: string;
-	omitSystemPrompt?: boolean;
-};
-
-/**
- * Parse the small, human-facing subset of StartParams used by `/shepherd`.
- * The canonical model-facing API remains the structured `shepherd` tool; this
- * adapter keeps the common interactive form (`start worker`) convenient while
- * still exposing the useful placement/scope options.
- */
-function parseStartCommand(tokens: string[]):
-	| { agent: string; options: StartCommandOptions }
-	| { error: string } {
-	const agent = tokens[1];
-	if (!agent || agent.startsWith("--")) {
-		return { error: "Usage: /shepherd start <agent> [--scope user|project|both] [--placement pane|tab|workspace]" };
-	}
-
-	const options: StartCommandOptions = {};
-	const values = new Map<string, keyof StartCommandOptions>([
-		["--scope", "agentScope"],
-		["--agent-scope", "agentScope"],
-		["--placement", "placement"],
-		["--direction", "direction"],
-		["--cwd", "cwd"],
-		["--model", "model"],
-	]);
-	for (let i = 2; i < tokens.length; i++) {
-		const token = tokens[i];
-		if (token === "--omit-system-prompt") {
-			options.omitSystemPrompt = true;
-			continue;
-		}
-		const equals = token.indexOf("=");
-		const flag = equals >= 0 ? token.slice(0, equals) : token;
-		const key = values.get(flag);
-		if (!key) return { error: `Unknown start option "${token}".` };
-		const value = equals >= 0 ? token.slice(equals + 1) : tokens[++i];
-		if (!value || value.startsWith("--")) return { error: `Missing value for ${flag}.` };
-		(options as Record<string, string>)[key] = value;
-	}
-
-	if (options.agentScope && !["user", "project", "both"].includes(options.agentScope)) {
-		return { error: `Invalid scope "${options.agentScope}"; use user, project, or both.` };
-	}
-	if (options.placement && !["pane", "tab", "workspace"].includes(options.placement)) {
-		return { error: `Invalid placement "${options.placement}"; use pane, tab, or workspace.` };
-	}
-	if (options.direction && !["right", "down"].includes(options.direction)) {
-		return { error: `Invalid direction "${options.direction}"; use right or down.` };
-	}
-	return { agent, options };
-}
-
 function parentArtifactSessionForCommand(ctx: ExtensionCommandContext) {
 	if (!fieldnotesEnabled()) return undefined;
 	const parentPiSessionId = ctx.sessionManager?.getSessionId?.();
@@ -373,110 +316,120 @@ export default function (pi: ExtensionAPI) {
 	registerSubagentStatusWidget(pi);
 
 	pi.registerCommand("shepherd", {
-		description: "pi-shepherd: agents | herd | start | settings",
-		// Keep completion aligned with the action names in the model-facing
-		// `shepherd` tool. Agent names are discovered fresh so user-defined agents
-		// are available here too.
+		description: "pi-shepherd: agents | herd | spawn | status | read | settings",
+		// Keep completion aligned with the actions the command supports. Agent
+		// names (and live handle ids for status) are discovered fresh so
+		// user-defined agents and running agents are available here.
 		getArgumentCompletions: (prefix) => {
 			const parts = prefix.split(/\s+/);
 			const action = parts[0] ?? "";
+			const discoveredAgentNames = () =>
+				discoverAgents(shepherdCommandCwd, loadSettings().agentScope)
+					.agents.filter((agent) => agent.name.length > 0)
+					.map((agent) => ({ name: agent.name, description: agent.description }));
+			const liveHandleIdPrefixes = () =>
+				lifecycleRegistry
+					.allAgents()
+					.map((handle) => handle.id)
+					.filter((id) => id.length > 0);
 			if (parts.length <= 1 && !prefix.endsWith(" ")) {
 				// Pi does not automatically invoke the completion provider again
 				// after applying an argument completion. When the user types
-				// `/shepherd sta`, show full `start <agent>` entries immediately
-				// instead of requiring a second completion cycle after `start`.
-				const wantsStartCandidates =
-					action === "start" || (action.length >= 3 && "start".startsWith(action));
-				if (wantsStartCandidates) {
-					const { agents } = discoverAgents(shepherdCommandCwd, loadSettings().agentScope);
-					const candidates = agents.filter((agent) => agent.name.length > 0);
-					if (candidates.length > 0) {
-						return candidates.map((agent) => ({
-							value: `start ${agent.name}`,
-							label: `start ${agent.name}`,
+				// `/shepherd spo`, show full `spawn <agent>` entries immediately
+				// instead of requiring a second completion cycle after `spawn`.
+				if (action.length >= 3 && "spawn".startsWith(action)) {
+					const names = discoveredAgentNames();
+					if (names.length > 0) {
+						return names.map((agent) => ({
+							value: `spawn ${agent.name}`,
+							label: `spawn ${agent.name}`,
 							description: agent.description,
 						}));
 					}
 				}
-				const actions = ["agents", "herd", "start", "settings"];
+				if (action.length >= 3 && "status".startsWith(action)) {
+					const targets = [...discoveredAgentNames().map((a) => a.name), ...liveHandleIdPrefixes()];
+					if (targets.length > 0) {
+						return targets.map((target) => ({ value: `status ${target}`, label: `status ${target}` }));
+					}
+				}
+				if (action.length >= 3 && "read".startsWith(action)) {
+					const targets = [...discoveredAgentNames().map((a) => a.name), ...liveHandleIdPrefixes()];
+					if (targets.length > 0) {
+						return targets.map((target) => ({ value: `read ${target}`, label: `read ${target}` }));
+					}
+				}
+				const actions = ["agents", "herd", "spawn", "status", "read", "settings"];
 				const filtered = actions.filter((s) => s.startsWith(action));
 				return filtered.length > 0
 					? filtered.map((value) => ({ value, label: value }))
 					: null;
 			}
-			if (action === "start") {
-				const agentPrefix = prefix.slice("start".length).trim();
-				const { agents } = discoverAgents(shepherdCommandCwd, loadSettings().agentScope);
-				const filtered = agents
+			if (action === "spawn") {
+				const agentPrefix = prefix.slice("spawn".length).trim();
+				const filtered = discoveredAgentNames()
 					.map((agent) => agent.name)
 					.filter((name) => name.startsWith(agentPrefix));
 				// Command completion replaces the complete argument string, not just
-				// the final token. Preserve the action or Enter turns `start scout`
+				// the final token. Preserve the action or Enter turns `spawn scout`
 				// into only `scout`.
 				return filtered.length > 0
-					? filtered.map((value) => ({ value: `start ${value}`, label: value }))
+					? filtered.map((value) => ({ value: `spawn ${value}`, label: value }))
+					: null;
+			}
+			if (action === "status" || action === "read") {
+				const targetPrefix = prefix.slice(action.length).trim();
+				const targets = [
+					...discoveredAgentNames().map((a) => a.name),
+					// A registered agent name is preferred over its handle id; the
+					// parser resolves each to a handle through the live registry.
+					...liveHandleIdPrefixes(),
+				].filter((t) => t.startsWith(targetPrefix));
+				return targets.length > 0
+					? targets.map((value) => ({ value: `${action} ${value}`, label: value }))
 					: null;
 			}
 			return null;
 		},
 		handler: async (args, ctx: ExtensionCommandContext) => {
-			const arg = (args ?? "").trim();
-			const tokens = arg ? arg.split(/\s+/) : [];
-			const action = tokens[0] ?? "";
-
-			if (action === "settings") {
+			const raw = (args ?? "").trim();
+			// Quote-aware tokenization (shared with the CLI preview renderer) so
+			// flags like --cwd="/a b" survive the split.
+			let tokens = raw ? tokenizeCli(raw) : [];
+			if (tokens[0] === "settings") {
 				await openSettings(ctx);
 				return;
 			}
-
-			if (action === "agents" || action === "list" || action === "sheep") {
-				// `list` and `sheep` remain accepted as compatibility aliases, but
-				// `agents` is the canonical action (and the only completion shown).
-				const scopeArg = tokens[1];
-				const scope = ["user", "project", "both"].includes(scopeArg ?? "")
-					? (scopeArg as "user" | "project" | "both")
-					: loadSettings().agentScope;
-				await runCommandAction({ action: "agents", agentScope: scope }, ctx);
+			// Historical aliases remain accepted but are never offered in
+			// completions; `agents` is canonical.
+			if (tokens[0] === "list" || tokens[0] === "sheep") tokens = ["agents", ...tokens.slice(1)];
+			const parsed = parseShepherdCli(tokens);
+			if ("error" in parsed) {
+				ctx.ui?.notify(`pi-shepherd: ${parsed.error}`, "warning");
 				return;
 			}
-
-			if (action === "herd") {
-				if (!isHerdrAvailable()) {
-					ctx.ui?.notify(
-						"pi-shepherd: Herdr runtime not reachable (the `herdr` CLI on PATH and a running server are required). Start Herdr with `herdr`, or run pi inside a Herdr pane.",
-						"warning",
-					);
-					return;
-				}
-				await runCommandAction({ action: "herd" }, ctx);
+			// Only `agents` is pure local discovery; everything else needs the
+			// Herdr runtime, so warn with the setup hint instead of a raw error.
+			if (parsed.action !== "agents" && !isHerdrAvailable()) {
+				ctx.ui?.notify(
+					"pi-shepherd: Herdr runtime not reachable. Start Herdr with `herdr`, or run pi inside a Herdr pane.",
+					"warning",
+				);
 				return;
 			}
-
-			if (action === "start") {
-				if (!isHerdrAvailable()) {
-					ctx.ui?.notify(
-						"pi-shepherd: Herdr runtime not reachable. Start Herdr with `herdr`, or run pi inside a Herdr pane.",
-						"warning",
-					);
-					return;
-				}
-				const parsed = parseStartCommand(tokens);
-				if ("error" in parsed) {
-					ctx.ui?.notify(`pi-shepherd: ${parsed.error}`, "warning");
-					return;
-				}
-				ctx.ui?.setStatus?.("pi-shepherd", `Starting ${parsed.agent}…`);
+			if (parsed.action === "spawn") {
+				const agent = String(parsed.args.agent);
+				ctx.ui?.setStatus?.("pi-shepherd", `Starting ${agent}…`);
 				try {
 					await runCommandAction(
 						{
-							action: "spawn",
-							agent: parsed.agent,
-							...parsed.options,
-							// Pre-resolve tolerantly (undefined when fieldnotes are disabled
-							// or no session identity exists); 'artifactSession' in args makes
-							// doAction honor the explicit value instead of requiring one.
+							...parsed.args,
+							// Pre-resolve tolerantly (undefined when fieldnotes are
+							// disabled or no session identity exists); 'artifactSession'
+							// in args makes doAction honor the explicit value instead of
+							// requiring one.
 							artifactSession: parentArtifactSessionForCommand(ctx),
-						},
+						} as ShepherdArgs,
 						ctx,
 					);
 				} finally {
@@ -484,12 +437,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				return;
 			}
-
-			ctx.ui?.notify(
-				`pi-shepherd: try /shepherd agents, /shepherd herd, /shepherd start <agent>, or /shepherd settings` +
-					(action ? ` (unhandled action: ${action})` : ""),
-				"info",
-			);
+			await runCommandAction(parsed.args as ShepherdArgs, ctx);
 		},
 	});
 }

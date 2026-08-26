@@ -1,6 +1,6 @@
 # Plan: Split the Shepherd Tool Surface
 
-Status: in progress — Phases 0–2 complete (verified 2026-08-26). Next: Phase 3.
+Status: in progress — Phases 0–4 complete (verified 2026-08-26). Next: Phase 5.
 Related discussion: constrained-sampling backends drop arguments on bare-`anyOf` tool schemas
 
 ## 1. Problem
@@ -132,8 +132,7 @@ One registration helper, six declarative tools. All roots are plain objects.
       - `shepherd_close`: `handle` (required) ✅
       - `shepherd_read`: `name` (required), `lines`?, `source`? ✅
       - Note: the core action `start` was renamed to `spawn` (`SpawnParams`) to match the
-        tool naming scheme; the `/shepherd` command still uses the verb `start` until
-        Phase 4's rename.
+        tool naming scheme; the `/shepherd` command verb was renamed in Phase 4.
 - [x] Share `HandleSchema`, timeout, and completion-state enums across definitions.
       ✅ Done by deriving each tool schema with `Type.Omit(<LifecycleParams>, ['action'])`,
       which reuses the existing `AgentHandleInputSchema`/`PromptHandleInputSchema` and
@@ -161,22 +160,37 @@ Files: `shepherd.ts`, `types.ts` (`SpawnParams`), `index.ts`. ✅ Done
 
 Bring the human surface up to parity, scoped sensibly.
 
-- [ ] Decide blocking policy (recommended): allow quick actions only —
+- [x] Decide blocking policy (recommended): allow quick actions only —
       `status`, `read` join `agents|herd|spawn|settings`; keep `prompt`/`wait`/
       `close` **model-only** initially (they can block minutes or mutate agent state
       mid-conversation). Revisit after real-world use.
-- [ ] Rename the command verb `start` → `spawn` everywhere (handler branch,
-      completions, hints); no alias retained.
-- [ ] Factor the CLI grammar into `parseShepherdCli(args)` shared with
+      ✅ `status` + `read` are command actions; prompt/wait/close remain model-only.
+- [x] Rename the command verb `start` → `spawn` everywhere (handler branch,
+      completions, hints); no alias retained. ✅ (/shepherd list|sheep aliases for
+      *agents* remain, as before.)
+- [x] Factor the CLI grammar into `parseShepherdCli(args)` shared with
       `shepherdCallPreview` (parser = inverse of renderer); replace
       `parseStartCommand` with it.
-- [ ] Extend `getArgumentCompletions`: actions first; for `status`/`read`, complete
+      ✅ Now `cli.ts`: one `OPTION_SPECS` table drives both `parseShepherdCli` (human)
+      and `formatShepherdCommand` (tool-call previews, moved out of `shepherd.ts`). A
+      quote-aware `tokenizeCli` makes the command split the exact inverse of the
+      renderer's JSON quoting, so a rendered line reparses to the same args.
+      Covered by the new `cli:test` suite (parses, rejections, round-trips).
+- [x] Extend `getArgumentCompletions`: actions first; for `status`/`read`, complete
       discovered agent names (reuse the pattern already used for `spawn`).
+      ✅ Action list now includes `status`/`read`; both also complete live
+      AgentHandle ids from the session registry; 3-char-prefix candidates
+      (`/shepherd spo` → `spawn <agent>`) preserved for spawn/status/read.
+- [x] `status` target resolution: `statusHandleTarget` maps agent name / handle id /
+      pane id to the complete handle object (live-registry lookup, id-only fallback).
 
-Acceptance: `/shepherd status <agent>` prints summary; unknown input prints the
-updated hint line; completions verified in TUI.
+Acceptance: `/shepherd status <agent>` prints summary ✅ (live: state `idle` after
+spawn); unknown input prints the updated hint line ✅ (`parseShepherdCli` error +
+Usage); command paths live-verified (status, read w/ quoted args). The full TUI UX
+pass (completions feel, long-running guardrails) stays in Phase 7.
 
-Files: `index.ts`, `cli.ts`.
+Files: `cli.ts` (new), `index.ts`, `shepherd.ts` (preview moved to cli.ts),
+`test/verify-cli.mjs` (new), `package.json` (wire `cli:test`), plan doc.
 
 ### Phase 5 — Relocate the narrative
 
