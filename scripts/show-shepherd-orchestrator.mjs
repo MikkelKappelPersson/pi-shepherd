@@ -19,7 +19,7 @@ import {
 	SHEPHERD_TOOL_PROMPT_GUIDELINES,
 	SHEPHERD_TOOL_PROMPT_SNIPPET,
 	ShepherdParams,
-} from "../shepherd.ts";
+} from "../src/extension/shepherd.ts";
 
 const json = process.argv.includes("--json");
 const help = process.argv.includes("--help") || process.argv.includes("-h");

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { LifecycleRegistry } = await import("../orchestration.ts");
+const { LifecycleRegistry } = await import("../src/core/orchestration.ts");
 let failures = 0;
 function assert(ok, label) { if (ok) console.log(`PASS  ${label}`); else { failures++; console.log(`FAIL  ${label}`); } }
 const registry = new LifecycleRegistry();

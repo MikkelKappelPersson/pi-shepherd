@@ -7,16 +7,15 @@ fallback.
 ## Architecture
 
 ```
-index.ts          extension entry and /shepherd command
- discovery.ts     fresh agent discovery and frontmatter parsing
- orchestration.ts opaque serializable handles and in-memory registries
- lifecycle.ts     spawn, prompt, wait, status, and close primitives
- shepherd.ts      umbrella control tool plus separate lifecycle tools
- herdr.ts         Herdr CLI, launch, pane, and ownership helpers
- artifact-sessions.ts durable parent-bound session, note, and fieldnotes persistence
- shepherd-done.ts in-tab completion extension
- .pi/agents/      bundled pi-format agents
- .agents/agents/  bundled shared-format agents
+index.ts                 extension entry and /shepherd command
+ src/core/discovery.ts    fresh agent discovery and frontmatter parsing
+ src/core/orchestration.ts opaque serializable handles and in-memory registries
+ src/core/lifecycle.ts    spawn, prompt, wait, status, and close primitives
+ src/core/herdr.ts        Herdr CLI, launch, pane, and ownership helpers
+ src/core/artifact-sessions.ts durable parent-bound session, note, and fieldnotes persistence
+ src/extension/shepherd.ts umbrella control tool plus separate lifecycle tools
+ src/extension/shepherd-done.ts in-tab completion extension
+ .agents/agents/  bundled pi-format and shared-format agents
 ```
 
 ## Public lifecycle API

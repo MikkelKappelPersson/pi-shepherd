@@ -12,7 +12,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentScope } from "./discovery.ts";
+import type { AgentScope } from "../core/discovery.ts";
 
 export interface ShepherdSettings {
 	/** Which agent directories to search. Project agents are repo-controlled. */

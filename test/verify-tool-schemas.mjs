@@ -10,7 +10,7 @@
 // registerShepherdTools() through a mock ExtensionAPI instead of duplicating
 // the schemas by hand.
 import assert from 'node:assert/strict';
-import { registerShepherdTools } from '../shepherd.ts';
+import { registerShepherdTools } from '../src/extension/shepherd.ts';
 
 const registered = [];
 registerShepherdTools({

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-const { LifecycleRegistry } = await import("../orchestration.ts");
+const { LifecycleRegistry } = await import("../src/core/orchestration.ts");
 let failures = 0;
 function assert(ok, label) { if (ok) console.log(`PASS  ${label}`); else { failures++; console.log(`FAIL  ${label}`); } }
-const { prepareShepherdArguments, formatIdForModel } = await import("../shepherd.ts");
+const { prepareShepherdArguments, formatIdForModel } = await import("../src/extension/shepherd.ts");
 const preparedHandle = prepareShepherdArguments({
  action: "prompt",
  handle: JSON.stringify({ id: "agent-1", agent: "worker" }),

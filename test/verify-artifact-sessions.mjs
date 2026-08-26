@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 
-const mod = await import("../artifact-sessions.ts");
+const mod = await import("../src/core/artifact-sessions.ts");
 const {
   slugifySessionName, slugifyAgentName, deriveSessionName,
   createOrResumeSession, resolveOrCreateParentArtifactSession, reserveArtifacts, markArtifactStarted,
@@ -123,7 +123,7 @@ await check("chain mode is retained across continuation", () => {
 
 await check("concurrent numbering uses unique ordinals", async () => {
   const concurrentRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shepherd-concurrent-"));
-  const script = `import { createOrResumeSession } from ${JSON.stringify(path.resolve("artifact-sessions.ts"))}; createOrResumeSession({projectRoot:process.argv[1],sessionName:process.argv[2]});`;
+  const script = `import { createOrResumeSession } from ${JSON.stringify(path.resolve("src/core/artifact-sessions.ts"))}; createOrResumeSession({projectRoot:process.argv[1],sessionName:process.argv[2]});`;
   const jobs = Array.from({ length: 8 }, (_, i) => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", "--input-type=module", "-e", script, concurrentRoot, `name-${i}`], { stdio: "ignore" });
     child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`child exited ${code}`)));

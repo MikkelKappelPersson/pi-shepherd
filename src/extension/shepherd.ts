@@ -23,14 +23,14 @@ import {
   WaitParams,
   LifecycleStatusParams,
   LifecycleCloseParams,
-} from './types.ts';
-import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from './lifecycle.ts';
+} from '../core/types.ts';
+import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from '../core/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './settings.ts';
-import { lifecycleRegistry } from './orchestration.ts';
+import { lifecycleRegistry } from '../core/orchestration.ts';
 import { formatShepherdCommand } from './cli.ts';
-import { resolveOrCreateParentArtifactSession, type ShepherdSession } from './artifact-sessions.ts';
-import type { DelegatorModel } from './discovery.ts';
-import { discoverAgents, formatAgentList } from './discovery.ts';
+import { resolveOrCreateParentArtifactSession, type ShepherdSession } from '../core/artifact-sessions.ts';
+import type { DelegatorModel } from '../core/discovery.ts';
+import { discoverAgents, formatAgentList } from '../core/discovery.ts';
 import {
   HERDR_SETUP_HINT,
   agentSummaries,
@@ -51,7 +51,7 @@ import {
   setCreatedPaneDir,
   waitForHerdrAgentDetected,
   waitForHerdrShellReady,
-} from './herdr.ts';
+} from '../core/herdr.ts';
 
 const execFileAsync = promisify(execFile);
 export const SourceSchema = StringEnum(

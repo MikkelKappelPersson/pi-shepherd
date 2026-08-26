@@ -13,7 +13,7 @@
  * args.
  */
 
-import { lifecycleRegistry } from './orchestration.ts';
+import { lifecycleRegistry } from '../core/orchestration.ts';
 
 export const SCOPE_VALUES = ['user', 'project', 'both'] as const;
 export const PLACEMENT_VALUES = ['pane', 'tab', 'workspace'] as const;

@@ -35,7 +35,7 @@ const packageDir = resolve(scriptDir, "..");
 const captureExtension = resolve(scriptDir, "capture-system-prompt.mjs");
 const resolverExtension = resolve(scriptDir, "resolve-agent.mjs");
 const shepherdExtension = resolve(packageDir, "index.ts");
-const agentExtension = resolve(packageDir, "shepherd-done.ts");
+const agentExtension = resolve(packageDir, "src/extension/shepherd-done.ts");
 
 function usage(exitCode = 2) {
 	console.error(`Usage:

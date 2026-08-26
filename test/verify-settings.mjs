@@ -10,7 +10,7 @@ const previousHome = process.env.HOME;
 process.env.HOME = home;
 
 try {
-  const mod = await import(`../settings.ts?settings-test=${Date.now()}`);
+  const mod = await import(`../src/extension/settings.ts?settings-test=${Date.now()}`);
   const {
     DEFAULT_SETTINGS,
     fieldnotesEnabled,

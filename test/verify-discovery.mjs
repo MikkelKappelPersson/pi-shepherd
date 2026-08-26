@@ -27,7 +27,7 @@ const fixtures = path.join(__dirname, "fixtures");
 // Point user dirs at the fixture "home" BEFORE importing discovery.
 process.env.HOME = path.join(fixtures, "home");
 
-const { discoverAgents, formatAgentList, normalizeModel, resolveDelegatedModel } = await import("../discovery.ts");
+const { discoverAgents, formatAgentList, normalizeModel, resolveDelegatedModel } = await import("../src/core/discovery.ts");
 
 let failures = 0;
 function assert(cond, label, extra = "") {

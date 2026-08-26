@@ -13,7 +13,7 @@
 
 import process from "node:process";
 import { resolve } from "node:path";
-import { discoverAgents } from "../discovery.ts";
+import { discoverAgents } from "../src/core/discovery.ts";
 
 function usage() {
 	console.error(`Usage: show-shepherd-prompt <agent> [options]

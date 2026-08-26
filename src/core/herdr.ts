@@ -506,7 +506,7 @@ export function writePiLaunchFiles(opts: {
 	const safe = opts.name.replace(/[^\w.-]+/g, "_") || "agent";
 	const sessionFile = path.join(dir, `session-${safe}.jsonl`);
 	const scriptFile = path.join(dir, `launch-${safe}.sh`);
-	const doneExt = fileURLToPath(new URL("./shepherd-done.ts", import.meta.url));
+	const doneExt = fileURLToPath(new URL("../extension/shepherd-done.ts", import.meta.url));
 
 	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
 	if (opts.model) args.push("--model", shellQuote(opts.model));

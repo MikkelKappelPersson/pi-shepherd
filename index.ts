@@ -1,25 +1,26 @@
 /**
  * pi-shepherd — no-fuss pi extension: subagents + herding pi agents in Herdr.
  *
- * Agent discovery (discovery.ts), lifecycle primitives (lifecycle.ts), built-in
- * agents (.pi/agents), and Herdr herding (herdr.ts).
+ * Entry point only. Engine lives in src/core/ (discovery, lifecycle, Herdr,
+ * registries, session persistence); the pi tool/command surface lives in
+ * src/extension/. Bundled agents are in .agents/agents/.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { discoverAgents } from './discovery.ts';
-import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './settings.ts';
-import { openSettings, registerSettingsCommand } from './settings-ui.ts';
-import { doAction, registerShepherdTools, type ShepherdArgs } from './shepherd.ts';
-import { parseShepherdCli, tokenizeCli } from './cli.ts';
-import { lifecycleRegistry } from './orchestration.ts';
-import { resolveOrCreateParentArtifactSession } from './artifact-sessions.ts';
+import { discoverAgents } from './src/core/discovery.ts';
+import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/settings.ts';
+import { openSettings, registerSettingsCommand } from './src/extension/settings-ui.ts';
+import { doAction, registerShepherdTools, type ShepherdArgs } from './src/extension/shepherd.ts';
+import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
+import { lifecycleRegistry } from './src/core/orchestration.ts';
+import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
   workingSubagents,
   loadCreatedPanes,
   type HerdrAgentSummary,
-} from './herdr.ts';
+} from './src/core/herdr.ts';
 
 /**
  * Persistent "below the editor" status box listing the subagents currently

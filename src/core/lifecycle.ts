@@ -1,5 +1,5 @@
 import { discoverAgents, resolveDelegatedModel, type AgentScope } from './discovery.ts';
-import { loadSettings } from './settings.ts';
+import { loadSettings } from '../extension/settings.ts';
 import {
   ensureHerdrRuntime,
   getHerdrWorkspaceId,

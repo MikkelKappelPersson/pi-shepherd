@@ -2,7 +2,9 @@
 
 A no-fuss pi extension for explicit agent (sheep) lifecycle orchestration and herding
 pi agents inside Herdr. See `README.md` and `docs/dictionary` for terminology
-and user-facing usage. Core semantics live in `doAction()`/`lifecycle.ts`; the
+and user-facing usage. Layout: `index.ts` is the pi entry point, `src/core/` is
+the engine, and `src/extension/` is the pi surface (tools, commands, settings
+UI). Core semantics live in `doAction()`/`src/core/lifecycle.ts`; the
 model-facing tools and `/shepherd` command are thin adapters. This file contains
 repository constraints only.
 
@@ -16,17 +18,20 @@ agent invocation receives its own note.
 
 - TypeScript runs directly by pi. There is no build step or bundler.
 - Herdr integration shells out to the `herdr` CLI.
-- `discovery.ts` is pure and reads agent files fresh on each invocation.
-- `orchestration.ts` contains internal opaque serializable handles and
+- `src/core/discovery.ts` is pure and reads agent files fresh on each invocation.
+- `src/core/orchestration.ts` contains internal opaque serializable handles and
   session-scoped registries; model-facing lifecycle tools expose only ids.
-- `lifecycle.ts` implements `spawn`, `prompt`, `wait`, `status`, and `close`.
-- `shepherd.ts` exposes the umbrella control tool and separate lifecycle tools.
+- `src/core/lifecycle.ts` implements `spawn`, `prompt`, `wait`, `status`, and
+  `close`.
+- `src/extension/shepherd.ts` exposes the umbrella control tool and separate
+  lifecycle tools.
 - Every `pi.registerTool({ ... })` declaration must spell out `name`, `label`,
   `description`, `promptSnippet`, and `parameters` directly in that registration.
   Do not hide or generate those tool-definition fields through nested factories,
   object spreads, or shared registration helpers.
-- `herdr.ts` owns Herdr launch, pane, and created-pane registry operations.
-- `shepherd-done.ts` is the in-tab completion extension.
+- `src/core/herdr.ts` owns Herdr launch, pane, and created-pane registry
+  operations.
+- `src/extension/shepherd-done.ts` is the in-tab completion extension.
 
 ## Invariants
 

@@ -7,8 +7,8 @@
 //   - round-trip: render(parse(x)) parses back to the same args
 //     (the renderer and parser share one OPTION_SPECS table).
 // (see docs/plan-tool-surface-split.md §4).
-import { parseShepherdCli, formatShepherdCommand, statusHandleTarget, tokenizeCli } from '../cli.ts';
-import { lifecycleRegistry } from '../orchestration.ts';
+import { parseShepherdCli, formatShepherdCommand, statusHandleTarget, tokenizeCli } from '../src/extension/cli.ts';
+import { lifecycleRegistry } from '../src/core/orchestration.ts';
 
 let failures = 0;
 function check(ok, label) {

@@ -11,7 +11,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import { discoverAgents } from "../discovery.ts";
+import { discoverAgents } from "../src/core/discovery.ts";
 
 export default function resolveAgent(pi) {
 	const target = process.env.PI_AGENT_DISCOVERY_FILE;
