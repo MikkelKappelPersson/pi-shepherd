@@ -33,6 +33,7 @@ jobs:
           cache: npm
 
       - name: Verify tag matches package version
+        id: package
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -46,7 +47,24 @@ jobs:
             process.exit(1);
           }
           console.log(`Publishing ${packageJson.name}@${packageJson.version}`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `name=${packageJson.name}\\nversion=${packageJson.version}\\n`);
           NODE
+
+      # npm versions are immutable. This makes the workflow safe to rerun and
+      # also lets the first release be bootstrapped manually before OIDC is
+      # configured for the newly-created npm package.
+      - name: Check whether this version is already published
+        id: npm
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is already published; skipping npm publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -55,4 +73,5 @@ jobs:
         run: npm test
 
       - name: Publish to npm
+        if: steps.npm.outputs.published != 'true'
         run: npm publish --access public --provenance
