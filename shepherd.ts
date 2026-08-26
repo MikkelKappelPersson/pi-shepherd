@@ -18,7 +18,7 @@ import { Text } from '@earendil-works/pi-tui';
 import { Type, type Static } from 'typebox';
 import {
   AgentScopeSchema,
-  StartParams,
+  SpawnParams,
   LifecyclePromptParams,
   WaitParams,
   LifecycleStatusParams,
@@ -53,7 +53,7 @@ import {
 } from './herdr.ts';
 
 const execFileAsync = promisify(execFile);
-const SourceSchema = StringEnum(['visible', 'recent', 'recent-unwrapped', 'detection'] as const, {
+export const SourceSchema = StringEnum(['visible', 'recent', 'recent-unwrapped', 'detection'] as const, {
   description: 'Terminal snapshot source for read',
   default: 'recent-unwrapped',
 });
@@ -85,7 +85,7 @@ const AnyShepherdUnion = Type.Union(
   [
     HerdParams,
     AgentsParams,
-    StartParams,
+    SpawnParams,
     LifecyclePromptParams,
     WaitParams,
     LifecycleStatusParams,
@@ -237,7 +237,7 @@ function shepherdCallPreview(args: Record<string, any>, expanded = false): strin
   };
 
   switch (args.action) {
-    case 'start':
+    case 'spawn':
       tokens.push(cliValue(args.agent, valueLimit));
       for (const name of [
         'agentScope',
@@ -309,7 +309,7 @@ export async function doAction(
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   switch (args.action) {
-    case 'start': {
+    case 'spawn': {
       const a: any = args;
       // Explicit artifactSession wins (the command adapter pre-resolves it
       // tolerantly); otherwise resolve/require the parent artifact session.
@@ -504,13 +504,40 @@ export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
   "Keep every agent's complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.",
   'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index first and write only to the assigned note for note-producing prompts.',
   'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
-  'Use shepherd action=agents to retrieve available agent definitions and source metadata before choosing an agent.',
-  "Workflow: shepherd_spawn creates an idle agent (defaults to a new tab; placement pane/workspace only when explicitly requested, direction defaults to right for panes), then shepherd_prompt submits work, then shepherd_wait collects results. A bare spawn submits no task.",
+  'List available agent definitions and source metadata before choosing an agent to spawn.',
   'For sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call wait once with all handles.',
   'Waiting does not close an agent. Close each agent explicitly when it is no longer needed; close also cancels its unresolved prompt.',
 ];
 
-export function registerShepherdTool(pi: ExtensionAPI) {
+/**
+ * Shared execution path for every registered shepherd tool: gate on a running
+ * Herdr, delegate to doAction() (the single source of truth), and map thrown
+ * errors to a friendly text result. `label` is the action verb used in errors.
+ */
+async function executeShepherd(
+  label: string,
+  args: ShepherdArgs,
+  ctx: any,
+  signal?: AbortSignal,
+  onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
+): Promise<AgentToolResult<Record<string, unknown>>> {
+  if (!isHerdrAvailable()) return unavailableResult();
+  try {
+    return await doAction(args, ctx, signal, onUpdate);
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    return {
+      content: [{ type: 'text', text: `Herd ${label} failed: ${message}` }],
+      details: { action: label, error: String(error?.message ?? error) },
+      isError: true,
+    };
+  }
+}
+
+const LIFECYCLE_TOOL_SNIPPET =
+  'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.';
+
+export function registerShepherdTools(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'shepherd',
     label: 'Shepherd (manage Herdr agents)',
@@ -521,17 +548,7 @@ export function registerShepherdTool(pi: ExtensionAPI) {
     prepareArguments: prepareShepherdArguments,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      if (!isHerdrAvailable()) return unavailableResult();
-      try {
-        return await doAction(params as ShepherdArgs, ctx, signal, onUpdate);
-      } catch (error: any) {
-        const message = String(error?.message ?? error);
-        return {
-          content: [{ type: 'text', text: `Herd ${params.action} failed: ${message}` }],
-          details: { action: params.action, error: String(error?.message ?? error) },
-          isError: true,
-        };
-      }
+      return executeShepherd(String(params.action), params as ShepherdArgs, ctx, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -547,21 +564,121 @@ export function registerShepherdTool(pi: ExtensionAPI) {
       return component;
     },
 
-    renderResult(result, { expanded }, theme, context) {
-      const text = result.content[0];
-      const body = text?.type === 'text' ? (text.text ?? '') : '';
-      let rendered: string;
-      if (!expanded && body.includes('\n')) {
-        const firstLine = body.split('\n')[0];
-        rendered =
-          theme.fg('accent', firstLine) +
-          `\n${theme.fg('muted', `… +${body.split('\n').length - 1} more lines (Ctrl+O to expand)`)}`;
-      } else {
-        rendered = theme.fg('toolOutput', body || '(no output)');
-      }
+    renderResult: (result, options, theme, context) => renderToolResult(result, options, theme, context),
+  });
+
+  const lifecycleRenderers = (action: string) => ({
+    renderCall(args: Record<string, any>, theme: any, context: any) {
+      const command = shepherdCallPreview({ ...args, action } as Record<string, any>, context.expanded);
       const component = reusableText(context.lastComponent);
-      component.setText(rendered);
+      component.setText(
+        theme.fg('toolTitle', theme.bold(`${action} `)) +
+          theme.fg('dim', command.slice(action.length + 1))
+      );
       return component;
     },
+    renderResult: (result: any, options: any, theme: any, context: any) =>
+      renderToolResult(result, options, theme, context),
   });
+
+  pi.registerTool({
+    name: 'shepherd_spawn',
+    label: 'Shepherd: spawn agent',
+    description:
+      'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Returns an agent handle to pass to shepherd_prompt. ' +
+      'Defaults to a new tab; placement pane/workspace and a direction are only requested when explicitly asked.',
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Omit(SpawnParams, ['action']),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('spawn', { action: 'spawn', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_spawn'),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_prompt',
+    label: 'Shepherd: prompt agent',
+    description:
+      'Submit one message to a spawned agent and return a prompt handle without waiting. Pass the complete native agent handle from shepherd_spawn.',
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Omit(LifecyclePromptParams, ['action']),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('prompt', { action: 'prompt', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_prompt'),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_wait',
+    label: 'Shepherd: wait for prompt',
+    description:
+      'Wait for one or more prompt handles to settle. Accepts a handle or a native array of handles for parallel work. Waiting does not close the agent.',
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Omit(WaitParams, ['action']),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_wait'),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_status',
+    label: 'Shepherd: status of agent',
+    description:
+      'Inspect an agent\'s current state without focusing or mutating its Herdr pane.',
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Omit(LifecycleStatusParams, ['action']),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('status', { action: 'status', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_status'),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_close',
+    label: 'Shepherd: close agent',
+    description:
+      "Close an owned agent and cancel any unresolved prompt. Pass the exact complete handle returned by the action that created it.",
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Omit(LifecycleCloseParams, ['action']),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('close', { action: 'close', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_close'),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_read',
+    label: 'Shepherd: read terminal output',
+    description:
+      'Read recent terminal output from an agent or pane (name, pane id, or AgentHandle id).',
+    promptSnippet: LIFECYCLE_TOOL_SNIPPET,
+    parameters: Type.Object({
+      name: Type.String({ description: 'Agent name, Herdr pane id, or AgentHandle id of the target.' }),
+      lines: Type.Optional(Type.Integer({ description: 'Number of recent lines for read (default 40)', default: 40 })),
+      source: Type.Optional(SourceSchema),
+    }),
+    prepareArguments: prepareShepherdArguments,
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('read', { action: 'read', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    ...lifecycleRenderers('shepherd_read'),
+  });
+}
+
+function renderToolResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
+  const text = result.content[0];
+  const body = text?.type === 'text' ? (text.text ?? '') : '';
+  const expanded = options?.expanded ?? false;
+  let rendered: string;
+  if (!expanded && body.includes('\n')) {
+    const firstLine = body.split('\n')[0];
+    rendered =
+      theme.fg('accent', firstLine) +
+      `\n${theme.fg('muted', `… +${body.split('\n').length - 1} more lines (Ctrl+O to expand)`)}`;
+  } else {
+    rendered = theme.fg('toolOutput', body || '(no output)');
+  }
+  const component = reusableText(context.lastComponent);
+  component.setText(rendered);
+  return component;
 }

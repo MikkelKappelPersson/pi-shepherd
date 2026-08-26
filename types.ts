@@ -5,24 +5,24 @@ export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const,
   description: 'Which agent-definition directories to use. Defaults to the persisted Shepherd setting; an explicit value overrides it.',
 });
 
-export const StartPlacementSchema = StringEnum(['pane', 'tab', 'workspace'] as const, {
+export const SpawnPlacementSchema = StringEnum(['pane', 'tab', 'workspace'] as const, {
   description:
     'Where to create the agent: pane splits the current pane, tab creates a new tab, workspace creates a new workspace. Default: tab.',
   default: 'tab',
 });
-export const StartDirectionSchema = StringEnum(['right', 'down'] as const, {
+export const SpawnDirectionSchema = StringEnum(['right', 'down'] as const, {
   description: 'Pane split direction when placement is pane. Default: right.',
   default: 'right',
 });
 
-export const StartParams = Type.Object({
-  action: Type.Literal('start', {
-    description: 'Start an idle persistent agent; does not submit work.',
+export const SpawnParams = Type.Object({
+  action: Type.Literal('spawn', {
+    description: 'Spawn an idle persistent agent; does not submit work.',
   }),
   agent: Type.String({ description: 'Exact discovered agent name (case-sensitive).' }),
   agentScope: Type.Optional(AgentScopeSchema),
-  placement: Type.Optional(StartPlacementSchema),
-  direction: Type.Optional(StartDirectionSchema),
+  placement: Type.Optional(SpawnPlacementSchema),
+  direction: Type.Optional(SpawnDirectionSchema),
   confirmProjectAgents: Type.Optional(Type.Boolean({ default: true })),
   cwd: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
@@ -41,7 +41,7 @@ const HandleObjectOptions = { additionalProperties: true } as const;
  */
 export const AgentHandleInputSchema = Type.Object(
   {
-    id: Type.String({ description: 'Handle id from details.handle returned by start.' }),
+    id: Type.String({ description: 'Handle id from details.handle returned by spawn.' }),
     agent: Type.Optional(Type.String()),
     paneId: Type.Optional(Type.String()),
     tabId: Type.Optional(Type.String()),
@@ -49,7 +49,7 @@ export const AgentHandleInputSchema = Type.Object(
   },
   {
     ...HandleObjectOptions,
-    description: 'The complete agent handle (AgentHandle) returned in details.handle by start.',
+    description: 'The complete agent handle (AgentHandle) returned in details.handle by spawn.',
   }
 );
 export const PromptHandleInputSchema = Type.Object(
@@ -69,7 +69,7 @@ export const LifecyclePromptParams = Type.Object({
     description: 'Submit one message to an agent and return a prompt handle without waiting.',
   }),
   handle: AgentHandleInputSchema,
-  message: Type.String({ description: 'Message to submit to the started agent.' }),
+  message: Type.String({ description: 'Message to submit to the spawned agent.' }),
   timeout: Type.Optional(Type.Integer({ default: 20, description: 'Timeout in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60 minutes' })),
 });
 export const WaitParams = Type.Object({

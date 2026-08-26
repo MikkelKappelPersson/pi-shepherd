@@ -10,7 +10,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { discoverAgents } from "./discovery.ts";
 import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
-import { doAction, registerShepherdTool, type ShepherdArgs } from "./shepherd.ts";
+import { doAction, registerShepherdTools, type ShepherdArgs } from "./shepherd.ts";
 import { resolveOrCreateParentArtifactSession } from "./artifact-sessions.ts";
 import {
 	isHerdrAvailable,
@@ -368,7 +368,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Tools for natural-language use.
-	registerShepherdTool(pi);
+	registerShepherdTools(pi);
 	registerSettingsCommand(pi);
 	registerSubagentStatusWidget(pi);
 
@@ -469,7 +469,7 @@ export default function (pi: ExtensionAPI) {
 				try {
 					await runCommandAction(
 						{
-							action: "start",
+							action: "spawn",
 							agent: parsed.agent,
 							...parsed.options,
 							// Pre-resolve tolerantly (undefined when fieldnotes are disabled

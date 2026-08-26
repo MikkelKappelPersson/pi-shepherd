@@ -1,6 +1,6 @@
 # Plan: Split the Shepherd Tool Surface
 
-Status: in progress — Phases 0–2 complete
+Status: in progress — Phases 0–2 complete (verified 2026-08-26). Next: Phase 3.
 Related discussion: constrained-sampling backends drop arguments on bare-`anyOf` tool schemas
 
 ## 1. Problem
@@ -65,13 +65,13 @@ Schema fragments shared across tools: `HandleSchema`, timeout/lines/source optio
 
 ### Phase 0 — Baseline & guardrails
 
-- [ ] Capture current behavior: run `npm test`; record pass set. ✅ All 7 suites pass.
-- [ ] Add a schema-shape regression test: assert every registered tool's root JSON Schema
+- [x] Capture current behavior: run `npm test`; record pass set. ✅ All 8 suites pass (schemas:test was added as the 8th).
+- [x] Add a schema-shape regression test: assert every registered tool's root JSON Schema
       has `"type": "object"` (fails today for `shepherd`; becomes the invariant).
-      ✅ `test/verify-tool-schemas.mjs` added as `schemas:test`; currently red
-      (documents the bare-`anyOf` root). Joins the default `test` chain in Phase 2
-      when it turns green.
-- [ ] Optional: snapshot the current serialized `ShepherdParams` for diffing.
+      ✅ `test/verify-tool-schemas.mjs` added as `schemas:test`; wired into the default
+      `test` chain (runs first) and green now that the union is gone. Phase 3 adds the
+      six new tools to the checked list (placeholders already in the file).
+- [ ] Optional: snapshot the current serialized `ShepherdParams` for diffing. (skipped — the flat schema is small enough to verify by eye)
 
 Files: `test/verify-tool-schemas.mjs` (new), `package.json` (wire test if needed).
 
@@ -79,12 +79,16 @@ Files: `test/verify-tool-schemas.mjs` (new), `package.json` (wire test if needed
 
 Make `doAction()` the single entry so tools and command can never diverge.
 
-- [ ] Refactor `/shepherd` handler branches (`agents`, `herd`, `start`) to construct args
+- [x] Refactor `/shepherd` handler branches (`agents`, `herd`, `start`) to construct args
       objects and call `doAction()`, rendering via a small result-to-notification helper,
       instead of calling `discoverAgents`/`listHerdrAgents`/`startAgent` directly.
-- [ ] Keep `settings` branch command-only (no model-facing equivalent needed).
-- [ ] Extract `parentArtifactSessionForCommand` reuse so command and tool resolve
+      ✅ Done via `runCommandAction()` in `index.ts`; results surface as notifications.
+- [x] Keep `settings` branch command-only (no model-facing equivalent needed).
+- [x] Extract `parentArtifactSessionForCommand` reuse so command and tool resolve
       artifact sessions identically.
+      ✅ Via the "explicit `artifactSession` wins" pattern: the command pre-resolves
+      tolerantly and passes the value, `doAction` honors an explicit value before
+      resolving/requiring the parent session itself.
 
 Acceptance: `/shepherd agents|herd|start <agent>` behave identically before/after;
 command tests still pass.
@@ -104,9 +108,9 @@ Reduce `shepherd` to the control plane + inspection actions.
         future tools keep full-typed access to every verb.
 - [ ] Runtime validation is trivial at this point (enum-only); keep the same
       friendly text-result style used elsewhere. ✅ (doAction switch unchanged)
-- [ ] Update prepareShepherdArguments: kept as-is; reused by Phase 3 tools. ✅
-- [ ] Update `prepareShepherdArguments`: keep string-coercion recovery; drop nothing else.
-- [ ] Update `renderCall`/`renderResult` (they key off `args.action` and keep working).
+- [x] Update `prepareShepherdArguments`: kept as-is (string-coercion recovery for
+      handles, booleans, integers); reused by the Phase 3 tools. ✅
+- [x] Update `renderCall`/`renderResult` — they key off `args.action` and kept working.
 
 Acceptance: schema test from Phase 0 passes ✅; `npm test` green ✅; serialized
 schema confirmed flat (`type: object`, enum action) ✅.
@@ -115,29 +119,43 @@ Files: `shepherd.ts`. ✅ Done
 
 ### Phase 3 — Extract handle-centric tools
 
-One registration helper, five declarative tools. All roots are plain objects.
+One registration helper, six declarative tools. All roots are plain objects.
 
-- [ ] Generalize `registerShepherdTool` into `registerShepherdTools(pi)` registering:
+- [x] Generalize `registerShepherdTool` into `registerShepherdTools(pi)` registering:
       - `shepherd_spawn`: `agent` (required), `agentScope`, `placement`, `direction`,
-        `confirmProjectAgents`, `cwd`, `model`, `omitSystemPrompt`, `timeout`
-      - `shepherd_prompt`: `handle` (required), `message` (required), `timeout`
-      - `shepherd_wait`: `handle` (required, string-or-object, or arrays of either), `timeout`
-      - `shepherd_status`: `handle` (required)
-      - `shepherd_close`: `handle` (required)
-      - `shepherd_read`: `name` (required), `lines`?, `source`?
-- [ ] Share `HandleSchema`, timeout, and completion-state enums across definitions.
-- [ ] Each tool delegates to `doAction({action: '<verb>', ...params}, ...)`.
-- [ ] Per-tool `description`: short, operational; cross-reference siblings
-      ("wait on handles returned by shepherd_prompt").
-- [ ] `renderCall`: prefix label per tool (`shepherd_start scout --cwd …`) reusing
-      `shepherdCallPreview` internals; keep the CLI-style look.
-- [ ] Keep `promptSnippet`/`promptGuidelines` content but split: lifecycle guidelines
-      belong to Phase 5's system-prompt work; per-tool usage notes stay local.
+        `confirmProjectAgents`, `cwd`, `model`, `omitSystemPrompt`. ✅ (deliberately no
+        `timeout`: startup readiness uses fixed internal grace periods; timeout only
+        applies to prompts/waits — see the start-case comment in `doAction`)
+      - `shepherd_prompt`: `handle` (required), `message` (required), `timeout` ✅
+      - `shepherd_wait`: `handle` (required; object or native array of objects), `timeout` ✅
+      - `shepherd_status`: `handle` (required) ✅
+      - `shepherd_close`: `handle` (required) ✅
+      - `shepherd_read`: `name` (required), `lines`?, `source`? ✅
+      - Note: the core action `start` was renamed to `spawn` (`SpawnParams`) to match the
+        tool naming scheme; the `/shepherd` command still uses the verb `start` until
+        Phase 4's rename.
+- [x] Share `HandleSchema`, timeout, and completion-state enums across definitions.
+      ✅ Done by deriving each tool schema with `Type.Omit(<LifecycleParams>, ['action'])`,
+      which reuses the existing `AgentHandleInputSchema`/`PromptHandleInputSchema` and
+      the shared timeout/enum definitions from `types.ts` — zero duplicated field schemas.
+- [x] Each tool delegates to `doAction({action: '<verb>', ...params}, ...)`.
+      ✅ Via a shared `executeShepherd(label, args, ctx, ...)` wrapper (Herdr gate +
+      try/catch to a friendly text result).
+- [x] Per-tool `description`: short, operational; cross-references siblings
+      ("Pass the complete native agent handle from shepherd_spawn" etc.). ✅
+- [x] `renderCall`: per-tool CLI-style call preview reusing `shepherdCallPreview`
+      internals (e.g. `shepherd_spawn scout --cwd …`), plus a shared `renderToolResult`. ✅
+- [x] Split `promptSnippet`/`promptGuidelines`: lifecycle tools share one snippet line;
+      the control tool keeps the narrative + guidelines; the old `Workflow:` guideline
+      line was dropped (superseded by per-tool descriptions). Full narrative relocation
+      remains Phase 5.
 
-Acceptance: schema test passes for all six tools; multi-wait and close-cancellation
-verified live (existing verify scripts cover the underlying flows).
+Acceptance: schema test passes for all seven tools ✅; `npm test` green ✅; live
+end-to-end verified under a running Herdr session: idle spawn, non-blocking prompt,
+wait (status `done`), status, close, read-after-close, and prune ✅. (Full multi-wait /
+close-cancellation live matrix stays in Phase 7 alongside the constrained-backend check.)
 
-Files: `shepherd.ts`, `types.ts` (if params types move), `index.ts`.
+Files: `shepherd.ts`, `types.ts` (`SpawnParams`), `index.ts`. ✅ Done
 
 ### Phase 4 — Extend the `/shepherd` command
 

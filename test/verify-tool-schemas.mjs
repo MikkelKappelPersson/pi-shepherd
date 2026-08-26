@@ -8,17 +8,24 @@
 // Expected state: FAILS while the union-based `ShepherdParams` is still in
 // place; becomes the permanent guard once phases 2–3 land.
 import assert from 'node:assert/strict';
-import { ShepherdParams } from '../shepherd.ts';
+import { Type } from 'typebox';
+import { ShepherdParams, SourceSchema } from '../shepherd.ts';
+import {
+  SpawnParams,
+  LifecyclePromptParams,
+  WaitParams,
+  LifecycleStatusParams,
+  LifecycleCloseParams,
+} from '../types.ts';
 
 const tools = [
   { name: 'shepherd', parameters: ShepherdParams },
-  // Phase 3 additions:
-  // { name: 'shepherd_spawn',  parameters: ShepherdSpawnParams },
-  // { name: 'shepherd_prompt', parameters: ShepherdPromptParams },
-  // { name: 'shepherd_wait',   parameters: ShepherdWaitParams },
-  // { name: 'shepherd_status', parameters: ShepherdStatusParams },
-  // { name: 'shepherd_close',  parameters: ShepherdCloseParams },
-  // { name: 'shepherd_read',   parameters: ShepherdReadParams },
+  { name: 'shepherd_spawn', parameters: Type.Omit(SpawnParams, ['action']) },
+  { name: 'shepherd_prompt', parameters: Type.Omit(LifecyclePromptParams, ['action']) },
+  { name: 'shepherd_wait', parameters: Type.Omit(WaitParams, ['action']) },
+  { name: 'shepherd_status', parameters: Type.Omit(LifecycleStatusParams, ['action']) },
+  { name: 'shepherd_close', parameters: Type.Omit(LifecycleCloseParams, ['action']) },
+  { name: 'shepherd_read', parameters: Type.Object({ name: Type.String(), lines: Type.Optional(Type.Integer({ default: 40 })), source: Type.Optional(SourceSchema) }) },
 ];
 
 let failed = 0;
