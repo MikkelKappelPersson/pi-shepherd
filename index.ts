@@ -310,6 +310,12 @@ export default function (pi: ExtensionAPI) {
 		initializeSessionSettings();
 	});
 
+	// Launched workers load the user extension set too, but their only Shepherd
+	// surface is the explicitly injected shepherd_done tool. Keep the parent
+	// orchestrator's tools, command, settings UI, and widget out of worker
+	// sessions; PI_SHEPHERD_SESSION is set by herdr.ts only for launched agents.
+	if (process.env.PI_SHEPHERD_SESSION) return;
+
 	// Tools for natural-language use.
 	registerShepherdTools(pi);
 	registerSettingsCommand(pi);

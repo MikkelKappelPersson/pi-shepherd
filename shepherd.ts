@@ -2,7 +2,7 @@
  * Shepherd tool — the model-facing `shepherd` tool for the parent pi session.
  *
  * One tool surface:
- *   - start/prompt/wait/status/read/close/prune — manage pi agents living in
+ *   - spawn/prompt/wait/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
  * Registered by index.ts in the parent session only. The launched agents get
@@ -405,12 +405,12 @@ export const SHEPHERD_TOOL_PROMPT_SNIPPET =
   'Shepherd (orchestrator): manage specialized agents (also called sheep) and, when enabled, their fieldnotes (durable artifacts) inside Herdr panes.';
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
-  "Keep every agent's complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.",
-  'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index first and write only to the assigned note for note-producing prompts.',
+  'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+  "Keep every agent's complete AgentHandle and use it unchanged with shepherd_prompt, shepherd_status, and shepherd_close; use each returned PromptHandle unchanged with shepherd_wait. Never stringify, reconstruct, or replace a handle with an id.",
+  'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
   'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
-  'List available agent definitions and source metadata before choosing an agent to spawn.',
-  'For sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call wait once with all handles.',
-  'Waiting does not close an agent. Close each agent explicitly when it is no longer needed; close also cancels its unresolved prompt.',
+  'For sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call shepherd_wait once with all prompt handles.',
+  'Waiting does not close an agent. Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.',
 ];
 
 /**
@@ -514,7 +514,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_wait',
     label: 'Shepherd: wait for prompt',
     description:
-      'Wait for one or more prompt handles to settle. Accepts a handle or a native array of handles for parallel work. Waiting does not close the agent.',
+      'Wait for one or more prompt handles to settle. Accepts one handle or a native array of handles for parallel work.',
     promptSnippet: LIFECYCLE_TOOL_SNIPPET,
     parameters: Type.Omit(WaitParams, ['action']),
     prepareArguments: prepareShepherdArguments,
@@ -540,7 +540,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_close',
     label: 'Shepherd: close agent',
     description:
-      "Close an owned agent and cancel any unresolved prompt. Pass the exact complete handle returned by the action that created it.",
+      'Close an owned agent and cancel any unresolved prompt. Pass the complete native handle returned by shepherd_spawn.',
     promptSnippet: LIFECYCLE_TOOL_SNIPPET,
     parameters: Type.Omit(LifecycleCloseParams, ['action']),
     prepareArguments: prepareShepherdArguments,
