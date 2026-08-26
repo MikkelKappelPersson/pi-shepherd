@@ -36,6 +36,10 @@ agent invocation receives its own note.
 - Temporary launch/session resources are removed only after the child pane is
   confirmed gone.
 
+## Reference implementation
+
+[pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents) — a tmux-based pi extension for async subagents; useful inspiration for pi-shepherd. Local clone: `/mnt/Projects/Projects/references/pi-interactive-subagents`.
+
 ## Verification
 
 Run `npm test`. Live Herdr verification should cover idle start, non-blocking
