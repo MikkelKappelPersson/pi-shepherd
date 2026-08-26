@@ -192,17 +192,33 @@ pass (completions feel, long-running guardrails) stays in Phase 7.
 Files: `cli.ts` (new), `index.ts`, `shepherd.ts` (preview moved to cli.ts),
 `test/verify-cli.mjs` (new), `package.json` (wire `cli:test`), plan doc.
 
-### Phase 5 — Relocate the narrative
+### Phase 5 — Consolidate the Shepherd narrative
 
-- [ ] Move lifecycle guidance (sequential-vs-parallel wait, waiting doesn't close,
-      pass handles unchanged, fieldnotes contract) from tool descriptions into the
-      extension's system-prompt contribution (`system-prompt.ts` wiring used by
-      `index.ts`).
-- [ ] Trim `SHEPHERD_TOOL_PROMPT_GUIDELINES` accordingly; keep per-tool usage hints local.
-- [ ] Meta-description ("subagent framework for native Herdr orchestration") stays at
-      the top of the `shepherd` tool description and the command description.
+Keep general Shepherd knowledge scoped to the umbrella `shepherd` tool rather than
+injecting it into the global parent system prompt.
 
-Files: `system-prompt.ts`, `shepherd.ts`.
+- [ ] Make the umbrella `shepherd` tool the documentation and guidance hub for the
+      complete Shepherd tool family (`agents`, `herd`, `prune`, `spawn`, `prompt`,
+      `wait`, `status`, `close`, and `read`).
+- [ ] Put shared lifecycle guidance on the umbrella tool: wait for independent work
+      concurrently when possible, waiting does not close agents, preserve complete
+      handles unchanged, and follow the shared `shepherd.md` fieldnotes contract.
+- [ ] Keep individual lifecycle tool descriptions short and operational; retain only
+      tool-specific usage hints and parameter expectations there.
+- [ ] Keep the meta-description ("subagent framework for native Herdr orchestration")
+      at the top of the umbrella `shepherd` tool description and the command description.
+- [ ] Verify that the umbrella Shepherd tools and their guidance are exposed only in
+      the parent/orchestrator session, not in launched worker sessions. If the
+      extension loads in both, add an explicit `PI_SHEPHERD_SESSION` child-session
+      guard around parent-only registration.
+- [ ] Do not add a global `before_agent_start` lifecycle-guidance hook unless a later
+      use case shows that the umbrella tool's scoped guidance is insufficient.
+
+Acceptance: the umbrella `shepherd` tool explains the shared lifecycle and fieldnote
+rules; each split tool explains only its own operation; worker prompts do not receive
+parent orchestration guidance.
+
+Files: `shepherd.ts`, `index.ts` (parent-session registration guard if needed).
 
 ### Phase 6 — Docs & conventions
 
@@ -235,7 +251,8 @@ Files: `system-prompt.ts`, `shepherd.ts`.
 | `read` placement | **Resolved:** own tool `shepherd_read(name, lines?, source?)` |
 | Handle representation | **Resolved:** accept string-or-object handles (arrays of either for wait); normalize in `prepareShepherdArguments` |
 | Old single-tool form | **Resolved:** hard remove; grep sweep covers stragglers |
-| `prompt`/`wait`/`close` via command | Deferred to Phase 4 (model-only initially) |
+| `prompt`/`wait`/`close` via command | **Resolved:** model-only initially; revisit after real-world use |
+| General lifecycle guidance location | **Resolved:** umbrella `shepherd` tool guidance; do not use the global system prompt initially |
 
 ## 6. Risk notes
 
