@@ -8,6 +8,18 @@ import path from "node:path";
 // Isolate persisted settings and fieldnotes from the developer's real session.
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shepherd-command-ux-"));
 process.env.HOME = home;
+
+// Keep this command-surface test independent of a developer's Herdr install.
+// The command handler only needs Herdr availability to reach the error path
+// being tested; no actual Herdr operation should be performed here.
+const fakeBinDir = path.join(home, "bin");
+fs.mkdirSync(fakeBinDir, { recursive: true });
+const fakeHerdr = path.join(fakeBinDir, "herdr");
+fs.writeFileSync(fakeHerdr, "#!/bin/sh\n[ \"$1\" = \"--version\" ] && echo herdr-test\n");
+fs.chmodSync(fakeHerdr, 0o755);
+process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`;
+process.env.HERDR_ENV = "1";
+
 const settingsDir = path.join(home, ".pi", "agent", "pi-shepherd");
 fs.mkdirSync(settingsDir, { recursive: true });
 fs.writeFileSync(path.join(settingsDir, "settings.json"), JSON.stringify({
