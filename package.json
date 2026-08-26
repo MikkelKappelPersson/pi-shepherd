@@ -1,6 +1,6 @@
 {
   "name": "@luminascale/pi-shepherd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "No-fuss pi extension: subagents + herding pi agents in Herdr",
   "license": "Apache-2.0",
@@ -37,7 +37,7 @@
     "build": "echo 'nothing to build'",
     "check": "echo 'nothing to check'",
     "discovery:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-discovery.mjs",
- "schemas:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-tool-schemas.mjs",
+    "schemas:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-tool-schemas.mjs",
     "cli:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-cli.mjs",
     "parent-surface:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-parent-surface.mjs",
     "command-ux:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-command-ux.mjs",
