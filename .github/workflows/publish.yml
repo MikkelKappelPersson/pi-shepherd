@@ -47,7 +47,7 @@ jobs:
             process.exit(1);
           }
           console.log(`Publishing ${packageJson.name}@${packageJson.version}`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `name=${packageJson.name}\\nversion=${packageJson.version}\\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `name=${packageJson.name}\nversion=${packageJson.version}\n`);
           NODE
 
       # npm versions are immutable. This makes the workflow safe to rerun and
