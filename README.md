@@ -195,11 +195,16 @@ instead of manual commands.
 ## Settings
 
 Open `/shepherd settings` (or `/shepherd-settings`) to configure pi-shepherd.
-The menu includes an **Enable fieldnotes** toggle. It defaults to enabled and,
-when enabled, creates the durable `shepherd.md` index and one note per delegated
-prompt. When disabled, new agents receive no fieldnotes context and delegated
-prompts do not create or update note files; existing notes are retained. The
-toggle is intentionally
+The menu includes an **Enable fieldnotes** toggle and a **Use sheep emoji**
+toggle. Sheep emoji are enabled by default; disabling the latter replaces the
+animated `🐑` marker in the working-agent widget with a plain `o`. This setting
+only affects the decorative sheep marker; the state symbols and box-drawing
+characters remain unchanged.
+
+The fieldnotes toggle defaults to enabled and, when enabled, creates the durable
+`shepherd.md` index and one note per delegated prompt. When disabled, new agents
+receive no fieldnotes context and delegated prompts do not create or update note
+files; existing notes are retained. The fieldnotes toggle is intentionally
 session-scoped: save the setting and start a new parent pi session for it to
 apply. Agents already running in the current session retain the current
 fieldnotes behavior.

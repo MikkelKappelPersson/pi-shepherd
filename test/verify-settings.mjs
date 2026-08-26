@@ -22,15 +22,19 @@ try {
 
   assert.equal(DEFAULT_SETTINGS.fieldnotes, true);
   assert.equal(loadSettings().fieldnotes, true, "missing fieldnotes setting defaults on");
+  assert.equal(DEFAULT_SETTINGS.emojiSheep, true);
+  assert.equal(loadSettings().emojiSheep, true, "missing emoji sheep setting defaults on");
 
-  saveSettings({ ...DEFAULT_SETTINGS, fieldnotes: false });
+  saveSettings({ ...DEFAULT_SETTINGS, fieldnotes: false, emojiSheep: false });
   assert.equal(loadSettings().fieldnotes, false, "disabled fieldnotes setting persists");
+  assert.equal(loadSettings().emojiSheep, false, "disabled emoji sheep setting persists");
   initializeSessionSettings();
   assert.equal(fieldnotesEnabled(), false, "new session snapshots disabled fieldnotes");
 
   // Settings changes remain persisted but do not alter the active session.
-  saveSettings({ ...DEFAULT_SETTINGS, fieldnotes: true });
+  saveSettings({ ...DEFAULT_SETTINGS, fieldnotes: true, emojiSheep: true });
   assert.equal(loadSettings().fieldnotes, true);
+  assert.equal(loadSettings().emojiSheep, true);
   assert.equal(fieldnotesEnabled(), false, "active session keeps its fieldnotes mode");
 
   // A subsequent parent session picks up the newly persisted value.

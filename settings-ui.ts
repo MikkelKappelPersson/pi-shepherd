@@ -39,6 +39,9 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
 		case "fieldnotes":
 			next.fieldnotes = value === "on";
 			break;
+		case "emojiSheep":
+			next.emojiSheep = value === "on";
+			break;
 		case "timeout": {
 			// The list displays values as e.g. "30 min", so parse the
 			// numeric portion rather than passing the decorated label to Number.
@@ -63,6 +66,7 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 	const [keepOpenValue, keepOpenValues] = booleans(settings.keepOpen);
 	const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
 	const [fieldnotesValue, fieldnotesValues] = booleans(settings.fieldnotes);
+	const [emojiSheepValue, emojiSheepValues] = booleans(settings.emojiSheep);
 	const [confirmValue, confirmValues] = booleans(settings.confirmProjectAgents);
 
 	// All labels ≤ 30 chars — the SettingsList pads to the widest label (capped
@@ -102,6 +106,13 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 			description: "Create durable notes for delegated prompts. Takes effect next pi session.",
 			currentValue: fieldnotesValue,
 			values: fieldnotesValues,
+		},
+		{
+			id: "emojiSheep",
+			label: "Use sheep emoji",
+			description: "Show 🐑 beside active agents; off uses a plain o instead.",
+			currentValue: emojiSheepValue,
+			values: emojiSheepValues,
 		},
 		{
 			id: "timeout",

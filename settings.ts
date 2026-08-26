@@ -25,6 +25,8 @@ export interface ShepherdSettings {
 	stayOpen: boolean;
 	/** Create and attach durable fieldnotes to delegated prompts. */
 	fieldnotes: boolean;
+	/** Show the animated sheep emoji beside actively working agents. */
+	emojiSheep: boolean;
 	/** Default time limit (minutes) for a Herdr run before it's reported timed out. */
 	timeout: number;
 }
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 	keepOpen: true,
 	stayOpen: false,
 	fieldnotes: true,
+	emojiSheep: true,
 	timeout: 20,
 };
 
@@ -69,6 +72,8 @@ export function loadSettings(): ShepherdSettings {
 				typeof parsed.stayOpen === "boolean" ? parsed.stayOpen : DEFAULT_SETTINGS.stayOpen,
 			fieldnotes:
 				typeof parsed.fieldnotes === "boolean" ? parsed.fieldnotes : DEFAULT_SETTINGS.fieldnotes,
+			emojiSheep:
+				typeof parsed.emojiSheep === "boolean" ? parsed.emojiSheep : DEFAULT_SETTINGS.emojiSheep,
 			timeout: (() => {
 				const raw = parsed.timeout;
 				if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return DEFAULT_SETTINGS.timeout;

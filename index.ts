@@ -6,50 +6,78 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { discoverAgents } from "./discovery.ts";
 import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from "./settings.ts";
 import { openSettings, registerSettingsCommand } from "./settings-ui.ts";
-import { registerShepherdTool } from "./shepherd.ts";
-import { startAgent } from "./lifecycle.ts";
+import { doAction, registerShepherdTool, type ShepherdArgs } from "./shepherd.ts";
 import { resolveOrCreateParentArtifactSession } from "./artifact-sessions.ts";
 import {
 	isHerdrAvailable,
-	listHerdrAgents,
-	formatSummary,
 	workingSubagents,
+	loadCreatedPanes,
 	type HerdrAgentSummary,
 } from "./herdr.ts";
 
 /**
- * Persistent "below the editor" status line listing the subagents currently
+ * Persistent "below the editor" status box listing the subagents currently
  * working (see tui.md Pattern 5 / widget-placement.ts). Polls the live herd
- * every ~1s and re-renders on change. Safe no-op when Herdr isn't reachable.
+ * into a snapshot every ~1s, then renders a bordered box at the real
+ * viewport width: one row per agent with a color-coded state icon and an
+ * mm:ss elapsed timer — shaped after the pi-interactive-subagents "Subagents"
+ * widget, but theme-driven rather than hard-coded ANSI hues. No-op when
+ * Herdr isn't reachable or there is nothing working.
  */
+interface WorkingSnapshotItem extends HerdrAgentSummary {
+	/** Recorded pane creation time (registry), or undefined for untracked panes. */
+	createdAt?: number;
+}
+
 function registerSubagentStatusWidget(pi: ExtensionAPI): void {
 	const POLL_MS = 1_000;
-	let last = "";
 
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
+		let snapshot: WorkingSnapshotItem[] = [];
+
+		const tick = (tui: { requestRender(): void }): void => {
+			// Poll Herdr + the registry once per tick, not per render frame.
+			const panes = loadCreatedPanes();
+			const createdAtById = new Map(panes.map((p) => [p.paneId, p.createdAt]));
+			snapshot = workingSubagents().map((s) => ({
+				...s,
+				createdAt: createdAtById.get(s.paneId),
+			}));
+			tui.requestRender();
+		};
+
 		ctx.ui.setWidget(
 			"pi-shepherd-working",
 			(tui, theme) => {
-				const tick = (): void => {
-					const line = renderWorkingLine(workingSubagents(), theme);
-					if (line !== last) {
-						last = line;
-						tui.requestRender();
-					}
-				};
-				tick();
-				const timer = setInterval(tick, POLL_MS);
+				let sheepFrame = 0;
+				tick(tui);
+				const timer = setInterval(() => tick(tui), POLL_MS);
+				const animationTimer = setInterval(() => {
+					if (!snapshot.some((agent) => agent.state === "working")) return;
+					// Keep this counter unbounded: the spinner wraps its ten frames,
+					// while the sheep uses it to traverse the full available track.
+					sheepFrame += 1;
+					tui.requestRender();
+				}, 250);
 				return {
-					render: () => (last ? [last] : []),
+					render: (width: number) =>
+						snapshot.length > 0
+							? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings().emojiSheep)
+							: [],
 					invalidate: () => {
-						// Theme changed → re-render from the current snapshot, keep polling.
-						tick();
+						// Theme changed: rows are re-derived from the live snapshot,
+						// which the poll timer keeps fresh.
+						tui.requestRender();
 					},
-					dispose: () => clearInterval(timer),
+					dispose: () => {
+						clearInterval(timer);
+						clearInterval(animationTimer);
+					},
 				};
 			},
 			{ placement: "belowEditor" },
@@ -57,22 +85,182 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
 	});
 }
 
-function renderWorkingLine(
-	agents: HerdrAgentSummary[],
+/** Elapsed since pane creation, mm:ss (the created-panes registry is the time source). */
+function formatElapsedMMSS(createdAt: number, now = Date.now()): string {
+	const seconds = Math.max(0, Math.floor((now - createdAt) / 1000));
+	const m = Math.floor(seconds / 60);
+	const s = seconds % 60;
+	return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Nature-inspired semantic color for a Herdr state. */
+function stateColor(state: string): string {
+	switch (state) {
+		case "working":
+		case "done":
+		case "completed":
+			return "success";
+		case "waiting":
+			return "warning";
+		case "error":
+			return "error";
+		default:
+			return "dim";
+	}
+}
+
+// Teal accent (#2aa198) for the box border and working spinner. The pi theme
+// has no teal semantic color, so this is a fixed truecolor ANSI hue.
+const TEAL_ANSI = "\u001b[38;2;42;161;152m";
+const RESET_ANSI = "\u001b[0m";
+
+function teal(text: string): string {
+	return `${TEAL_ANSI}${text}${RESET_ANSI}`;
+}
+
+/** Colored status icon per Herdr agent state (green Braille spinner, … waiting, ✗ error). */
+function stateIcon(
+	state: string,
+	theme: { fg(color: string, text: string): string },
+	frame = 0,
+): string {
+	const color = stateColor(state);
+	switch (state) {
+		case "working":
+			// Teal spinner; the rest of the row stays neutral.
+			return teal(WORKING_SPINNER_FRAMES[frame % WORKING_SPINNER_FRAMES.length] ?? "⠋");
+		case "waiting":
+			return theme.fg(color, "…");
+		case "error":
+			return theme.fg(color, "✗");
+		case "done":
+		case "completed":
+			return theme.fg(color, "✓");
+		default:
+			return theme.fg(color, "○");
+	}
+}
+
+// The sheep walks right-to-left through the available gap after the active
+// agent name. It jumps back to the right edge after reaching the left edge; it
+// never walks back to the right. The glyph itself is not mirrored because
+// Unicode/terminals do not provide a portable way to transform an emoji.
+const SHEEP_SPEED = 3;
+const WORKING_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function animatedSheep(
+	frame: number,
+	useEmoji: boolean,
+	theme: { fg(color: string, text: string): string },
+	trackSpan: number,
+): string {
+	const glyph = useEmoji ? "🐑" : "o";
+	const cycleWidth = trackSpan + 1;
+	const position = trackSpan - ((frame * SHEEP_SPEED) % cycleWidth);
+	return `${" ".repeat(position + 1)}${theme.fg("text", glyph)}`;
+}
+
+/**
+ * Bordered "working" box, one line per agent, shaped after the pi-interactive-
+ * subagents widget:
+ *
+ *   ╭─ shepherd ────────── 2 working ─╮
+ *   │ ⠋ 01:23  planner  🐑      working │
+ *   │ … 00:47  worker            waiting │
+ *   ╰───────────────────────────────────╯
+ *
+ * Left text (icon + elapsed + name) truncates; the right status label is
+ * preserved and right-aligned, padding the row to full terminal width.
+ */
+function renderWorkingAgents(
+	agents: WorkingSnapshotItem[],
 	theme: {
 		fg(color: string, text: string): string;
-		dim(text: string): string;
 	},
+	width: number,
+	sheepFrame = 0,
+	useEmoji = true,
+): string[] {
+	const title = "shepherd";
+	const info = `${agents.length} working`;
+
+	const lines: string[] = [borderTop(title, info, width, theme)];
+
+	for (const agent of agents) {
+		const elapsed = agent.createdAt != null ? ` ${formatElapsedMMSS(agent.createdAt)}` : "";
+		const icon = stateIcon(agent.state, theme, sheepFrame);
+		const right = ` ${theme.fg("text", agent.state)} `;
+		const name = theme.fg("text", agent.name);
+		const prefix = ` ${icon}${elapsed}  ${name}`;
+		const sheepGlyph = useEmoji ? "🐑" : "o";
+		const sheepWidth = visibleWidth(theme.fg("text", sheepGlyph));
+		const leftWidth = Math.max(0, width - 2 - visibleWidth(right));
+		const trackSpan = leftWidth - visibleWidth(prefix) - sheepWidth - 1;
+		const sheep = agent.state === "working" && trackSpan >= 0
+			? animatedSheep(sheepFrame, useEmoji, theme, trackSpan)
+			: "";
+		const left = `${prefix}${sheep}`;
+		lines.push(borderLine(left, right, width, theme));
+	}
+
+	lines.push(borderBottom(width, theme));
+	return lines;
+}
+
+/** Bordered top line: ╭─ title ──── info ─╮ (all chars within `width`). */
+function borderTop(
+	title: string,
+	info: string,
+	width: number,
+	theme: { fg(color: string, text: string): string },
 ): string {
-	if (agents.length === 0) return "";
-	const parts = agents.map((a) => {
-		const name = theme.fg("accent", a.name);
-		const state = theme.fg("muted", a.state);
-		return `● ${name} [${state}]`;
-	});
-	return (
-		theme.fg("dim", "working: ") + parts.join(theme.fg("dim", "  "))
-	);
+	if (width <= 0) return "";
+	if (width === 1) return teal("╭");
+	const inner = Math.max(0, width - 2); // inside ╭ and ╮
+	const titlePart = `─ ${title} `;
+	const infoPart = ` ${info} ─`;
+	const fillLen = Math.max(0, inner - titlePart.length - infoPart.length);
+	const fill = "─".repeat(fillLen);
+	const content = `${titlePart}${fill}${infoPart}`.slice(0, inner).padEnd(inner, "─");
+	return `${teal("╭")}${teal(content)}${teal("╮")}`;
+}
+
+/** Bordered bottom line: ╰──────────────────╯ */
+function borderBottom(width: number, theme: { fg(color: string, text: string): string }): string {
+	if (width <= 0) return "";
+	if (width === 1) return teal("╰");
+	const inner = Math.max(0, width - 2);
+	return `${teal("╰")}${teal("─".repeat(inner))}${teal("╯")}`;
+}
+
+/**
+ * Bordered content line: │left          right│ — left truncates, right is
+ * preserved and right-aligned, padded to fill `width` (both │ chars included).
+ */
+function borderLine(
+	left: string,
+	right: string,
+	width: number,
+	theme: { fg(color: string, text: string): string },
+): string {
+	if (width <= 0) return "";
+	if (width === 1) return teal("│");
+	const contentWidth = Math.max(0, width - 2); // space inside the two │ chars
+	const rightVis = visibleWidth(right);
+
+	// If the status label alone is too wide, keep it compact rather than
+	// overflowing the terminal.
+	if (rightVis >= contentWidth) {
+		const truncRight = truncateToWidth(right, contentWidth);
+		const rightPad = Math.max(0, contentWidth - visibleWidth(truncRight));
+		return `${teal("│")}${theme.fg("muted", truncRight)}${" ".repeat(rightPad)}${teal("│")}`;
+	}
+
+	const maxLeft = Math.max(0, contentWidth - rightVis);
+	const truncLeft = truncateToWidth(left, maxLeft);
+	const leftVis = visibleWidth(truncLeft);
+	const pad = Math.max(0, contentWidth - leftVis - rightVis);
+	return `${teal("│")}${theme.fg("muted", truncLeft)}${" ".repeat(pad)}${theme.fg("muted", right)}${teal("│")}`;
 }
 
 type StartCommandOptions = {
@@ -143,6 +331,27 @@ function parentArtifactSessionForCommand(ctx: ExtensionCommandContext) {
 		parentSessionFile: ctx.sessionManager?.getSessionFile?.(),
 		projectRoot: ctx.cwd,
 	});
+}
+
+/**
+ * Delegate a command invocation to doAction() — the shared core that also backs
+ * the model-facing tools — and surface the result through notifications.
+ * Error results map to error-level notifications; thrown errors are caught so
+ * a failing action never escapes into an unhandled rejection.
+ */
+async function runCommandAction(args: ShepherdArgs, ctx: ExtensionCommandContext): Promise<void> {
+	try {
+		const result = await doAction(args, {
+			cwd: ctx.cwd,
+			sessionManager: ctx.sessionManager as any,
+			ui: ctx.ui,
+			hasUI: true,
+		});
+		const text = result.content.find((c) => c.type === "text")?.text ?? "(no output)";
+		ctx.ui?.notify(text, result.isError ? "error" : "info");
+	} catch (error: any) {
+		ctx.ui?.notify(`pi-shepherd: ${error?.message ?? error}`, "error");
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -227,18 +436,7 @@ export default function (pi: ExtensionAPI) {
 				const scope = ["user", "project", "both"].includes(scopeArg ?? "")
 					? (scopeArg as "user" | "project" | "both")
 					: loadSettings().agentScope;
-				const { agents } = discoverAgents(ctx.cwd, scope);
-				const shown = agents.slice(0, 20);
-				const remaining = agents.length - shown.length;
-				const listing = shown.length > 0
-					? shown.map((agent) => `- ${agent.name} (${agent.source}): ${agent.description}`).join("\n")
-					: "- none";
-				ctx.ui?.notify(
-					`pi-shepherd agents (${scope} scope, ${agents.length}):\n${listing}${
-						remaining > 0 ? `\n(+${remaining} more)` : ""
-						}${action !== "agents" ? "\nUse `/shepherd agents` next time." : ""}`,
-					"info",
-				);
+				await runCommandAction({ action: "agents", agentScope: scope }, ctx);
 				return;
 			}
 
@@ -250,13 +448,7 @@ export default function (pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const agents = listHerdrAgents();
-				ctx.ui?.notify(
-					agents.length > 0
-						? agents.map(formatSummary).join("\n")
-						: "No agents detected in Herdr.",
-					"info",
-				);
+				await runCommandAction({ action: "herd" }, ctx);
 				return;
 			}
 
@@ -275,23 +467,18 @@ export default function (pi: ExtensionAPI) {
 				}
 				ctx.ui?.setStatus?.("pi-shepherd", `Starting ${parsed.agent}…`);
 				try {
-					const handle = await startAgent(
-						parsed.agent,
+					await runCommandAction(
 						{
+							action: "start",
+							agent: parsed.agent,
 							...parsed.options,
-							agentScope: parsed.options.agentScope ?? loadSettings().agentScope,
-							confirmProjectAgents: loadSettings().confirmProjectAgents,
+							// Pre-resolve tolerantly (undefined when fieldnotes are disabled
+							// or no session identity exists); 'artifactSession' in args makes
+							// doAction honor the explicit value instead of requiring one.
 							artifactSession: parentArtifactSessionForCommand(ctx),
 						},
 						ctx,
 					);
-					const location = handle.tabId ? `tab ${handle.tabId}` : `pane ${handle.paneId ?? "unknown"}`;
-					ctx.ui?.notify(
-						`Started idle agent ${parsed.agent} (${location}). It is interactive and ready for you in Herdr; pi-shepherd will not send a task. Handle: ${handle.id}`,
-						"info",
-					);
-				} catch (error: any) {
-					ctx.ui?.notify(`pi-shepherd: could not start ${parsed.agent}: ${error?.message ?? error}`, "error");
 				} finally {
 					ctx.ui?.setStatus?.("pi-shepherd", undefined);
 				}
