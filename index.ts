@@ -341,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 			if (parts.length <= 1 && !prefix.endsWith(" ")) {
 				// Pi does not automatically invoke the completion provider again
 				// after applying an argument completion. When the user types
-				// `/shepherd spo`, show full `spawn <agent>` entries immediately
+				// `/shepherd spa`, show full `spawn <agent>` entries immediately
 				// instead of requiring a second completion cycle after `spawn`.
 				if (action.length >= 3 && "spawn".startsWith(action)) {
 					const names = discoveredAgentNames();

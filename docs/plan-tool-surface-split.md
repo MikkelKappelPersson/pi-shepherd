@@ -238,14 +238,19 @@ Files: `shepherd.ts`, `index.ts`, `test/verify-parent-surface.mjs`, `package.jso
 
 ### Phase 7 — Verification
 
-- [ ] `npm test` fully green including new schema-invariant test.
-- [ ] Live Herdr checklist (per AGENTS.md): idle spawn, non-blocking prompt,
+- [x] `npm test` fully green including the flat-object schema-invariant test. ✅
+- [x] Live Herdr checklist (per AGENTS.md): idle spawn, non-blocking prompt,
       single wait/result, concurrent multi-wait, iterative prompting, status,
-      close cancellation, focus preservation, ownership protection.
-- [ ] Constrained-backend check: run a session with `stealth/ox-alpha` (or any backend
-      that previously emitted `{}`) and confirm tool calls now carry arguments.
-- [ ] Soft-guidance sanity: confirm Claude/GPT-style models handle the split tools.
-- [ ] Command UX pass: completions, error hints, long-running-action guardrails.
+      close cancellation, focus preservation, ownership protection. ✅ Verified
+      against the running Herdr server; owned panes were closed and stale
+      registrations pruned.
+- [x] Constrained-backend check: `stealth/ox-alpha` is no longer available
+      (OpenRouter returned 404), so `z-ai/glm-5.3` was used instead; it emitted
+      `{"action":"agents"}` and completed the call successfully. ✅
+- [x] Soft-guidance sanity: GPT-style `openai/gpt-5.6-luna` selected the split
+      `shepherd_prompt` and `shepherd_read` tools with structured arguments. ✅
+- [x] Command UX pass: added `test/verify-command-ux.mjs` covering partial and
+      argument completions, usage/error hints, and spawn status cleanup. ✅
 
 ## 5. Open decisions
 
