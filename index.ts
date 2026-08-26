@@ -148,7 +148,7 @@ function parentArtifactSessionForCommand(ctx: ExtensionCommandContext) {
 export default function (pi: ExtensionAPI) {
 	// Command autocomplete callbacks receive only the typed argument prefix,
 	// not ExtensionCommandContext. Keep the active session cwd available for
-	// discovered sheep completion instead of falling back to the extension's
+	// discovered agent completion instead of falling back to the extension's
 	// process cwd.
 	let shepherdCommandCwd = process.cwd();
 	pi.on("session_start", (_event, ctx) => {
@@ -164,9 +164,9 @@ export default function (pi: ExtensionAPI) {
 	registerSubagentStatusWidget(pi);
 
 	pi.registerCommand("shepherd", {
-		description: "pi-shepherd: sheep | herd | start | settings",
+		description: "pi-shepherd: agents | herd | start | settings",
 		// Keep completion aligned with the action names in the model-facing
-		// `shepherd` tool. Agent names are discovered fresh so user-defined sheep
+		// `shepherd` tool. Agent names are discovered fresh so user-defined agents
 		// are available here too.
 		getArgumentCompletions: (prefix) => {
 			const parts = prefix.split(/\s+/);
@@ -174,7 +174,7 @@ export default function (pi: ExtensionAPI) {
 			if (parts.length <= 1 && !prefix.endsWith(" ")) {
 				// Pi does not automatically invoke the completion provider again
 				// after applying an argument completion. When the user types
-				// `/shepherd sta`, show full `start <sheep>` entries immediately
+				// `/shepherd sta`, show full `start <agent>` entries immediately
 				// instead of requiring a second completion cycle after `start`.
 				const wantsStartCandidates =
 					action === "start" || (action.length >= 3 && "start".startsWith(action));
@@ -189,7 +189,7 @@ export default function (pi: ExtensionAPI) {
 						}));
 					}
 				}
-				const actions = ["sheep", "herd", "start", "settings"];
+				const actions = ["agents", "herd", "start", "settings"];
 				const filtered = actions.filter((s) => s.startsWith(action));
 				return filtered.length > 0
 					? filtered.map((value) => ({ value, label: value }))
@@ -220,9 +220,9 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (action === "sheep" || action === "list" || action === "agents") {
-				// `list` and `agents` remain accepted as compatibility aliases, but
-				// `sheep` is the canonical action (and the only completion shown).
+			if (action === "agents" || action === "list" || action === "sheep") {
+				// `list` and `sheep` remain accepted as compatibility aliases, but
+				// `agents` is the canonical action (and the only completion shown).
 				const scopeArg = tokens[1];
 				const scope = ["user", "project", "both"].includes(scopeArg ?? "")
 					? (scopeArg as "user" | "project" | "both")
@@ -234,9 +234,9 @@ export default function (pi: ExtensionAPI) {
 					? shown.map((agent) => `- ${agent.name} (${agent.source}): ${agent.description}`).join("\n")
 					: "- none";
 				ctx.ui?.notify(
-					`pi-shepherd sheep (${scope} scope, ${agents.length}):\n${listing}${
+					`pi-shepherd agents (${scope} scope, ${agents.length}):\n${listing}${
 						remaining > 0 ? `\n(+${remaining} more)` : ""
-						}${action !== "sheep" ? "\nUse `/shepherd sheep` next time." : ""}`,
+						}${action !== "agents" ? "\nUse `/shepherd agents` next time." : ""}`,
 					"info",
 				);
 				return;
@@ -254,7 +254,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui?.notify(
 					agents.length > 0
 						? agents.map(formatSummary).join("\n")
-						: "No sheep detected in Herdr.",
+						: "No agents detected in Herdr.",
 					"info",
 				);
 				return;
@@ -287,7 +287,7 @@ export default function (pi: ExtensionAPI) {
 					);
 					const location = handle.tabId ? `tab ${handle.tabId}` : `pane ${handle.paneId ?? "unknown"}`;
 					ctx.ui?.notify(
-						`Started idle sheep ${parsed.agent} (${location}). It is interactive and ready for you in Herdr; pi-shepherd will not send a task. Handle: ${handle.id}`,
+						`Started idle agent ${parsed.agent} (${location}). It is interactive and ready for you in Herdr; pi-shepherd will not send a task. Handle: ${handle.id}`,
 						"info",
 					);
 				} catch (error: any) {
@@ -299,7 +299,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui?.notify(
-				`pi-shepherd: try /shepherd sheep, /shepherd herd, /shepherd start <agent>, or /shepherd settings` +
+				`pi-shepherd: try /shepherd agents, /shepherd herd, /shepherd start <agent>, or /shepherd settings` +
 					(action ? ` (unhandled action: ${action})` : ""),
 				"info",
 			);

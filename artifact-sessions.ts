@@ -385,7 +385,7 @@ function artifactFrontmatter(a: ArtifactReservation, session: SessionRecord, ext
 		const safe = /^[A-Za-z0-9._-]+$/.test(value) ? value : JSON.stringify(value);
 		return `${key}: ${safe}`;
 	});
-	return `---\n${lines.join("\n")}\n---\n\n# ${displayName(a.agent)} ${String(a.ordinal).padStart(2, "0")}\n\n<!-- Sheep's note or sheep-maintained report follows. -->\n`;
+	return `---\n${lines.join("\n")}\n---\n\n# ${displayName(a.agent)} ${String(a.ordinal).padStart(2, "0")}\n\n<!-- Agent's note or agent-maintained report follows. -->\n`;
 }
 function initializeArtifact(a: ArtifactReservation, session: SessionRecord): void { atomicWrite(a.filePath, artifactFrontmatter(a, session) + "\n"); }
 

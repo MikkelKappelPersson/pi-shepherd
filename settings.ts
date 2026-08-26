@@ -21,7 +21,7 @@ export interface ShepherdSettings {
 	confirmProjectAgents: boolean;
 	/** Keep the Herdr tab open after completion, for inspection. */
 	keepOpen: boolean;
-	/** Keep the sheep's pi process alive after done, to keep driving it. */
+	/** Keep the agent's pi process alive after done, to keep driving it. */
 	stayOpen: boolean;
 	/** Create and attach durable fieldnotes to delegated prompts. */
 	fieldnotes: boolean;
@@ -90,7 +90,7 @@ export function loadSettings(): ShepherdSettings {
 }
 
 // Fieldnotes are session-scoped: changing the setting while a parent pi
-// session is running must not leave some sheep with notes and others without
+// session is running must not leave some agents with notes and others without
 // them. A new pi session snapshots the persisted value.
 let sessionFieldnotesEnabled: boolean | undefined;
 

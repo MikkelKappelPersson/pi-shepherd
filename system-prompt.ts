@@ -1,8 +1,8 @@
 /**
- * System-prompt adjustment used by pi-shepherd-launched sheep.
+ * System-prompt adjustment used by pi-shepherd-launched agents.
  *
  * Pi's default identity paragraph is useful for the main session, but it is
- * misleading when a sheep has a more specific system-prompt body. Keep the
+ * misleading when an agent has a more specific system-prompt body. Keep the
  * match exact so custom prompts and future Pi prompt changes are left alone.
  */
 

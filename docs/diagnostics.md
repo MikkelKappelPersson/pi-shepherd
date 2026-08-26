@@ -13,14 +13,14 @@ Run these commands from the pi-shepherd repository root:
 # Inspect the parent Pi session (the Shepherd)
 npm run extract:system-prompt -- shepherd
 
-# Inspect a discovered child agent (a sheep)
-npm run extract:system-prompt -- sheep scout
+# Inspect a discovered child agent (also called a sheep)
+npm run extract:system-prompt -- agent scout
 ```
 
 The prompt is written to standard output. To save the raw prompt instead:
 
 ```bash
-npm run extract:system-prompt -- sheep scout \
+npm run extract:system-prompt -- agent scout \
   --output /tmp/scout-system-prompt.md
 ```
 
@@ -41,7 +41,7 @@ There are two modes:
 
 - `shepherd` loads the pi-shepherd parent extension and captures the parent
   session's assembled prompt.
-- `sheep <agent>` resolves the named agent using pi-shepherd discovery, then
+- `agent <agent>` resolves the named agent using pi-shepherd discovery, then
   captures a child session using that agent's prompt, model, and tools.
 
 Only the extension required by the selected mode is loaded explicitly. This
@@ -52,14 +52,14 @@ The captured prompt can include more than the Markdown body of an agent
 file—for example Pi's built-in instructions, project context, skills, tool
 guidance, and pi-shepherd's prompt adjustments.
 
-## Sheep discovery options
+## Agent discovery options
 
-By default, sheep are discovered from the user scope. Use `--scope project` or
+By default, agents are discovered from the user scope. Use `--scope project` or
 `--scope both` when you need project-controlled definitions:
 
 ```bash
-npm run extract:system-prompt -- sheep scout --scope both
-npm run extract:system-prompt -- sheep scout --scope project \
+npm run extract:system-prompt -- agent scout --scope both
+npm run extract:system-prompt -- agent scout --scope project \
   --cwd /path/to/project
 ```
 
@@ -100,7 +100,7 @@ with the rest of the child session's prompt.
 
 ```text
 --cwd <path>       Working directory for discovery and Pi (default: current)
---scope <scope>    user, project, or both (sheep mode; default: user)
+--scope <scope>    user, project, or both (agent mode; default: user)
 --output <path>    Save raw prompt to this path as well as stdout
 --json             Print metadata and prompt as JSON
 --model <model>    Override the diagnostic model
@@ -113,7 +113,7 @@ For example, to compare a project prompt with a user prompt and record the
 source metadata:
 
 ```bash
-npm run extract:system-prompt -- sheep scout \
+npm run extract:system-prompt -- agent scout \
   --scope both \
   --cwd /path/to/project \
   --json > /tmp/scout-system-prompt.json
@@ -125,7 +125,7 @@ its `systemPrompt` field contains the same captured prompt.
 
 ## Prompt composition details
 
-When pi-shepherd launches a sheep, the agent Markdown body replaces Pi's
+When pi-shepherd launches an agent, the agent Markdown body replaces Pi's
 generic leading identity paragraph unless the agent opts into a different
 configuration. The remaining Pi instructions and context stay available.
 
@@ -169,8 +169,8 @@ inferring it from the agent file alone.
 Try listing available agents and check the scope and working directory:
 
 ```text
-/shepherd sheep
-/shepherd sheep both
+/shepherd agents
+/shepherd agents both
 ```
 
 Then rerun the extractor with `--scope both` and, if needed, `--cwd` pointing

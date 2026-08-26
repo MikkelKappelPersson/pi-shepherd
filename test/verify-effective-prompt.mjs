@@ -43,7 +43,7 @@ try {
         "--experimental-strip-types",
         "--disable-warning=ExperimentalWarning",
         script,
-        "sheep",
+        "agent",
         agent,
         "--scope",
         "user",

@@ -1,6 +1,6 @@
 # pi-shepherd — maintenance instructions
 
-A no-fuss pi extension for explicit sheep lifecycle orchestration and herding
+A no-fuss pi extension for explicit agent (sheep) lifecycle orchestration and herding
 pi agents inside Herdr. See `README.md` and `docs/dictionary` for terminology
 and user-facing usage. The model-facing tool definition is the source of truth
 for actions and lifecycle guidance; this file contains repository constraints
@@ -8,9 +8,9 @@ only.
 
 ## Project conventions
 
-Bundled sheep are `scout`, `planner`, `worker`, and `reviewer`; run only sheep
+Bundled agents are `scout`, `planner`, `worker`, and `reviewer`; run only agents
 you trust. `shepherd.md` is the shared fieldnotes index, and each submitted
-sheep invocation receives its own note.
+agent invocation receives its own note.
 
 ## Runtime and architecture
 

@@ -91,8 +91,8 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 		},
 		{
 			id: "stayOpen",
-			label: "Keep sheep alive after done",
-			description: "Keep the sheep's pi alive so you can keep driving it in the tab.",
+			label: "Keep agent alive after done",
+			description: "Keep the agent's pi alive so you can keep driving it in the tab.",
 			currentValue: stayOpenValue,
 			values: stayOpenValues,
 		},

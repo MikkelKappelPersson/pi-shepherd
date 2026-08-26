@@ -1,9 +1,9 @@
 # pi-shepherd
 
-A Herdr-native pi extension for explicit sheep lifecycle orchestration.
+A Herdr-native pi extension for explicit agent lifecycle orchestration.
 The Shepherd is the parent pi session and orchestrator. Its herd is made up of
-sheep—created workers conventionally called agents or subagents—visible in Herdr
-and controlled through five composable primitives:
+specialized agents (also called sheep), created from their Markdown
+definitions and visible in Herdr, controlled through five composable primitives:
 
 ```text
 start(agent, options) -> AgentHandle
@@ -14,12 +14,12 @@ close(agentHandle) -> void
 ```
 
 The model-facing `shepherd` tool also retains diagnostic/operational actions:
-`sheep`, `herd`, `read`, and `prune`.
+`agent`, `herd`, `read`, and `prune`.
 
 ## Lifecycle usage
 
-`start` launches an idle persistent sheep. It never submits a task and has no
-`stayOpen` option. The sheep remains alive until explicitly closed. By default it
+`start` launches an idle persistent agent. It never submits a task and has no
+`stayOpen` option. The agent remains alive until explicitly closed. By default it
 creates a new background tab; pass `placement: "pane"` to split the current
 pane, or `placement: "workspace"` to create a new workspace. Pane placement
 uses a right split by default; pass `direction: "down"` for a pane below.
@@ -38,7 +38,7 @@ shepherd({ action: "close", handle: agent.handle })
 ```
 
 Prompt submission is non-blocking. `wait` is the synchronization point. For
-parallel work, start multiple sheep, prompt each one, then wait on the array:
+parallel work, start multiple agents, prompt each one, then wait on the array:
 
 ```text
 scoutA = start("scout", options)
@@ -50,26 +50,26 @@ close(scoutA)
 close(scoutB)
 ```
 
-Arrays wait concurrently and preserve input order. A single sheep may have
+Arrays wait concurrently and preserve input order. A single agent may have
 only one unresolved prompt. Sequential chains are composed by the caller:
 wait for one result, include its text in the next prompt, and wait again.
-Waiting never closes a sheep.
+Waiting never closes an agent.
 
 ## Shepherd actions
 
 | Action | Purpose |
 |---|---|
-| `start` | Create an idle persistent sheep in a background Herdr tab (or requested pane/workspace placement) |
+| `start` | Create an idle persistent agent in a background Herdr tab (or requested pane/workspace placement) |
 | `prompt` | Submit one message using an `AgentHandle`; returns immediately |
 | `wait` | Wait for one or many `PromptHandle`s |
 | `status` | Inspect a handle without focusing or mutating Herdr |
-| `close` | Explicitly close an owned sheep and cancel unresolved prompts |
-| `sheep` | List available sheep (agent/subagent) definitions and source metadata |
-| `herd` | List the live herd: sheep detected in Herdr panes |
+| `close` | Explicitly close an owned agent and cancel unresolved prompts |
+| `agents` | List all available agents (also called sheep) and source metadata |
+| `herd` | List the live herd: agents detected in Herdr panes |
 | `read` | Read recent output for diagnostics |
 | `prune` | Remove stale pi-shepherd pane registrations |
 
-`read` accepts a sheep name, a Herdr pane id such as `w9:p18`, or a recorded
+`read` accepts an agent name, a Herdr pane id such as `w9:p18`, or a recorded
 Shepherd pane id. Herdr's opaque internal pane handle (for example, `pane-14`)
 is not a pane target and cannot be read. `recent` and `recent-unwrapped` may
 return empty output for idle panes with no scrollback; use `visible` for the
@@ -103,7 +103,7 @@ manually stringify the array. If the tool reports an invalid handle shape, retry
 the exact native object from `details.handle`. `close` refuses any pane not recorded
 in the pi-shepherd created-pane registry.
 
-## Sheep discovery and security
+## Agent discovery and security
 
 Definitions use VS Code custom-agent Markdown (`.md` or `.agent.md`) with YAML
 frontmatter and a Markdown system prompt. Discovery precedence is:
@@ -117,11 +117,11 @@ frontmatter and a Markdown system prompt. Discovery precedence is:
 
 User-level discovery is the default. Project definitions are repo-controlled,
 require explicit project/both scope, and require confirmation when interactive.
-Sheep retain the host user's normal pi tool permissions.
+Agents retain the host user's normal pi tool permissions.
 
 ## Parent-bound note sessions
 
-When fieldnotes are enabled, all sheep orchestrated by one parent pi session
+When fieldnotes are enabled, all agents orchestrated by one parent pi session
 in the same project share one persistent note session under:
 
 ```text
@@ -154,12 +154,12 @@ truth for safe close operations.
 ## Manual commands
 
 Sometimes you do not want the Shepherd to delegate a one-shot task and collect
-a result. If you want to collaborate directly with a specific sheep—for
+a result. If you want to collaborate directly with a specific agent—for
 example, inspect its role, ask follow-up questions, guide its investigation, or
-keep it available as an interactive partner—start an idle sheep manually:
+keep it available as an interactive partner—start an idle agent manually:
 
 ```text
-/shepherd sheep                 # list available definitions
+/shepherd agents                # list available definitions
 /shepherd start worker          # start an idle, interactive worker
 ```
 
@@ -175,15 +175,15 @@ The slash command uses the same action vocabulary as the model-facing
 `shepherd` tool for the supported manual actions:
 
 ```text
-/shepherd sheep                 # list available definitions
-/shepherd sheep both            # include project definitions
+/shepherd agents                # list available definitions
+/shepherd agents both           # include project definitions
 /shepherd herd                  # list live Herdr agents
 /shepherd start worker          # start an interactive worker
 /shepherd settings
 ```
 
 `/shepherd list` and `/shepherd agents` remain accepted as compatibility
-aliases for `/shepherd sheep`, but `sheep` is canonical. Optional `start` flags
+aliases for `/shepherd agents`, but `agents` is canonical. Optional `start` flags
 include `--scope user|project|both`, `--placement pane|tab|workspace`,
 `--direction right|down`, `--cwd <path>`, `--model <provider/model>`, and
 `--omit-system-prompt`.
@@ -197,11 +197,11 @@ instead of manual commands.
 Open `/shepherd settings` (or `/shepherd-settings`) to configure pi-shepherd.
 The menu includes an **Enable fieldnotes** toggle. It defaults to enabled and,
 when enabled, creates the durable `shepherd.md` index and one note per delegated
-prompt. When disabled, new sheep receive no fieldnotes context and delegated
+prompt. When disabled, new agents receive no fieldnotes context and delegated
 prompts do not create or update note files; existing notes are retained. The
 toggle is intentionally
 session-scoped: save the setting and start a new parent pi session for it to
-apply. Sheep already running in the current session retain the current
+apply. Agents already running in the current session retain the current
 fieldnotes behavior.
 
 ## System-prompt diagnostic
@@ -217,23 +217,23 @@ definition:
 # The parent Pi session (the Shepherd)
 npm run extract:system-prompt -- shepherd
 
-# A discovered child agent (a sheep)
-npm run extract:system-prompt -- sheep scout --scope both --cwd /path/to/project
+# A discovered child agent (also called a sheep)
+npm run extract:system-prompt -- agent scout --scope both --cwd /path/to/project
 
 # Save the raw prompt, or include diagnostic metadata as JSON
-npm run extract:system-prompt -- sheep scout --output /tmp/scout-system.md
+npm run extract:system-prompt -- agent scout --output /tmp/scout-system.md
 npm run extract:system-prompt -- shepherd --json
 ```
 
 The script starts an ephemeral `pi --mode json` process, captures the prompt at
 Pi's `before_agent_start` hook, and terminates it before a provider request is
 made. It therefore does not need a model response or API call. Shepherd mode
-loads the parent extension; sheep mode uses the discovered definition's prompt,
+loads the parent extension; agent mode uses the discovered definition's prompt,
 model, and tools. Only the requested pi-shepherd extension is loaded explicitly
 so the diagnostic is deterministic. `--output` contains raw prompt text and is
 written with restrictive permissions.
 
-When pi-shepherd launches a sheep normally, the Markdown body of its agent
+When pi-shepherd launches an agent normally, the Markdown body of its agent
 file replaces Pi's generic leading identity paragraph. For example, scout
 starts with `You are a scout. Quickly investigate a codebase ...`, rather than
 `You are an expert coding assistant ...`; the rest of Pi's built-in tools and

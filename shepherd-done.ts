@@ -78,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 			agentSystemPrompt = readFileSync(agentSystemPromptFile, "utf8").trim();
 		} catch {
 			// The launch directory is retained for the lifetime of the child, but
-			// a missing file should not prevent the sheep from starting.
+			// a missing file should not prevent the agent from starting.
 		}
 	}
 

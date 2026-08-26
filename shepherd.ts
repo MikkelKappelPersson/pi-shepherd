@@ -5,7 +5,7 @@
  *   - start/prompt/wait/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
- * Registered by index.ts in the parent session only. Sheep get
+ * Registered by index.ts in the parent session only. The launched agents get
  * the separate in-tab `shepherd_done` tool from shepherd-done.ts instead.
  */
 
@@ -59,19 +59,19 @@ const SourceSchema = StringEnum(['visible', 'recent', 'recent-unwrapped', 'detec
 });
 
 const HerdParams = Type.Object({
-  action: Type.Literal('herd', { description: 'List the live herd: sheep detected in Herdr panes.' }),
+  action: Type.Literal('herd', { description: 'List the live herd: agents detected in Herdr panes.' }),
 });
-const SheepParams = Type.Object({
-  action: Type.Literal('sheep', {
-    description: 'List available sheep definitions (agent/subagent definitions) and their source metadata.',
+const AgentsParams = Type.Object({
+  action: Type.Literal('agents', {
+    description: 'List all available agents (also called sheep) and their source metadata.',
   }),
   agentScope: Type.Optional(AgentScopeSchema),
 });
 const ReadParams = Type.Object({
   action: Type.Literal('read', {
-    description: 'Read recent terminal output from a sheep or pane.',
+    description: 'Read recent terminal output from an agent or pane.',
   }),
-  name: Type.String({ description: 'Sheep name, Herdr pane id, or AgentHandle id of the target.' }),
+  name: Type.String({ description: 'Agent name, Herdr pane id, or AgentHandle id of the target.' }),
   lines: Type.Optional(
     Type.Integer({ description: 'Number of recent lines for read (default 40)', default: 40 })
   ),
@@ -84,7 +84,7 @@ const PruneParams = Type.Object({
 export const ShepherdParams = Type.Union(
   [
     HerdParams,
-    SheepParams,
+    AgentsParams,
     StartParams,
     LifecyclePromptParams,
     WaitParams,
@@ -95,7 +95,7 @@ export const ShepherdParams = Type.Union(
   ],
   {
     description:
-      'Action-discriminated shepherd commands for herding sheep (agents/subagents), managing their fieldnotes (artifacts), and controlling Herdr panes.',
+      'Action-discriminated shepherd commands for managing specialized agents (also called sheep), their fieldnotes (artifacts), and their Herdr panes.',
   }
 );
 
@@ -243,7 +243,7 @@ function shepherdCallPreview(args: Record<string, any>, expanded = false): strin
     case 'close':
       tokens.push(handlePreview(args.handle, idLimit));
       break;
-    case 'sheep':
+    case 'agents':
       add('agentScope');
       break;
     case 'read':
@@ -269,7 +269,7 @@ type ShepherdContext = {
 
 function parentArtifactSession(ctx: ShepherdContext): ShepherdSession | undefined {
   // The setting is snapshotted when the parent pi session starts. This means
-  // disabling fieldnotes does not change the contract of sheep already
+  // disabling fieldnotes does not change the contract of agents already
   // running in this session; start a new pi session to stop using them.
   if (!fieldnotesEnabled()) return undefined;
   const parentPiSessionId = ctx.sessionManager?.getSessionId();
@@ -307,7 +307,7 @@ async function doAction(
         ctx
       );
       return textResult(
-        `Started idle sheep ${a.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'} Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
+        `Started idle agent ${a.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'} Pass the complete details.handle object natively to prompt, status, or close; do not stringify it yourself.`,
         { handle, ...(artifactSession ? { artifactSession } : {}) }
       );
     }
@@ -347,14 +347,14 @@ async function doAction(
     case 'close': {
       const a: any = args;
       const handle = closeAgent(a.handle);
-      return textResult(`Closed sheep ${handle.id}.`, { handle });
+      return textResult(`Closed agent ${handle.id}.`, { handle });
     }
-    case 'sheep': {
-      // List available sheep definitions for the shepherd's herd.
+    case 'agents': {
+      // List available agent definitions for the shepherd's herd.
       const scope = args.agentScope ?? loadSettings().agentScope;
       const { agents, projectDirs } = discoverAgents(ctx.cwd, scope);
       if (agents.length === 0)
-        return textResult('No sheep definitions found.', { agents: [], projectDirs, scope });
+        return textResult('No agent definitions found.', { agents: [], projectDirs, scope });
       const lines = agents.map(a => `${a.name} (${a.source}): ${a.description}`);
       return textResult(lines.join('\n'), { agents, projectDirs, scope });
     }
@@ -365,7 +365,7 @@ async function doAction(
       pruneStaleCreatedPanes();
       const out = herdrExecSync(['agent', 'list']);
       const agents = agentSummaries(out);
-      if (agents.length === 0) return textResult('No sheep detected in Herdr.', { agents });
+      if (agents.length === 0) return textResult('No agents detected in Herdr.', { agents });
       return textResult(agents.map(formatSummary).join('\n'), { agents });
     }
 
@@ -465,32 +465,32 @@ async function doAction(
 }
 
 export const SHEPHERD_TOOL_DESCRIPTION = [
-  'Manage a herd of specialized sheep inside Herdr panes.',
-  'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of sheep; sheep are the created workers commonly called agents or subagents.',
-  'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each sheep invocation.',
-  'Use start to create an idle sheep, prompt to submit work, wait to collect its result, status to inspect it, and close to end it. Waiting does not close sheep automatically.',
+  'Manage specialized agents (also called sheep) inside Herdr panes.',
+  'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents are the created workers.',
+  'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
+  'Use start to create an idle agent, prompt to submit work, wait to collect its result, status to inspect it, and close to end it. Waiting does not close agents automatically.',
   'Do not use this tool unless explicitly instructed: too many Herdr panes may crash pi.',
   'Lifecycle handles must be passed as the complete native handle object returned in details.handle; never manually stringify, replace it with an id, or reconstruct it.',
   'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
 ].join(' ');
 
 export const SHEPHERD_TOOL_PROMPT_SNIPPET =
-  'Shepherd (orchestrator): manage a herd of sheep (agents/subagents) and, when enabled, their fieldnotes (durable artifacts) inside Herdr panes.';
+  'Shepherd (orchestrator): manage specialized agents (also called sheep) and, when enabled, their fieldnotes (durable artifacts) inside Herdr panes.';
 
 export const SHEPHERD_TOOL_PROMPT_GUIDELINES = [
-  'Keep every sheep\'s complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.',
+  "Keep every agent's complete AgentHandle and use it unchanged with prompt, status, and close; use each returned PromptHandle unchanged with wait.",
   'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index first and write only to the assigned note for note-producing prompts.',
   'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
-  'Use shepherd action=sheep to retrieve available sheep definitions and source metadata before choosing a sheep.',
-  'Workflow: start an idle sheep, prompt it, then wait with the complete prompt handle. A bare start submits no task. Start defaults to a new tab; use placement pane or workspace only when explicitly requested. For pane placement, direction defaults to right and can be set to down.',
-  'For sequential work, wait for one result before including its text in the next prompt. For independent work, start and prompt multiple sheep, then call wait with one native array of complete prompt handles.',
-  'Waiting does not close a sheep. Close each sheep explicitly when it is no longer needed; close also cancels its unresolved prompt.',
+  'Use shepherd action=agents to retrieve available agent definitions and source metadata before choosing an agent.',
+  'Workflow: start an idle agent, prompt it, then wait with the complete prompt handle. A bare start submits no task. Start defaults to a new tab; use placement pane or workspace only when explicitly requested. For pane placement, direction defaults to right and can be set to down.',
+  'For sequential work, wait for one result before including its text in the next prompt. For independent work, start and prompt multiple agents, then call wait with one native array of complete prompt handles.',
+  'Waiting does not close an agent. Close each agent explicitly when it is no longer needed; close also cancels its unresolved prompt.',
 ];
 
 export function registerShepherdTool(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'shepherd',
-    label: 'Shepherd (manage Herdr sheep/agents)',
+    label: 'Shepherd (manage Herdr agents)',
     description: SHEPHERD_TOOL_DESCRIPTION,
     promptSnippet: SHEPHERD_TOOL_PROMPT_SNIPPET,
     promptGuidelines: SHEPHERD_TOOL_PROMPT_GUIDELINES,

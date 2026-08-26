@@ -9,8 +9,8 @@
  *
  * Usage:
  *   node --experimental-strip-types scripts/extract-pi-system-prompt.mjs shepherd
- *   node --experimental-strip-types scripts/extract-pi-system-prompt.mjs sheep scout
- *   node --experimental-strip-types scripts/extract-pi-system-prompt.mjs sheep scout --scope both --cwd /path/to/project
+ *   node --experimental-strip-types scripts/extract-pi-system-prompt.mjs agent scout
+ *   node --experimental-strip-types scripts/extract-pi-system-prompt.mjs agent scout --scope both --cwd /path/to/project
  *
  * By default only the requested pi-shepherd extension is loaded explicitly,
  * which makes the result deterministic and avoids loading this extension a
@@ -35,16 +35,16 @@ const packageDir = resolve(scriptDir, "..");
 const captureExtension = resolve(scriptDir, "capture-system-prompt.mjs");
 const resolverExtension = resolve(scriptDir, "resolve-agent.mjs");
 const shepherdExtension = resolve(packageDir, "index.ts");
-const sheepExtension = resolve(packageDir, "shepherd-done.ts");
+const agentExtension = resolve(packageDir, "shepherd-done.ts");
 
 function usage(exitCode = 2) {
 	console.error(`Usage:
   extract-pi-system-prompt shepherd [options]
-  extract-pi-system-prompt sheep <agent> [options]
+  extract-pi-system-prompt agent <agent> [options]
 
 Options:
   --cwd <path>       Cwd used for discovery (default: current directory)
-  --scope <scope>    user, project, or both (sheep only; default: user)
+  --scope <scope>    user, project, or both (agent mode; default: user)
   --output <path>    Write the raw prompt to this path as well as stdout
   --json             Print metadata and the prompt as JSON
   --model <model>    Override the model used by the diagnostic session
@@ -53,7 +53,7 @@ Options:
   --pi <command>     Pi executable (default: pi)
   --help             Show this help
 
-The sheep mode uses the discovered agent's system prompt, model, and tools.
+The agent mode uses the discovered agent's system prompt, model, and tools.
 The shepherd mode loads pi-shepherd's parent extension and captures the
 parent/shepherd prompt contribution. The process is stopped immediately after
 before_agent_start, before a provider request is made.
@@ -65,9 +65,9 @@ const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) usage(0);
 
 const role = argv.shift();
-if (role !== "shepherd" && role !== "sheep") usage();
-const agentName = role === "sheep" ? argv.shift() : undefined;
-if (role === "sheep" && !agentName) usage();
+if (role !== "shepherd" && role !== "agent") usage();
+const agentName = role === "agent" ? argv.shift() : undefined;
+if (role === "agent" && !agentName) usage();
 
 let cwd = process.cwd();
 let scope = "user";
@@ -113,7 +113,7 @@ if (output) output = resolve(output);
 
 const temporaryDir = mkdtempSync(resolve(tmpdir(), "pi-system-prompt-"));
 
-async function resolveSheep() {
+async function resolveAgent() {
 	const discoveryFile = resolve(temporaryDir, "agent.json");
 	const child = spawn(piCommand, [
 		"--mode",
@@ -167,7 +167,7 @@ async function resolveSheep() {
 
 let agent;
 try {
-	if (role === "sheep") agent = await resolveSheep();
+	if (role === "agent") agent = await resolveAgent();
 } catch (error) {
 	rmSync(temporaryDir, { recursive: true, force: true });
 	console.error(error?.message ?? String(error));
@@ -179,7 +179,7 @@ if (agentSystemPromptFile) {
 	const { writeFileSync } = await import("node:fs");
 	writeFileSync(agentSystemPromptFile, agent.systemPrompt, { encoding: "utf8", mode: 0o600 });
 }
-const extension = role === "shepherd" ? shepherdExtension : sheepExtension;
+const extension = role === "shepherd" ? shepherdExtension : agentExtension;
 const args = [
 	"--mode",
 	"json",
@@ -194,7 +194,7 @@ const args = [
 
 if (agent?.model || model) args.push("--model", model ?? agent.model);
 if (agent?.omitContextFiles === true) args.push("--no-context-files");
-if (agent?.tools?.length) args.push("--tools", [...agent.tools, ...(role === "sheep" ? ["shepherd_done"] : [])].join(","));
+if (agent?.tools?.length) args.push("--tools", [...agent.tools, ...(role === "agent" ? ["shepherd_done"] : [])].join(","));
 if (agent?.omitSystemPrompt) args.push("--system-prompt", agentSystemPromptFile);
 args.push(diagnosticPrompt);
 
@@ -273,7 +273,7 @@ const metadata = {
 	source: agent?.source,
 	definition: agent?.filePath,
 	cwd,
-	scope: role === "sheep" ? scope : undefined,
+	scope: role === "agent" ? scope : undefined,
 	promptLength: prompt.length,
 };
 if (json) console.log(JSON.stringify({ ...metadata, systemPrompt: prompt }, null, 2));
