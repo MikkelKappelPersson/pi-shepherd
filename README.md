@@ -235,7 +235,7 @@ instead of manual commands. The old single-tool form such as
 
 ## Settings
 
-Open `/shepherd settings` (or `/shepherd-settings`) to configure pi-shepherd.
+Open `/shepherd` (with no arguments) or `/shepherd settings` to configure pi-shepherd.
 The menu includes an **Enable fieldnotes** toggle and a **Use sheep emoji**
 toggle. Sheep emoji are enabled by default; disabling the latter replaces the
 animated `🐑` marker in the working-agent widget with a plain `o`. This setting

@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-c
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { discoverAgents } from './src/core/discovery.ts';
 import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/settings.ts';
-import { openSettings, registerSettingsCommand } from './src/extension/settings-ui.ts';
+import { openSettings } from './src/extension/settings-ui.ts';
 import { doAction, registerShepherdTools, type ShepherdArgs } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { lifecycleRegistry } from './src/core/orchestration.ts';
@@ -347,11 +347,11 @@ export default function (pi: ExtensionAPI) {
 
   // Tools for natural-language use.
   registerShepherdTools(pi);
-  registerSettingsCommand(pi);
   registerSubagentStatusWidget(pi);
 
   pi.registerCommand('shepherd', {
-    description: 'pi-shepherd: agents | herd | spawn | status | read | settings',
+    description:
+      'pi-shepherd: (no args) settings menu | agents | herd | spawn | status | read | settings',
     // Keep completion aligned with the actions the command supports. Agent
     // names (and live handle ids for status) are discovered fresh so
     // user-defined agents and running agents are available here.
@@ -432,7 +432,9 @@ export default function (pi: ExtensionAPI) {
       // Quote-aware tokenization (shared with the CLI preview renderer) so
       // flags like --cwd="/a b" survive the split.
       let tokens = raw ? tokenizeCli(raw) : [];
-      if (tokens[0] === 'settings') {
+      // With no arguments (or the explicit `settings` action), open the
+      // settings menu — the command's default behavior.
+      if (tokens.length === 0 || tokens[0] === 'settings') {
         await openSettings(ctx);
         return;
       }

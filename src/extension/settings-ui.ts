@@ -9,10 +9,10 @@
  * (capped at 30). Keep every label ≤ 30 visible chars so the value column
  * stays aligned.
  *
- * Commands: `/shepherd settings` and the dedicated `/shepherd-settings`.
+ * Command: `/shepherd` with no arguments (or `/shepherd settings`).
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { type ShepherdSettings, loadSettings, saveSettings } from "./settings.ts";
@@ -57,7 +57,7 @@ function booleans(value: boolean): [string, string[]] {
 	return value ? ["on", ["on", "off"]] : ["off", ["on", "off"]];
 }
 
-/** Render + drive the settings menu. Shared by the two commands. */
+/** Render + drive the settings menu. */
 export async function openSettings(ctx: ExtensionCommandContext): Promise<void> {
 	// Keep the in-memory state current while the menu is open. SettingsList can
 	// invoke onChange multiple times in one session; applying every change to
@@ -160,13 +160,4 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 		// No `overlay` — renders inline in the writing-field slot (editor is
 		// replaced by the menu and restored on close), like pi's own /settings.
 	);
-}
-
-export function registerSettingsCommand(pi: ExtensionAPI): void {
-	pi.registerCommand("shepherd-settings", {
-		description: "pi-shepherd settings menu (inline, like /settings)",
-		handler: async (_args, ctx) => {
-			await openSettings(ctx);
-		},
-	});
 }
