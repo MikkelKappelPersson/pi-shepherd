@@ -349,3 +349,30 @@ export class LifecycleRegistry {
 }
 
 export const lifecycleRegistry = new LifecycleRegistry();
+
+// ── Session owner identity ──────────────────────────────────────────────
+// The created-panes registry is shared across all pi-shepherd processes (it
+// lives in the user agent dir), so pane creation must be tagged with the
+// owning parent session and session-facing views must filter by it. The owner
+// id is the parent pi session's session id, bound once by the extension at
+// session_start; a test/override env var wins when set.
+
+let boundSessionOwner: string | undefined;
+
+/**
+ * Stable identity of this parent pi session for tagging owned panes.
+ * Undefined when not yet bound (and no override is set).
+ */
+export function sessionOwner(): string | undefined {
+  const override = process.env.PI_SHEPHERD_OWNER_SESSION?.trim();
+  return override || boundSessionOwner;
+}
+
+/**
+ * Bind (or clear) the parent session identity. Called from session_start /
+ * session_shutdown; binding is idempotent so re-fire is safe.
+ */
+export function bindSessionOwner(id: string | undefined): void {
+  if (id?.trim()) boundSessionOwner = id.trim();
+  else boundSessionOwner = undefined;
+}

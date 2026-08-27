@@ -26,6 +26,7 @@ import { promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
+import { sessionOwner } from "./orchestration.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -159,19 +160,20 @@ export function listHerdrAgents(): HerdrAgentSummary[] {
 }
 
 /**
- * The subagents pi-shepherd is currently working on: our own panes whose
- * agent is not idle (working, waiting on input, errored, …). Used for the
- * persistent "below the editor" status line.
+ * The subagents pi-shepherd is currently working on in THIS parent session:
+ * our own panes (owned by this session) whose agent is not idle (working,
+ * waiting on input, errored, …). Used for the persistent "below the editor"
+ * status widget. Panes owned by other shepherd sessions are excluded so each
+ * widget only shows the sheep its shepherd spawned.
  */
 export function workingSubagents(): HerdrAgentSummary[] {
 	// `rec.agent` in `herdr agent list` is always the program name (“pi”),
 	// not the agent kind. For shepherd panes the agent kind (scout/worker/…)
 	// is what we recorded when the tab was created — use that for the label.
-	const kindByPane = new Map(
-		loadCreatedPanes().map((p) => [p.paneId, p.name]),
-	);
+	const panes = loadCreatedPanes().filter((p) => paneOwner(p) === sessionOwner());
+	const kindByPane = new Map(panes.map((p) => [p.paneId, p.name]));
 	return listHerdrAgents()
-		.filter((s) => s.shepherd && s.state !== "idle")
+		.filter((s) => s.shepherd && s.state !== "idle" && kindByPane.has(s.paneId))
 		.map((s) => {
 			const kind = kindByPane.get(s.paneId);
 			return kind && kind !== "pi" ? { ...s, name: kind } : s;
@@ -244,6 +246,19 @@ interface CreatedPane {
 	createdAt: number;
 	/** Temp launch dir (if any) to remove when this pane is closed. */
 	dir?: string;
+	/** Parent pi session that created this pane (this session's identity).
+	 * Legacy entries (and entries written by other pi-shepherd versions)
+	 * omit this field. */
+	ownerSession?: string;
+}
+
+/**
+ * Owner session id of a pane entry. Legacy entries carry no marker; they are
+ * attributed to the current session so pre-existing panes keep their behavior
+ * instead of silently vanishing from the widget or pane-name matchers.
+ */
+function paneOwner(entry: CreatedPane): string {
+	return entry.ownerSession ?? sessionOwner() ?? "";
 }
 
 function registryFile(): string {
@@ -340,6 +355,16 @@ function isShepherdPane(idOrName: string): boolean {
 	return loadCreatedPanes().some((p) => p.paneId === idOrName || p.name === idOrName);
 }
 
+/**
+ * True when a created-pane entry was spawned by THIS parent session (or is a
+ * legacy entry without an owner marker, which is attributed to the current
+ * session). Used to keep shared-registry views scoped to each session's own
+ * sheep.
+ */
+export function paneOwnedByCurrentSession(entry: CreatedPane): boolean {
+	return paneOwner(entry) === sessionOwner();
+}
+
 // ── Herdr-backed agent runner ────────────────────────────────────────────
 // Pane lifecycle and persistent agent launch helpers.
 
@@ -411,7 +436,7 @@ export function createHerdrInstance(
 	} catch {
 		/* cosmetic */
 	}
-	recordCreatedPane({ paneId, tabId, name: label, cwd, createdAt: Date.now() });
+	recordCreatedPane({ paneId, tabId, name: label, cwd, createdAt: Date.now(), ownerSession: sessionOwner() });
 	return { paneId, tabId, workspaceId: resolvedWorkspaceId };
 }
 

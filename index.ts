@@ -13,10 +13,11 @@ import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './sr
 import { openSettings } from './src/extension/settings-ui.ts';
 import { doAction, registerShepherdTools, type ShepherdArgs } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
-import { lifecycleRegistry } from './src/core/orchestration.ts';
+import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
+  paneOwnedByCurrentSession,
   workingSubagents,
   loadCreatedPanes,
   type HerdrAgentSummary,
@@ -52,7 +53,9 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
 
     const tick = (tui: { requestRender(): void }): void => {
       // Poll Herdr + the registry once per tick, not per render frame.
-      const panes = loadCreatedPanes();
+      // The created-panes registry is shared across all shepherd sessions;
+      // only the panes owned by THIS session belong in this widget.
+      const panes = loadCreatedPanes().filter(paneOwnedByCurrentSession);
       const createdAtById = new Map(panes.map((p) => [p.paneId, p.createdAt]));
       const agents = workingSubagents();
       const workingNow = new Set(agents.filter((s) => s.state === 'working').map((s) => s.paneId));
@@ -346,6 +349,14 @@ export default function (pi: ExtensionAPI) {
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
     initializeSessionSettings(ctx.cwd);
+    // Bind this session's identity so the panes it creates are tagged and the
+    // widget/registry views are scoped to its own sheep.
+    bindSessionOwner(ctx.sessionManager?.getSessionId?.());
+  });
+  pi.on('session_shutdown', (_event, _ctx) => {
+    // Drop the binding on teardown so a reload/new-session cycle without a
+    // fresh identity never attributes fresh panes to a stale session.
+    bindSessionOwner(undefined);
   });
 
   // Launched workers load the user extension set too, but their only Shepherd
