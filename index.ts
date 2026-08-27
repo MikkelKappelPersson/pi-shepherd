@@ -9,7 +9,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { discoverAgents } from './src/core/discovery.ts';
-import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/settings.ts';
+import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/config.ts';
 import { openSettings } from './src/extension/settings-ui.ts';
 import { doAction, registerShepherdTools, type ShepherdArgs } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
@@ -87,7 +87,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
         return {
           render: (width: number) =>
             snapshot.length > 0
-              ? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings().emojiSheep)
+              ? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings(shepherdCommandCwd).emojiSheep)
               : [],
           invalidate: () => {
             // Theme changed: rows are re-derived from the live snapshot,
@@ -336,7 +336,7 @@ export default function (pi: ExtensionAPI) {
     shepherdCommandCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
-    initializeSessionSettings();
+    initializeSessionSettings(ctx.cwd);
   });
 
   // Launched workers load the user extension set too, but their only Shepherd
@@ -360,7 +360,7 @@ export default function (pi: ExtensionAPI) {
       const action = parts[0] ?? '';
       const discoveredAgentNames = () =>
         (() => {
-          const s = loadSettings();
+          const s = loadSettings(shepherdCommandCwd);
           return discoverAgents(shepherdCommandCwd, s.agentScope, {
             includeBundled: s.includeBundledAgents,
           });

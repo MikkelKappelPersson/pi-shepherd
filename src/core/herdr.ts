@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
 
@@ -246,7 +247,9 @@ interface CreatedPane {
 }
 
 function registryFile(): string {
-	return path.join(os.homedir(), ".pi", "agent", "pi-shepherd", "created-panes.json");
+	// getAgentDir() resolves the active agent dir (~/.pi/agent by default,
+	// overridable via the PI_CODING_AGENT_DIR env var).
+	return path.join(getAgentDir(), "pi-shepherd", "created-panes.json");
 }
 
 export function loadCreatedPanes(): CreatedPane[] {

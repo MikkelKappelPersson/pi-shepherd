@@ -237,9 +237,25 @@ instead of manual commands. The old single-tool form such as
 
 ## Settings
 
-Open `/shepherd` (with no arguments) or `/shepherd settings` to configure pi-shepherd.
-The menu includes an **Enable fieldnotes** toggle and a **Use sheep emoji**
-toggle. Sheep emoji are enabled by default; disabling the latter replaces the
+Open `/shepherd` (with no arguments) or `/shepherd settings` to configure
+pi-shepherd. The first menu item, **Settings scope**, selects where the
+effective values come from and where edits are written:
+
+- **User** (default) — `pi-shepherd/config.json` inside the active pi agent
+  dir (`~/.pi/agent` by default; overridable with `PI_CODING_AGENT_DIR`). The
+  base layer for every session, whatever directory pi runs in.
+- **Project** — `.shepherd/config.json` in the current working directory (the
+  same `.shepherd` root fieldnotes use; no walk-up). It is a *delta* on top of
+  the user file: every field present overrides the matching user field one by
+  one, and the menu writes only the fields that actually differ (an empty
+  file is pure user values). Switching the scope to **project** when the file
+  does not exist yet creates it as an empty delta and notifies you. The
+  scope itself is always stored in the user file, since it is the pointer to
+  where to look.
+
+The menu shows the merged, effective values and includes an **Enable
+fieldnotes** toggle and a **Use sheep emoji** toggle. Sheep emoji are enabled
+by default; disabling the latter replaces the
 animated `🐑` marker in the working-agent widget with a plain `o`. This setting
 only affects the decorative sheep marker; the state symbols and box-drawing
 characters remain unchanged.

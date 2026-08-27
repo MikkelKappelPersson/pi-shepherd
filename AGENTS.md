@@ -14,6 +14,13 @@ Bundled agents are `scout`, `planner`, `worker`, and `reviewer`; run only agents
 you trust. `shepherd.md` is the shared fieldnotes index, and each submitted
 agent invocation receives its own note.
 
+Config is two files: the user layer (`pi-shepherd/config.json` inside the
+active pi agent dir — `~/.pi/agent` by default, `PI_CODING_AGENT_DIR`
+overridable; owns `settingsScope` and the base defaults) plus an optional
+project delta (`.shepherd/config.json`, anchored at cwd, overridable
+field-by-field, written only for fields that differ). `settingsScope` is
+user-file-only.
+
 ## Runtime and architecture
 
 - TypeScript runs directly by pi. There is no build step or bundler.
@@ -23,6 +30,9 @@ agent invocation receives its own note.
   session-scoped registries; model-facing lifecycle tools expose only ids.
 - `src/core/lifecycle.ts` implements `spawn`, `prompt`, `wait`, `status`, and
   `close`.
+- `src/extension/config.ts` owns the two-layer config store (user file +
+  project delta), the file rename migration, and the fieldnotes session
+  snapshot (`settings-ui.ts` renders the `/shepherd settings` menu).
 - `src/extension/shepherd.ts` exposes the umbrella control tool and separate
   lifecycle tools.
 - Every `pi.registerTool({ ... })` declaration must spell out `name`, `label`,

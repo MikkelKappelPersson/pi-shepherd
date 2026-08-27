@@ -25,7 +25,7 @@ import {
   LifecycleCloseParams,
 } from '../core/types.ts';
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from '../core/lifecycle.ts';
-import { fieldnotesEnabled, loadSettings } from './settings.ts';
+import { fieldnotesEnabled, loadSettings } from './config.ts';
 import { lifecycleRegistry } from '../core/orchestration.ts';
 import { formatShepherdCommand } from './cli.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from '../core/artifact-sessions.ts';
@@ -236,7 +236,7 @@ export async function doAction(
       // tolerantly); otherwise resolve/require the parent artifact session.
       const artifactSession =
         'artifactSession' in a ? a.artifactSession : parentArtifactSession(ctx);
-      const settings = loadSettings();
+      const settings = loadSettings(ctx.cwd);
       // Startup readiness has its own fixed internal grace periods; timeout
       // settings apply only to submitted prompts and their waits. Undefined
       // options inherit persisted settings; explicitly supplied options win.
@@ -260,7 +260,7 @@ export async function doAction(
       const a: any = args;
       // Convert timeout from minutes to milliseconds for internal use.
       // Default: from settings (20 minutes).
-      const defaultTimeout = loadSettings().timeout;
+      const defaultTimeout = loadSettings(ctx.cwd).timeout;
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
       const handle = await promptAgent(a.id ?? a.handle, a.message, { timeout: timeoutMs });
@@ -278,7 +278,7 @@ export async function doAction(
       const a: any = args;
       // Convert timeout from minutes to milliseconds for internal use.
       // Default: from settings (20 minutes).
-      const defaultTimeout = loadSettings().timeout;
+      const defaultTimeout = loadSettings(ctx.cwd).timeout;
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
       const result = await waitPrompts(a.id ?? a.handle, { timeout: timeoutMs });
@@ -301,9 +301,9 @@ export async function doAction(
     }
     case 'agents': {
       // List available agent definitions for the shepherd's herd.
-      const scope = args.agentScope ?? loadSettings().agentScope;
+      const scope = args.agentScope ?? loadSettings(ctx.cwd).agentScope;
       const { agents, projectDirs } = discoverAgents(ctx.cwd, scope, {
-        includeBundled: loadSettings().includeBundledAgents,
+        includeBundled: loadSettings(ctx.cwd).includeBundledAgents,
       });
       if (agents.length === 0)
         return textResult(

@@ -22,7 +22,7 @@ process.env.HERDR_ENV = "1";
 
 const settingsDir = path.join(home, ".pi", "agent", "pi-shepherd");
 fs.mkdirSync(settingsDir, { recursive: true });
-fs.writeFileSync(path.join(settingsDir, "settings.json"), JSON.stringify({
+fs.writeFileSync(path.join(settingsDir, "config.json"), JSON.stringify({
   agentScope: "both",
   confirmProjectAgents: false,
   fieldnotes: false,

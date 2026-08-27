@@ -5,6 +5,13 @@
  * arrows navigate, Enter cycles a value, `/` fuzzy-searches, esc closes and the
  * editor comes back.
  *
+ * The first item selects the *settings scope*: "user" (the user file) or
+ * "project" (the `.shepherd/config.json` delta in the current directory).
+ * The menu opens on the merged, effective values, so what it shows is exactly
+ * what the system is using. Scope changes always save to the user file (it
+ * owns the scope pointer); every other field saves to the current scope's
+ * file (the project file stores only the delta).
+ *
  * Alignment note: the SettingsList pads the label column to the widest label
  * (capped at 30). Keep every label ≤ 30 visible chars so the value column
  * stays aligned.
@@ -15,7 +22,14 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
-import { type ShepherdSettings, loadSettings, saveSettings } from "./settings.ts";
+import * as path from "node:path";
+import {
+	type ConfigScope,
+	type ShepherdSettings,
+	loadProjectDelta,
+	loadSettings,
+	saveSettings,
+} from "./config.ts";
 
 const TIMEOUT_CHOICES = [1, 2, 5, 10, 20, 30, 60];
 const TIMEOUT_DISPLAY = (n: number) => `${n} min`;
@@ -24,6 +38,9 @@ const TIMEOUT_DISPLAY = (n: number) => `${n} min`;
 function applyValue(settings: ShepherdSettings, id: string, value: string): ShepherdSettings {
 	const next = { ...settings };
 	switch (id) {
+		case "settingsScope":
+			next.settingsScope = (value === "project" ? "project" : "user") as ConfigScope;
+			break;
 		case "agentScope":
 			next.agentScope = value as ShepherdSettings["agentScope"];
 			break;
@@ -62,10 +79,11 @@ function booleans(value: boolean): [string, string[]] {
 
 /** Render + drive the settings menu. */
 export async function openSettings(ctx: ExtensionCommandContext): Promise<void> {
+	const cwd = ctx.cwd;
 	// Keep the in-memory state current while the menu is open. SettingsList can
 	// invoke onChange multiple times in one session; applying every change to
 	// the initial snapshot would otherwise discard earlier changes.
-	let settings = loadSettings();
+	let settings = loadSettings(cwd);
 	const [keepOpenValue, keepOpenValues] = booleans(settings.keepOpen);
 	const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
 	const [fieldnotesValue, fieldnotesValues] = booleans(settings.fieldnotes);
@@ -76,6 +94,14 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 	// All labels ≤ 30 chars — the SettingsList pads to the widest label (capped
 	// at 30), so longer labels would push their value column out of alignment.
 	const items: SettingItem[] = [
+		{
+			id: "settingsScope",
+			label: "Settings scope",
+			description:
+				"Where settings values come from and where edits are written: the user file, or the project .shepherd/config.json (project values override user values).",
+			currentValue: settings.settingsScope,
+			values: ["user", "project"],
+		},
 		{
 			id: "agentScope",
 			label: "Agent scope",
@@ -146,14 +172,36 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 				getSettingsListTheme(),
 				(id, value) => {
 					settings = applyValue(settings, id, value);
-					saveSettings(settings);
-					const note =
-						id === "agentScope" && settings.agentScope !== "user"
-							? `${id} = ${value} (project agents are repo-controlled)`
-						: id === "fieldnotes"
-							? `${id} = ${value} (takes effect next pi session)`
-							: `${id} = ${value}`;
-					ctx.ui?.notify?.(note, "info");
+					// Scope changes always persist to the user file (it owns
+					// the scope pointer); every other field saves to the
+					// current scope's file, so project saves only store the
+					// delta against the user layer.
+					const targetScope: ConfigScope =
+						id === "settingsScope" ? "user" : settings.settingsScope;
+					try {
+						const { file, created } = saveSettings(settings, targetScope, cwd);
+						if (created) {
+							// A just-born project file holds at most the delta
+							// of the field being set; reset the in-memory
+							// state from it so the menu (which shows
+							// effective values) matches disk.
+							if (targetScope === "project") settings = loadProjectDelta(cwd);
+							ctx.ui?.notify?.(`Config created at ${path.relative(cwd, file) || file}`, "info");
+							return;
+						}
+						const note =
+							id === "agentScope" && settings.agentScope !== "user"
+								? `${id} = ${value} (project agents are repo-controlled)`
+								: id === "fieldnotes"
+									? `${id} = ${value} (takes effect next pi session)`
+									: `${id} = ${value}`;
+						ctx.ui?.notify?.(note, "info");
+					} catch (error) {
+						ctx.ui?.notify?.(
+							`pi-shepherd: could not save ${id}: ${String((error as Error)?.message ?? error)}`,
+							"error",
+						);
+					}
 				},
 				() => done(undefined), // close menu
 				{ enableSearch: true },

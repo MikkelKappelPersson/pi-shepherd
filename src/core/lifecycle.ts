@@ -1,5 +1,5 @@
 import { discoverAgents, resolveDelegatedModel, type AgentScope } from './discovery.ts';
-import { loadSettings } from '../extension/settings.ts';
+import { loadSettings } from '../extension/config.ts';
 import {
   ensureHerdrRuntime,
   getHerdrWorkspaceId,
@@ -56,7 +56,7 @@ export async function startAgent(
   }
 ): Promise<AgentHandle> {
   const cwd = options.cwd ?? ctx.cwd;
-  const settings = loadSettings();
+  const settings = loadSettings(cwd);
   const agentScope = options.agentScope ?? settings.agentScope;
   const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
   const discovered = discoverAgents(cwd, agentScope, {
