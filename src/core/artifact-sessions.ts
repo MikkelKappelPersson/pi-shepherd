@@ -346,6 +346,19 @@ function loadSession(session: ShepherdSession): SessionRecord {
 	}
 	return record;
 }
+
+/**
+ * Mirror the canonical on-disk record back into the held session object.
+ * Every mutator below re-parses session.json, so the artifacts array held by
+ * callers (payloads serialize from the object) holds a per-parse copy that is
+ * stale by the time the first mutation lands; merging the record back keeps
+ * the held session in sync with the durable state without swapping
+ * references (agent records keep their original object).
+ */
+function syncHeldSession(session: ShepherdSession, record: SessionRecord): void {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	for (const key of Object.keys(record) as Array<keyof SessionRecord>) (session as any)[key] = (record as any)[key];
+}
 function hash(value: string): string { return crypto.createHash("sha256").update(value).digest("hex").slice(0, 8); }
 function safeArtifactMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
 	// Lifecycle metadata is useful provenance, but never allow it to replace the
@@ -434,10 +447,15 @@ function updateArtifact(session: ShepherdSession, artifact: ArtifactReservation,
 		if (status === "running" && !stored.startedAt) stored.startedAt = now();
 		if (["completed", "failed", "timed-out", "cancelled"].includes(status)) stored.completedAt = now();
 		Object.assign(stored, safeArtifactMetadata(metadata));
+		// Mirror the canonical on-disk state back into the in-memory reservation
+		// so callers that hold the handle (e.g. shepherd_wait payloads) report
+		// the current status instead of the stale value from reservation time.
+		Object.assign(artifact, stored);
 		const existing = fs.existsSync(stored.filePath) ? fs.readFileSync(stored.filePath, "utf8") : "";
 		const body = existing.replace(/^---[\s\S]*?---\s*/, "").replace(/\n<!-- Shepherd orchestration -->[\s\S]*$/, "");
 		atomicWrite(stored.filePath, artifactFrontmatter(stored, record, metadata) + body.trimStart() + "\n");
 		updateRecordAndMoc(record);
+		syncHeldSession(session, record);
 	} finally { release(); }
 }
 
@@ -452,6 +470,9 @@ export function finalizeArtifact(session: ShepherdSession, artifact: ArtifactRes
 		stored.status = result.status;
 		stored.completedAt = now();
 		if (result.metadata) Object.assign(stored, safeArtifactMetadata(result.metadata));
+		// Same mirror invariant as updateArtifact: the handle serialized into
+		// wait payloads must agree with session.json.
+		Object.assign(artifact, stored);
 		const existing = fs.existsSync(stored.filePath) ? fs.readFileSync(stored.filePath, "utf8") : artifactFrontmatter(stored, record);
 		const body = existing.replace(/^---[\s\S]*?---\s*/, "").replace(/\n<!-- Shepherd orchestration -->[\s\S]*$/, "").trimEnd();
 		const output = result.output ? `\n\n### Final output\n\n${result.output}` : "";
@@ -459,6 +480,7 @@ export function finalizeArtifact(session: ShepherdSession, artifact: ArtifactRes
 		const section = `\n\n<!-- Shepherd orchestration -->\n## Shepherd orchestration\n\n- **Final status:** ${result.status}\n- **Completed:** ${stored.completedAt}\n${result.metadata && Object.keys(result.metadata).length ? `- **Metadata:** \`${JSON.stringify(result.metadata)}\`\n` : ""}${output}${error}\n`;
 		atomicWrite(stored.filePath, artifactFrontmatter(stored, record, result.metadata ?? {}) + body + section);
 		updateRecordAndMoc(record);
+		syncHeldSession(session, record);
 	} finally { release(); }
 }
 
@@ -466,11 +488,17 @@ export function finalizeArtifact(session: ShepherdSession, artifact: ArtifactRes
 export function updateSessionMoc(session: ShepherdSession, update: { mode?: SessionMode; status?: string } = {}): ShepherdSession {
 	const release = lock(path.join(session.sessionPath, ".session.lock"));
 	try {
+		// Start from fresh on-disk state (a concurrent process may have added
+		// artifacts) so this update does not clobber them.
 		const record = loadSession(session);
 		if (update.mode && !record.modes.includes(update.mode)) record.modes.push(update.mode);
 		if (update.status) record.status = update.status;
 		updateRecordAndMoc(record);
-		return toSession(record, true);
+		// Merge the durable record back into the held session instead of
+		// returning a fresh copy: callers keep their reference and payloads
+		// serialized from it reflect the on-disk state.
+		syncHeldSession(session, record);
+		return session;
 	} finally { release(); }
 }
 

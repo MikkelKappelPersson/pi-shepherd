@@ -93,6 +93,10 @@ await check("reserve per-agent artifacts before execution with relative links", 
 });
 await check("lifecycle metadata and output/error persistence", () => {
   markArtifactStarted(first, artifacts[0], { pane: "test-pane" });
+  // The in-memory reservation must track the canonical state immediately,
+  // not stay at the "pending" snapshot from reserve time.
+  assert.equal(artifacts[0].status, "running");
+  assert.ok(artifacts[0].startedAt);
   finalizeArtifact(first, artifacts[0], { status: "completed", output: "survey output" });
   finalizeArtifact(first, artifacts[1], { status: "failed", error: "boom" });
   markArtifactStatus(first, artifacts[2], "timed-out", { reason: "deadline" });
@@ -103,6 +107,21 @@ await check("lifecycle metadata and output/error persistence", () => {
   assert.match(fs.readFileSync(artifacts[1].filePath, "utf8"), /boom/);
   const metadata = JSON.parse(fs.readFileSync(first.sessionMetadataPath, "utf8"));
   assert.deepEqual(metadata.artifacts.map((a) => a.status), ["completed", "failed", "timed-out", "cancelled"]);
+  // Handles passed around in memory (prompt/wait payloads) mirror the
+  // on-disk metadata — the shepherd_wait artifact status regression.
+  assert.deepEqual(artifacts.map((a) => a.status), ["completed", "failed", "timed-out", "cancelled"], "in-memory reservations mirror canonical status");
+  for (const a of artifacts) {
+    const stored = metadata.artifacts.find((m) => m.id === a.id);
+    assert.equal(a.startedAt, stored.startedAt);
+    assert.equal(a.completedAt, stored.completedAt);
+  }
+  // The held session object's artifacts array must be synced too: payloads
+  // serialize both the per-prompt artifact and artifactSession.artifacts.
+  assert.deepEqual(first.artifacts.map((a) => a.status), ["completed", "failed", "timed-out", "cancelled"], "held session artifacts array mirrors canonical state");
+  const heldFromArray = first.artifacts.find((a) => a.id === artifacts[0].id);
+  const canonical = metadata.artifacts.find((m) => m.id === artifacts[0].id);
+  assert.equal(heldFromArray.startedAt, canonical.startedAt);
+  assert.equal(heldFromArray.completedAt, canonical.completedAt);
 });
 await check("session remains resumable after failure", () => {
   const resumed = createOrResumeSession({ projectRoot: project, sessionName: "fix-oauth-login" });
