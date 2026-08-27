@@ -5,8 +5,8 @@
  *   - spawn/prompt/wait/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
- * Registered by index.ts in the parent session only. The launched agents get
- * the separate in-tab `shepherd_done` tool from shepherd-done.ts instead.
+ * Registered by index.ts in the parent session only. Launched agents get the
+ * in-tab completion extension from shepherd-done.ts instead.
  */
 
 import { execFile } from 'node:child_process';

@@ -14,6 +14,7 @@ import {
   paneExists,
   removeCreatedPaneDir,
   readPaneTail,
+  readLastAssistantText,
   readCompletionSignal,
 } from './herdr.ts';
 import {
@@ -119,6 +120,7 @@ export async function startAgent(
       { agent: name, paneId, tabId, workspaceId },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
+        completionResultPath: files.sessionFile,
         artifactSession: options.artifactSession,
       }
     );
@@ -241,6 +243,16 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
     if (record.settled) return lifecycleRegistry.wait(canonical);
     const agent = lifecycleRegistry.getAgent({ id: canonical.agentId } as AgentHandle);
     const signalPath = lifecycleRegistry.completionSignalPath(agent.handle);
+    const resultPath = lifecycleRegistry.completionResultPath(agent.handle);
+    // Prefer the full final answer from the child's session file; the pane
+    // tail only reflects the TUI rendering and is a fallback for short answers.
+    const readResultText = async (): Promise<string> => {
+      if (resultPath) {
+        const text = readLastAssistantText(resultPath).trim();
+        if (text) return text;
+      }
+      return agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : '';
+    };
 
     // Arm/replace the timeout on the prompt record (clears safety net from createPrompt).
     if (record.timeoutId) clearTimeout(record.timeoutId);
@@ -269,7 +281,7 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
           signal?.signalId && signal.signalId !== tracking.baselineCompletionSignalId
         );
         if (signalAdvanced) {
-          const text = agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : '';
+          const text = await readResultText();
           const failedSignal = signal?.type === 'error';
           return lifecycleRegistry.settlePrompt(canonical, {
             promptId: canonical.id,
@@ -289,7 +301,7 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
           ['idle', 'done', 'blocked'].includes(state) &&
           (tracking.observedWorking || sequenceAdvanced)
         ) {
-          const text = agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : '';
+          const text = await readResultText();
           return lifecycleRegistry.settlePrompt(canonical, {
             promptId: canonical.id,
             agentId: canonical.agentId,

@@ -87,7 +87,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
         return {
           render: (width: number) =>
             snapshot.length > 0
-              ? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings(shepherdCommandCwd).emojiSheep)
+              ? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings(currentCwd()).emojiSheep)
               : [],
           invalidate: () => {
             // Theme changed: rows are re-derived from the live snapshot,
@@ -326,22 +326,31 @@ async function runCommandAction(args: ShepherdArgs, ctx: ExtensionCommandContext
   }
 }
 
+/**
+ * Cwd of the most recent pi session. Held in module scope because the
+ * /shepherd command's argument-completion callback receives only the typed
+ * prefix (no ExtensionCommandContext), and the status widget's render
+ * closure lives inside registerSubagentStatusWidget() — outside the
+ * export default body, so a local there would be unresolvable at render
+ * time. Falls back to the process cwd until session_start fires.
+ */
+let activeSessionCwd: string | undefined;
+
+function currentCwd(): string {
+  return activeSessionCwd ?? process.cwd();
+}
+
 export default function (pi: ExtensionAPI) {
-  // Command autocomplete callbacks receive only the typed argument prefix,
-  // not ExtensionCommandContext. Keep the active session cwd available for
-  // discovered agent completion instead of falling back to the extension's
-  // process cwd.
-  let shepherdCommandCwd = process.cwd();
   pi.on('session_start', (_event, ctx) => {
-    shepherdCommandCwd = ctx.cwd;
+    activeSessionCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
     initializeSessionSettings(ctx.cwd);
   });
 
   // Launched workers load the user extension set too, but their only Shepherd
-  // surface is the explicitly injected shepherd_done tool. Keep the parent
-  // orchestrator's tools, command, settings UI, and widget out of worker
+  // surface is the in-tab completion extension from shepherd-done.ts. Keep the
+  // parent orchestrator's tools, command, settings UI, and widget out of worker
   // sessions; PI_SHEPHERD_SESSION is set by herdr.ts only for launched agents.
   if (process.env.PI_SHEPHERD_SESSION) return;
 
@@ -360,8 +369,9 @@ export default function (pi: ExtensionAPI) {
       const action = parts[0] ?? '';
       const discoveredAgentNames = () =>
         (() => {
-          const s = loadSettings(shepherdCommandCwd);
-          return discoverAgents(shepherdCommandCwd, s.agentScope, {
+          const cwd = currentCwd();
+          const s = loadSettings(cwd);
+          return discoverAgents(cwd, s.agentScope, {
             includeBundled: s.includeBundledAgents,
           });
         })()

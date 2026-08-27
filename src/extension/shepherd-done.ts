@@ -2,12 +2,13 @@
  * Extension loaded into pi agents that pi-shepherd launches in Herdr tabs.
  *
  * Two responsibilities:
- *   1. Auto-terminate: on `agent_end`, if the latest assistant turn finished
- *      normally, write a completion sidecar (`<session>.exit`) and shut the
- *      process down so the parent (the main pi instance) can pick up the
- *      result. A user Escape/abort leaves the pane open for inspection.
- *   2. Explicit exit: register a `shepherd_done` tool the model can call when
- *      it considers the task complete.
+ *   1. Completion signal: on `agent_end`, if the latest assistant turn finished
+ *      normally, write a completion sidecar (`<session>.exit`) and — for
+ *      one-shot agents — shut the process down so the parent (the main pi
+ *      instance) can pick up the result. A user Escape/abort leaves the pane
+ *      open for inspection. The parent reads the actual full answer from the
+ *      child's JSONL session file; the sidecar is only the trigger.
+ *   2. Explicit exit: one-shot children exit after a normal turn.
  *
  * The parent sets `PI_SHEPHERD_SESSION` (the JSONL session file path) and
  * `PI_SHEPHERD_AUTO_EXIT=1` in the launch environment.
@@ -18,7 +19,6 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { omitPiDocumentation, replacePiIdentity } from "./system-prompt.ts";
@@ -103,30 +103,5 @@ export default function (pi: ExtensionAPI) {
 		// this pi session alive in the tab so the user can keep driving it.
 		if (stayOpen) return;
 		ctx.shutdown();
-	});
-
-	pi.registerTool({
-		name: "shepherd_done",
-		label: "Shepherd Done",
-		description:
-			"Call this tool when you have completed your assigned task. " +
-			"It signals completion and returns your output to the caller. " +
-			"Your LAST assistant message before calling it becomes the summary returned.",
-		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			writeSidecar({ type: "done" });
-			if (!stayOpen) ctx.shutdown();
-			return {
-				content: [
-					{
-						type: "text",
-						text: stayOpen
-							? "Done. Completion signaled; this session stays open for further work."
-							: "Done. Signaling completion.",
-					},
-				],
-				details: {},
-			};
-		},
 	});
 }

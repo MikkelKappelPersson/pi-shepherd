@@ -71,6 +71,8 @@ interface AgentRecord {
   handle: AgentHandle;
   /** Completion sidecar emitted by the child for each completed prompt. */
   completionSignalPath?: string;
+  /** Child JSONL session file; the full last answer is read from it on completion. */
+  completionResultPath?: string;
   /** Durable fieldnotes session owned by the parent pi session. */
   artifactSession?: ShepherdSession;
   state: AgentLifecycleState;
@@ -129,12 +131,13 @@ export class LifecycleRegistry {
 
   registerAgent(
     input: Omit<AgentHandle, 'id'>,
-    metadata: { completionSignalPath?: string; artifactSession?: ShepherdSession } = {}
+    metadata: { completionSignalPath?: string; completionResultPath?: string; artifactSession?: ShepherdSession } = {}
   ): AgentHandle {
     const handle = { ...input, id: this.id('agent') };
     this.agents.set(handle.id, {
       handle,
       completionSignalPath: metadata.completionSignalPath,
+      completionResultPath: metadata.completionResultPath,
       artifactSession: metadata.artifactSession,
       state: 'idle',
     });
@@ -241,6 +244,10 @@ export class LifecycleRegistry {
 
   completionSignalPath(handle: AgentHandleInput): string | undefined {
     return this.getAgent(handle).completionSignalPath;
+  }
+
+  completionResultPath(handle: AgentHandleInput): string | undefined {
+    return this.getAgent(handle).completionResultPath;
   }
 
   artifactSession(handle: AgentHandleInput): ShepherdSession | undefined {

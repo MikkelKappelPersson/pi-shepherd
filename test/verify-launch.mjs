@@ -29,8 +29,8 @@ function check(label, omit, includeOption = true, model, omitContextFiles) {
     assert(script.includes("--append-system-prompt") === false, `${label}: no duplicate append system prompt flag`);
     assert(script.includes("--system-prompt '") === !!omit, `${label}: replacement system prompt flag`);
     assert(script.includes(`'@${files.dir}/task-${name}.md'`), `${label}: task file argument`);
-    assert(task.includes("do the task") && task.includes("shepherd_done"), `${label}: task and completion instructions`);
-    assert(script.includes("shepherd-done.ts") && script.includes("--tools read,shepherd_done"), `${label}: completion extension wiring`);
+    assert(task.includes("do the task") && task.includes("FINAL assistant message"), `${label}: task and completion instructions`);
+    assert(script.includes("shepherd-done.ts") && script.includes("--tools read") && !script.includes("shepherd_done"), `${label}: completion extension wiring (no injected done tool)`);
     assert(script.includes("PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE='"), `${label}: agent system prompt wiring`);
     assert(script.includes("PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1"), `${label}: Pi documentation omission wiring`);
     assert(script.includes("--no-context-files") === (omitContextFiles === true), `${label}: context-file omission argument`);

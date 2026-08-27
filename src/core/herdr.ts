@@ -514,11 +514,7 @@ export function writePiLaunchFiles(opts: {
 	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
 	if (opts.model) args.push("--model", shellQuote(opts.model));
 	if (opts.omitContextFiles) args.push("--no-context-files");
-	const tools =
-		opts.tools && opts.tools.length > 0
-			? [...opts.tools, "shepherd_done"].join(",")
-			: undefined;
-	if (tools) args.push("--tools", tools);
+	if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
 
 	let systemPromptFile: string | undefined;
 	if (opts.systemPrompt !== undefined) {
@@ -531,7 +527,7 @@ export function writePiLaunchFiles(opts: {
 	}
 	if (opts.task !== undefined) {
 		const taskFile = path.join(dir, `task-${safe}.md`);
-		const task = `${opts.task}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. When finished, call the shepherd_done tool to signal completion and return your output to the caller. Keep your FINAL assistant message a concise summary of what you did and found.`;
+		const task = `${opts.task}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. When finished, stop and make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
 		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: "0600" });
 		args.push(`'@${taskFile}'`);
 	}
@@ -680,6 +676,19 @@ function lastAssistantText(messages: Message[]): string {
 		}
 	}
 	return "";
+}
+
+/**
+ * Reconstruct the full text of the latest assistant reply from the child's
+ * JSONL session file — the canonical completion payload (the pane terminal
+ * tail only reflects the TUI rendering, which escapes/wraps/truncates).
+ * The file may be being appended by the live child, so a partial final line
+ * is ignored rather than crashing the reader. Returns '' when nothing is
+ * readable; callers fall back to the pane tail.
+ */
+export function readLastAssistantText(sessionFile: string): string {
+	const { messages } = parseSessionFile(sessionFile);
+	return lastAssistantText(messages);
 }
 
 const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
