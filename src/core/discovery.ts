@@ -208,7 +208,10 @@ function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[], i
 	const locations: Location[] = [];
 
 	// Bundled base set (lowest precedence): pi-shepherd's own agent dirs.
-	const pkgDir = path.dirname(url.fileURLToPath(import.meta.url));
+	// discovery.ts lives in src/core, so walk back to the package root before
+	// resolving the bundled agent directories. Using the module directory
+	// directly would incorrectly look under src/core/.agents.
+	const pkgDir = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "../..");
 	const bundledPi = path.join(pkgDir, ".pi", "agents");
 	const bundledAgents = path.join(pkgDir, ".agents", "agents");
 
