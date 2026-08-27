@@ -359,7 +359,12 @@ export default function (pi: ExtensionAPI) {
       const parts = prefix.split(/\s+/);
       const action = parts[0] ?? '';
       const discoveredAgentNames = () =>
-        discoverAgents(shepherdCommandCwd, loadSettings().agentScope)
+        (() => {
+          const s = loadSettings();
+          return discoverAgents(shepherdCommandCwd, s.agentScope, {
+            includeBundled: s.includeBundledAgents,
+          });
+        })()
           .agents.filter(agent => agent.name.length > 0)
           .map(agent => ({ name: agent.name, description: agent.description }));
       const liveHandleIdPrefixes = () =>

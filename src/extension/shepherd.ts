@@ -302,7 +302,9 @@ export async function doAction(
     case 'agents': {
       // List available agent definitions for the shepherd's herd.
       const scope = args.agentScope ?? loadSettings().agentScope;
-      const { agents, projectDirs } = discoverAgents(ctx.cwd, scope);
+      const { agents, projectDirs } = discoverAgents(ctx.cwd, scope, {
+        includeBundled: loadSettings().includeBundledAgents,
+      });
       if (agents.length === 0)
         return textResult(
           `No agent definitions found in ${scope} scope. Do not guess an agent name; add a definition or choose another scope.`,

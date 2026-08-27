@@ -155,7 +155,9 @@ override names. Discovery precedence is:
 
 User-level discovery is the default. Project definitions are repo-controlled,
 require explicit project/both scope, and require confirmation when interactive.
-Agents retain the host user's normal pi tool permissions.
+The bundled set can be excluded with the "Include bundled agents" setting in
+`/shepherd` (on by default). Agents retain the host user's normal pi tool
+permissions.
 
 ## Parent-bound note sessions
 

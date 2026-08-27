@@ -204,7 +204,7 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
  *   5  bundled: <pkg>/.pi/agents
  *   6  bundled: <pkg>/.agents/agents
  */
-function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[]): Location[] {
+function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[], includeBundled: boolean): Location[] {
 	const locations: Location[] = [];
 
 	// Bundled base set (lowest precedence): pi-shepherd's own agent dirs.
@@ -230,7 +230,7 @@ function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[]): 
 		}
 	}
 
-	if (scope === "user" || scope === "project" || scope === "both") {
+	if (includeBundled) {
 		locations.push({ dir: bundledPi, source: "bundled" });
 		locations.push({ dir: bundledAgents, source: "bundled" });
 	}
@@ -238,9 +238,14 @@ function buildLocations(cwd: string, scope: AgentScope, projectDirs: string[]): 
 	return locations;
 }
 
-export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
+export interface DiscoveryOptions {
+	/** When false, skip bundled agent locations (scout, planner, worker, reviewer). */
+	includeBundled?: boolean;
+}
+
+export function discoverAgents(cwd: string, scope: AgentScope, options: DiscoveryOptions = {}): AgentDiscoveryResult {
 	const projectDirs: string[] = [];
-	const locations = buildLocations(cwd, scope, projectDirs);
+	const locations = buildLocations(cwd, scope, projectDirs, options.includeBundled !== false);
 
 	// First-write-with-guard: the first location (highest precedence) that
 	// declares a given name wins; later duplicate names are dropped.

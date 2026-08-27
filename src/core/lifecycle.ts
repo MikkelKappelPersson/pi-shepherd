@@ -59,7 +59,9 @@ export async function startAgent(
   const settings = loadSettings();
   const agentScope = options.agentScope ?? settings.agentScope;
   const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
-  const discovered = discoverAgents(cwd, agentScope).agents;
+  const discovered = discoverAgents(cwd, agentScope, {
+    includeBundled: settings.includeBundledAgents,
+  }).agents;
   const found = discovered.find(a => a.name === name);
   if (!found) {
     const available = discovered.map(a => a.name).join(', ');

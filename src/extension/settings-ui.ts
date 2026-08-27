@@ -27,6 +27,9 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
 		case "agentScope":
 			next.agentScope = value as ShepherdSettings["agentScope"];
 			break;
+		case "includeBundledAgents":
+			next.includeBundledAgents = value === "on";
+			break;
 		case "confirmProjectAgents":
 			next.confirmProjectAgents = value === "on";
 			break;
@@ -67,6 +70,7 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 	const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
 	const [fieldnotesValue, fieldnotesValues] = booleans(settings.fieldnotes);
 	const [emojiSheepValue, emojiSheepValues] = booleans(settings.emojiSheep);
+	const [bundledValue, bundledValues] = booleans(settings.includeBundledAgents);
 	const [confirmValue, confirmValues] = booleans(settings.confirmProjectAgents);
 
 	// All labels ≤ 30 chars — the SettingsList pads to the widest label (capped
@@ -78,6 +82,13 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 			description: "Which agent directories to search. Project agents are repo-controlled.",
 			currentValue: settings.agentScope,
 			values: ["user", "project", "both"],
+		},
+		{
+			id: "includeBundledAgents",
+			label: "Include bundled agents",
+			description: "Add built-in agents (scout, planner, worker, reviewer).",
+			currentValue: bundledValue,
+			values: bundledValues,
 		},
 		{
 			id: "confirmProjectAgents",

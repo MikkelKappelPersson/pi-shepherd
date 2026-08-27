@@ -17,6 +17,8 @@ import type { AgentScope } from "../core/discovery.ts";
 export interface ShepherdSettings {
 	/** Which agent directories to search. Project agents are repo-controlled. */
 	agentScope: AgentScope;
+	/** Include pi-shepherd's bundled agents (scout, planner, worker, reviewer) in discovery. */
+	includeBundledAgents: boolean;
 	/** Prompt before running project-local agents (security gate). */
 	confirmProjectAgents: boolean;
 	/** Keep the Herdr tab open after completion, for inspection. */
@@ -33,6 +35,7 @@ export interface ShepherdSettings {
 
 export const DEFAULT_SETTINGS: ShepherdSettings = {
 	agentScope: "user",
+	includeBundledAgents: true,
 	confirmProjectAgents: true,
 	keepOpen: true,
 	stayOpen: false,
@@ -62,6 +65,10 @@ export function loadSettings(): ShepherdSettings {
 		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ShepherdSettings>;
 		const merged: ShepherdSettings = {
 			agentScope: validAgentScope(parsed.agentScope),
+			includeBundledAgents:
+				typeof parsed.includeBundledAgents === "boolean"
+					? parsed.includeBundledAgents
+					: DEFAULT_SETTINGS.includeBundledAgents,
 			confirmProjectAgents:
 				typeof parsed.confirmProjectAgents === "boolean"
 					? parsed.confirmProjectAgents
