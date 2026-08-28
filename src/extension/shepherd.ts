@@ -699,6 +699,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -744,6 +749,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof WaitParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -770,6 +780,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -796,6 +811,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -819,6 +839,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof ReadParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('read', { action: 'read', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
