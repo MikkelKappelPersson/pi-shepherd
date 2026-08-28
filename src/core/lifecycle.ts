@@ -123,11 +123,12 @@ export async function startAgent(
     // its completion sidecar is also the reliable fast-completion signal.
     const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
     if (!ready.detected) {
-      const returnCode = await readLaunchExitCode(paneId);
+      const returnCode = ready.exitCode ?? (await readLaunchExitCode(paneId));
       const output = (await readPaneTail(paneId)).trim();
       const suffix = returnCode === null ? '' : ` (return code ${returnCode})`;
+      const wording = returnCode !== null && returnCode !== 0 ? 'failed to start' : 'did not become ready';
       throw Object.assign(
-        new Error(`Agent "${name}" did not become ready${suffix}.${output ? `\n${output}` : ''}`),
+        new Error(`Agent "${name}" ${wording}${suffix}.${output ? `\n${output}` : ''}`),
         { returnCode: returnCode ?? 1, code: 'agent_not_ready' }
       );
     }
@@ -174,6 +175,19 @@ function finalizePromptArtifact(handle: PromptHandle, result: PromptResult): voi
           ? 'completed'
           : 'failed';
   finalizeArtifact(session, artifact, { status, output: result.text, error: result.error });
+}
+
+function extractAgentError(output: string): string | undefined {
+  const match = output.match(/(?:^|\n)\s*Error:\s*(.+)/i);
+  if (!match) return undefined;
+  const message = match[1].trim();
+  return /api key|authentication|authenticat|provider|model|failed to load/i.test(message)
+    ? message
+    : undefined;
+}
+
+async function readImmediateAgentError(paneId: string): Promise<string | undefined> {
+  return extractAgentError((await readPaneTail(paneId)).trim());
 }
 
 export async function promptAgent(
@@ -227,6 +241,15 @@ export async function promptAgent(
       record.handle.paneId,
       message + (session && artifact ? artifactContext(session, artifact) : ''),
     ]);
+    // Provider validation can fail immediately after Herdr accepts the
+    // prompt. Give the child a short bounded window to print that error so
+    // shepherd_prompt reports it directly instead of returning a prompt that
+    // can only fail later as a wait timeout.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const error = await readImmediateAgentError(record.handle.paneId);
+      if (error) throw new Error(`Agent prompt failed: ${error}`);
+      if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 100));
+    }
     return prompt;
   } catch (error) {
     lifecycleRegistry.settlePrompt(prompt, {
@@ -270,6 +293,20 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
       }
       return agent.handle.paneId ? (await readPaneTail(agent.handle.paneId)).trim() : '';
     };
+    const readAgentError = async (): Promise<string | undefined> => {
+      if (!agent.handle.paneId) return undefined;
+      const output = await readPaneTail(agent.handle.paneId);
+      // Some provider failures happen before shepherd-done receives an
+      // agent_end event, so there is no completion sidecar to observe. Catch
+      // the terminal error here and turn it into a failed prompt result rather
+      // than allowing the wait to time out.
+      const match = output.match(/(?:^|\n)\s*Error:\s*(.+)/i);
+      if (!match) return undefined;
+      const message = match[1].trim();
+      return /api key|authentication|authenticat|provider|model|failed to load/i.test(message)
+        ? message
+        : undefined;
+    };
 
     // Arm/replace the timeout on the prompt record (clears safety net from createPrompt).
     if (record.timeoutId) clearTimeout(record.timeoutId);
@@ -309,6 +346,17 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
             ...(failedSignal && signal?.errorMessage ? { error: signal.errorMessage } : {}),
           });
         }
+        const agentError = await readAgentError();
+        if (agentError) {
+          return lifecycleRegistry.settlePrompt(canonical, {
+            promptId: canonical.id,
+            agentId: canonical.agentId,
+            status: 'failed',
+            ok: false,
+            returnCode: 1,
+            error: agentError,
+          });
+        }
         const sequenceAdvanced =
           tracking.baselineStateChangeSeq === undefined ||
           (typeof seq === 'number' && seq !== tracking.baselineStateChangeSeq);
@@ -327,7 +375,22 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
             text,
           });
         }
-      } catch {}
+      } catch {
+        // Herdr may stop recognizing the child as soon as Pi enters its
+        // provider-error state. Still inspect the pane in that case; the
+        // terminal error is the useful result, not a wait timeout.
+        const agentError = await readAgentError();
+        if (agentError) {
+          return lifecycleRegistry.settlePrompt(canonical, {
+            promptId: canonical.id,
+            agentId: canonical.agentId,
+            status: 'failed',
+            ok: false,
+            returnCode: 1,
+            error: agentError,
+          });
+        }
+      }
       await new Promise(r => setTimeout(r, 500));
     }
     // Loop exited without settling; the timeout callback will fire.

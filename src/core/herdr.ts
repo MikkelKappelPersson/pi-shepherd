@@ -611,7 +611,7 @@ export function launchPiInPane(
 export async function waitForHerdrAgentDetected(
 	paneId: string,
 	options: { timeoutMs?: number; intervalMs?: number } = {},
-): Promise<{ detected: boolean; state?: string }> {
+): Promise<{ detected: boolean; state?: string; exitCode?: number }> {
 	const timeoutMs = options.timeoutMs ?? 20_000;
 	const intervalMs = options.intervalMs ?? 500;
 	const deadline = Date.now() + timeoutMs;
@@ -627,6 +627,12 @@ export async function waitForHerdrAgentDetected(
 		} catch {
 			/* not yet detected */
 		}
+		// A launch can fail before Herdr recognizes the child (for example when
+		// pi cannot authenticate the requested provider). The launch script emits
+		// an exit sentinel after pi terminates; surface that immediately instead
+		// of waiting out the full readiness timeout.
+		const exitCode = await doneSentinelInTail(paneId);
+		if (exitCode !== null) return { detected: false, state: "exited", exitCode };
 		if (Date.now() >= deadline) break;
 		await new Promise((r) => setTimeout(r, intervalMs));
 	}
@@ -653,7 +659,7 @@ export async function readPaneTail(paneId: string): Promise<string> {
 	try {
 		const { stdout } = await execFileAsync(
 			"herdr",
-			["pane", "read", paneId, "--source", "recent", "--lines", "40"],
+			["agent", "read", paneId, "--source", "recent-unwrapped", "--lines", "120"],
 			{ encoding: "utf8" },
 		);
 		return stdout;
