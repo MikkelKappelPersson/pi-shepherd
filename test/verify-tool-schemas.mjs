@@ -17,6 +17,7 @@ registerShepherdTools({
   registerTool(tool) {
     registered.push(tool);
   },
+  registerMessageRenderer() {},
 });
 
 const expectedNames = [

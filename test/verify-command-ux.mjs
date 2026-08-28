@@ -33,6 +33,7 @@ const commands = new Map();
 const events = [];
 const pi = {
   registerTool() {},
+  registerMessageRenderer() {},
   registerCommand(name, spec) { commands.set(name, spec); },
   on(event) { events.push(event); },
 };

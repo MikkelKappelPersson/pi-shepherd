@@ -24,6 +24,7 @@ const probe = `
       };
     },
     registerCommand(name) { calls.commands.push(name); },
+    registerMessageRenderer() {},
     on(event) { calls.events.push(event); },
   };
   const mod = await import(${JSON.stringify(indexUrl)});

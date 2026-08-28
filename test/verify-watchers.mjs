@@ -51,8 +51,13 @@ service.shutdown();
 // The extension bridge sends a custom follow-up, never a synthetic user
 // message, and preserves structured completion details.
 const sent = [];
+let registeredMessageRenderer;
 registerShepherdTools({
   registerTool() {},
+  registerMessageRenderer(customType, renderer) {
+    assert.equal(customType, 'shepherd.prompt.completion');
+    registeredMessageRenderer = renderer;
+  },
   sendMessage(message, options) {
     sent.push({ message, options });
   },
@@ -69,9 +74,27 @@ lifecycleRegistry.settlePrompt(bridgePrompt, {
 });
 await new Promise(resolve => setTimeout(resolve, 40));
 assert.equal(sent.length, 1, 'bridge sends one custom completion message');
+assert.equal(typeof registeredMessageRenderer, 'function');
+const renderedNotification = registeredMessageRenderer(
+  sent[0].message,
+  { expanded: false, outputPad: 0 },
+  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
+);
+assert.ok(
+  renderedNotification
+    .render(200)
+    .some(line => line.trimEnd() === 'shepherd_watcher completion: planner: bridge done'),
+);
 assert.equal(sent[0].message.customType, 'shepherd.prompt.completion');
 assert.equal(sent[0].message.details.completions[0].promptId, bridgePrompt.id);
 assert.equal(sent[0].message.details.completions[0].agentId, bridgeAgent.id);
+const notificationFirstLine = sent[0].message.content.split('\n')[0];
+assert.equal(notificationFirstLine, 'shepherd_watcher completion: planner: bridge done');
+assert.doesNotMatch(notificationFirstLine, /shepherd-(?:watch|prompt)-/);
+assert.match(sent[0].message.content, /\ncall:\n    shepherd_watch \{"id":".*"\}/);
+assert.match(sent[0].message.content, /\nreturn:\n    \[\{"promptId":"/);
+assert.match(sent[0].message.content, /\ndetails:\n/);
+assert.doesNotMatch(sent[0].message.content, /Process the structured completion details/);
 assert.deepEqual(sent[0].options, { deliverAs: 'followUp', triggerTurn: true });
 promptWatcherService.shutdown();
 console.log('All watcher assertions passed.');

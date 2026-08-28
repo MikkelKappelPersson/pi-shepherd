@@ -124,6 +124,7 @@ const probe = `
   const pi = {
     registerTool() {},
     registerCommand() {},
+    registerMessageRenderer() {},
     on(event, handler) { calls.events.push({ event, handler }); },
   };
   const mod = await import(${JSON.stringify(indexUrl)});

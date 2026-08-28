@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
-import { Text } from '@earendil-works/pi-tui';
+import { Box, Text } from '@earendil-works/pi-tui';
 import { Type, type Static } from 'typebox';
 import {
   AgentScopeSchema,
@@ -299,23 +299,68 @@ export function setPromptWatcherSessionActive(active: boolean): void {
   watcherParentSessionActive = active;
 }
 
+function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
+  pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const summary = firstLine.startsWith('shepherd_watcher ')
+      ? firstLine.slice('shepherd_watcher '.length)
+      : firstLine.startsWith('Shepherd watcher ')
+        ? firstLine.slice('Shepherd watcher '.length)
+        : firstLine;
+    const rendered = [
+      theme.fg('toolTitle', theme.bold('shepherd_watcher')) +
+        (summary ? ` ${theme.fg('accent', summary)}` : ''),
+      ...lines.map(line =>
+        ['call:', 'return:', 'details:'].includes(line)
+          ? theme.fg('accent', line)
+          : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    // Custom message renderers replace Pi's default custom-message component,
+    // including its themed background. Recreate that container here while
+    // keeping the Shepherd-specific title and section styling.
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  });
+}
+
 /** Narrow extension-owned bridge from core watcher completions to pi. */
 function configurePromptWatcherBridge(pi: ExtensionAPI): void {
+  registerPromptCompletionRenderer(pi);
   configurePromptWatcherNotifications(notification => {
     if (!watcherParentSessionActive) return;
+    const promptIds = notification.completions.map(completion => completion.promptId);
     const summary = notification.completions
       .map(completion => {
         const identity = completion.label
           ? `${completion.agent ?? completion.agentId}: ${completion.label}`
           : completion.agent ?? completion.agentId;
-        return `${completion.promptId} (${identity}) ${completion.status}`;
+        return `${identity} ${completion.status}`;
       })
       .join(', ');
-    const content = [
-      `Shepherd watcher ${notification.watcherId} completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
-      'Process the structured completion details below; promptId is the primary correlation key.',
-      JSON.stringify(notification.completions),
-    ].join('\n');
+    const returnCode =
+      notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
+    const content = formatUserFacingText({
+      content: [
+        {
+          type: 'text',
+          text: `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
+        },
+      ],
+      details: {
+        call: {
+          name: 'shepherd_watch',
+          arguments: { id: promptIds.length === 1 ? promptIds[0] : promptIds },
+        },
+        watcherId: notification.watcherId,
+        promptIds,
+        returnCode,
+        returnValue: notification.completions,
+      },
+    });
     try {
       const sendResult: any = pi.sendMessage(
         {
