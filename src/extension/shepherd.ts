@@ -571,21 +571,18 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd (manage Herdr agents)',
     description: [
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
-      'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents are the created workers.',
+      'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). Lifecycle operations are separate tools: shepherd_spawn creates an idle agent, shepherd_prompt submits work, shepherd_wait collects results, shepherd_status inspects, shepherd_close ends it, shepherd_read reads terminal output. Bundled agent names are scout, planner, worker, and reviewer; call agents before guessing a name.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: spawn, prompt, wait, status, close, read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
     promptSnippet:
-      'Shepherd (orchestrator): manage specialized agents (also called sheep) and, when enabled, their fieldnotes (durable artifacts) inside Herdr panes.',
+      'Subagent orchestration tool for herdr.',
     promptGuidelines: [
       'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
-      'After spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After prompt, copy the printed prompt id into shepherd_wait. For parallel wait, pass an array of prompt ids. Do not use a Herdr pane id; lifecycle ids are session-scoped.',
       'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
       'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
-      'For sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call shepherd_wait once with an array of prompt ids.',
-      'Waiting does not close an agent. Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.',
     ],
     parameters: Type.Object(
       {
@@ -630,7 +627,10 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
       'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model, and a new tab. Use placement pane_right or pane_down to split the current pane.',
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'Spawn a new agent in a Herdr pane.',
+    promptGuidelines: [
+            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_wait. For parallel wait, pass an array of prompt ids. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
+            ],
     parameters: Type.Object({
       agent: Type.String({
         description:
@@ -672,7 +672,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       'Submit one message to a spawned agent and return immediately. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_wait.',
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'prompt a spawned agent with a task or question.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
@@ -714,7 +714,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       'Wait for one or more prompts to settle. Pass the prompt id printed by shepherd_prompt, or an array of prompt ids for parallel work. Results stay in array input order; waiting does not close agents.',
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'Wait for agent(s) to complete their work and return results.',
+    promptGuidelines: [
+      'When using shepherd_wait, waiting does not close an agent. Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.',
+      'When using shepherd_wait, for sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call shepherd_wait once with an array of prompt ids.'
+    ],
     parameters: Type.Object({
       id: Type.Union(
         [
@@ -764,7 +768,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       "Inspect an agent's current state without focusing or mutating its Herdr pane. Pass the agent id printed by shepherd_spawn; do not pass a prompt id or Herdr pane id.",
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'Check the current state of a spawned agent.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
@@ -795,7 +799,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       'Close an owned agent and cancel any unresolved prompt. Pass the agent id printed by shepherd_spawn, not a Herdr pane id. Waiting does not close agents, so close each agent when finished.',
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'Close an owned agent and cancel any unresolved prompt.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
@@ -826,7 +830,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       'Read recent terminal output for diagnostics. Pass an agent name, Herdr pane id, or an agent id; unlike lifecycle tools, this diagnostic tool intentionally accepts several target forms.',
     promptSnippet:
-      'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
+      'Read recent terminal output for diagnostics.',
     parameters: Type.Object({
       name: Type.String({
         description: 'Agent name, Herdr pane id, or opaque agent id of the target.',
