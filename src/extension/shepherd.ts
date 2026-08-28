@@ -219,6 +219,15 @@ function publicToolCall(action: string, args: ShepherdArgs): Record<string, unkn
   return { name, arguments: parameters };
 }
 
+function displayAgentName(agentId: string): string {
+  try {
+    const handle = lifecycleRegistry.getAgent({ id: agentId }).handle;
+    return handle.label ? `${handle.agent}: ${handle.label}` : handle.agent;
+  } catch {
+    return agentId;
+  }
+}
+
 function formatUserFacingText(result: any): string | undefined {
   const body = result?.content?.[0]?.type === 'text' ? (result.content[0].text ?? '') : undefined;
   const details = result?.details && typeof result.details === 'object' ? result.details : {};
@@ -242,9 +251,7 @@ function formatUserFacingText(result: any): string | undefined {
       return `   ${displayKey}: ${displayValue ?? 'null'}`;
     });
   const callText = `${call.name} ${JSON.stringify(call.arguments ?? {})}`;
-  const renderedReturn = typeof returnValue === 'string'
-    ? returnValue
-    : JSON.stringify(returnValue ?? null);
+  const renderedReturn = formatReturnValue(returnValue);
   return [
     body ?? '(no output)',
     '',
@@ -255,6 +262,15 @@ function formatUserFacingText(result: any): string | undefined {
     `    ${renderedReturn}`,
     ...(visibleDetails.length ? ['', 'details:', ...visibleDetails] : []),
   ].join('\n');
+}
+
+function formatReturnValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const items = value.map(item => JSON.stringify(item));
+    return `[${items.join(',\n     ')}]`;
+  }
+  return JSON.stringify(value ?? null);
 }
 
 function withUserFacingContent(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
@@ -342,9 +358,10 @@ export async function doAction(
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
       const handle = await promptAgent(a.id ?? a.handle, a.message, { timeout: timeoutMs });
+      const agent = lifecycleRegistry.getAgent(handle.agentId).handle;
       const artifact = lifecycleRegistry.promptArtifact(handle);
       return textResult(
-        `Prompt submitted (${handle.id}); note: ${artifact.artifact?.relativePath ?? 'none'}.\nPrompt id for shepherd_wait: ${formatIdForModel(handle.id)}\nNext: call shepherd_wait with this id. For parallel work, pass an array of prompt ids.`,
+        `Prompted ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
         {
           id: handle.id,
           returnValue: {
@@ -366,9 +383,8 @@ export async function doAction(
       const result = await waitPrompts(a.id ?? a.handle, { timeout: timeoutMs });
       const results = Array.isArray(result) ? result : [result];
       const returnCode = results.find(r => typeof r.returnCode === 'number' && r.returnCode !== 0)?.returnCode ?? 0;
-      const summary = results.length === 1
-        ? `wait completed (${results[0]?.status ?? 'unknown'}).`
-        : `wait completed for ${results.length} prompts.`;
+      const names = results.map(item => displayAgentName(item.agentId));
+      const summary = `waited for ${names.join(', ')}`;
       return textResult(summary, { returnCode, result, returnValue: result });
     }
     case 'status': {
@@ -384,7 +400,10 @@ export async function doAction(
     case 'close': {
       const a: any = args;
       const handle = closeAgent(a.id ?? a.handle);
-      return textResult(`Closed agent ${handle.id}.`, { id: handle.id, returnValue: { id: handle.id } });
+      return textResult(`closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`, {
+        id: handle.id,
+        returnValue: { id: handle.id },
+      });
     }
     case 'agents': {
       // List available agent definitions for the shepherd's herd.
