@@ -25,6 +25,9 @@ import {
   type PromptHandle,
   type PromptHandleInput,
   type PromptResult,
+  type WatcherCompletion,
+  type WatcherNotification,
+  type WatcherRegistration,
   type AgentStatus,
   formatAgentName,
   validateAgentLabel,
@@ -262,6 +265,252 @@ export async function promptAgent(
     });
     throw new Error(`Prompt submission failed: ${String((error as any)?.message ?? error)}`);
   }
+}
+
+export type PromptWatcherNotifier = (notification: WatcherNotification) => void | Promise<void>;
+
+/**
+ * Non-blocking prompt completion observer. The registry owns settlement and
+ * watcher deduplication; this service only polls Herdr for prompts that have
+ * no completion result yet and bridges completions to the parent extension.
+ */
+export class PromptWatcherService {
+  private timer?: ReturnType<typeof setInterval>;
+  private ticking = false;
+  private notifier?: PromptWatcherNotifier;
+  private readonly registry: typeof lifecycleRegistry;
+  private readonly intervalMs: number;
+  private readonly coalesceMs: number;
+  private readonly queued = new Map<string, WatcherCompletion[]>();
+  private readonly promptOrder = new Map<string, Map<string, number>>();
+  private readonly remaining = new Map<string, number>();
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  constructor(
+    registry = lifecycleRegistry,
+    notifier?: PromptWatcherNotifier,
+    intervalMs = 500,
+    coalesceMs = 25
+  ) {
+    this.registry = registry;
+    this.notifier = notifier;
+    this.intervalMs = intervalMs;
+    this.coalesceMs = coalesceMs;
+  }
+
+  setNotifier(notifier?: PromptWatcherNotifier): void {
+    this.notifier = notifier;
+  }
+
+  watch(handles: PromptHandleInput | PromptHandleInput[]): WatcherRegistration {
+    // Registration is synchronous, so the id is assigned before any later
+    // settlement can invoke this callback. Keeping it in this closure avoids
+    // putting watcher identity into durable prompt results.
+    let watcherId = '';
+    const registration = this.registry.watchPrompts(handles, completion => {
+      this.queue(watcherId, completion);
+    });
+    watcherId = registration.watcherId;
+    if (registration.pending.length > 0) {
+      this.promptOrder.set(
+        watcherId,
+        new Map(registration.promptIds.map((promptId, index) => [promptId, index]))
+      );
+      this.remaining.set(watcherId, registration.pending.length);
+      this.start();
+    }
+    return registration;
+  }
+
+  /** Stop polling and discard delivery state for the parent session. */
+  shutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.ticking = false;
+    for (const timer of this.flushTimers.values()) clearTimeout(timer);
+    this.flushTimers.clear();
+    this.queued.clear();
+    this.promptOrder.clear();
+    this.remaining.clear();
+    this.registry.clearWatchers();
+  }
+
+  private start(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.tick(), this.intervalMs);
+    // A watcher is lifecycle state, not a reason for a test/host process to
+    // remain alive after its parent has gone away.
+    (this.timer as any).unref?.();
+    void this.tick();
+  }
+
+  private stopIfIdle(): void {
+    if (this.registry.watchedPromptIds().length > 0) return;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  private queue(watcherId: string, completion: WatcherCompletion): void {
+    if (!watcherId) return;
+    const list = this.queued.get(watcherId) ?? [];
+    list.push({ ...completion });
+    this.queued.set(watcherId, list);
+    const remaining = this.remaining.get(watcherId);
+    if (remaining !== undefined) this.remaining.set(watcherId, Math.max(0, remaining - 1));
+    if (!this.flushTimers.has(watcherId)) {
+      const timer = setTimeout(() => this.flush(watcherId), this.coalesceMs);
+      (timer as any).unref?.();
+      this.flushTimers.set(watcherId, timer);
+    }
+    this.stopIfIdle();
+  }
+
+  private flush(watcherId: string): void {
+    this.flushTimers.delete(watcherId);
+    const completions = this.queued.get(watcherId);
+    this.queued.delete(watcherId);
+    if (!completions || completions.length === 0) return;
+    // A watcher still reports prompts as they settle, but when several
+    // completions are coalesced into one notification, keep the array in the
+    // caller's input order. This makes the result deterministic without
+    // delaying an individual completion until earlier prompts finish.
+    const order = this.promptOrder.get(watcherId);
+    if (order) {
+      completions.sort((left, right) =>
+        (order.get(left.promptId) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(right.promptId) ?? Number.MAX_SAFE_INTEGER)
+      );
+    }
+    const notification = { watcherId, completions };
+    if (this.remaining.get(watcherId) === 0) {
+      this.promptOrder.delete(watcherId);
+      this.remaining.delete(watcherId);
+    }
+    try {
+      const result = this.notifier?.(notification);
+      if (result && typeof (result as Promise<void>).catch === 'function') {
+        (result as Promise<void>).catch(() => undefined);
+      }
+    } catch {
+      // The prompt result is already durable; an unavailable parent message
+      // bridge must not corrupt settlement or fieldnote finalization.
+    }
+  }
+
+  private async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const promptIds = this.registry.watchedPromptIds();
+      if (promptIds.length === 0) {
+        this.stopIfIdle();
+        return;
+      }
+      await Promise.all(promptIds.map(promptId => this.observe(promptId)));
+    } finally {
+      this.ticking = false;
+      this.stopIfIdle();
+    }
+  }
+
+  private async observe(promptId: string): Promise<void> {
+    let record: any;
+    try {
+      record = this.registry.getPrompt(promptId);
+    } catch {
+      return;
+    }
+    if (record.settled) return;
+    let agent: any;
+    try {
+      agent = this.registry.getAgent({ id: record.handle.agentId } as AgentHandle);
+    } catch {
+      return;
+    }
+    const paneId = agent.handle.paneId;
+    if (!paneId) return;
+    const signalPath = this.registry.completionSignalPath(agent.handle);
+    const resultPath = this.registry.completionResultPath(agent.handle);
+    const readText = async (): Promise<string> => {
+      if (resultPath) {
+        const text = readLastAssistantText(resultPath).trim();
+        if (text) return text;
+      }
+      return (await readPaneTail(paneId)).trim();
+    };
+    const readError = async (): Promise<string | undefined> => {
+      return extractAgentError(await readPaneTail(paneId));
+    };
+    try {
+      // Use the async Herdr bridge here: watcher registration must return
+      // without synchronously waiting on a child or the Herdr CLI.
+      const out: any = await herdrExec(['agent', 'get', paneId]);
+      const state = String(out?.result?.agent?.agent_status ?? 'unknown').toLowerCase();
+      const seq = out?.result?.agent?.state_change_seq;
+      if (state === 'working') this.registry.observeWorking(record.handle);
+      const signal: any = signalPath ? readCompletionSignal(signalPath) : undefined;
+      const tracking = this.registry.promptTracking(record.handle);
+      if (signal?.signalId && signal.signalId !== tracking.baselineCompletionSignalId) {
+        const failed = signal.type === 'error';
+        this.registry.settlePrompt(record.handle, {
+          promptId,
+          agentId: record.handle.agentId,
+          status: failed ? 'failed' : 'done',
+          ok: !failed,
+          text: await readText(),
+          ...(failed && signal.errorMessage ? { error: signal.errorMessage } : {}),
+          ...(typeof signal.returnCode === 'number' ? { returnCode: signal.returnCode } : {}),
+        });
+        return;
+      }
+      const error = await readError();
+      if (error) {
+        this.registry.settlePrompt(record.handle, {
+          promptId,
+          agentId: record.handle.agentId,
+          status: 'failed',
+          ok: false,
+          returnCode: 1,
+          error,
+        });
+        return;
+      }
+      const sequenceAdvanced =
+        tracking.baselineStateChangeSeq === undefined ||
+        (typeof seq === 'number' && seq !== tracking.baselineStateChangeSeq);
+      if (['idle', 'done', 'blocked'].includes(state) && (tracking.observedWorking || sequenceAdvanced)) {
+        this.registry.settlePrompt(record.handle, {
+          promptId,
+          agentId: record.handle.agentId,
+          status: state === 'blocked' ? 'blocked' : state === 'done' ? 'done' : 'idle',
+          ok: state !== 'blocked',
+          text: await readText(),
+        });
+      }
+    } catch {
+      const error = await readError();
+      if (error) {
+        this.registry.settlePrompt(record.handle, {
+          promptId,
+          agentId: record.handle.agentId,
+          status: 'failed',
+          ok: false,
+          returnCode: 1,
+          error,
+        });
+      }
+    }
+  }
+}
+
+export const promptWatcherService = new PromptWatcherService();
+
+export function configurePromptWatcherNotifications(notifier?: PromptWatcherNotifier): void {
+  promptWatcherService.setNotifier(notifier);
+}
+
+export function shutdownPromptWatchers(): void {
+  promptWatcherService.shutdown();
 }
 
 async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<PromptResult> {

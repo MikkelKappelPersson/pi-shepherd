@@ -41,8 +41,8 @@ existing PromptRecord
    Completion notifications include prompt id, agent id, status, return code,
    error, and the last assistant message.
 4. **One-shot watchers** — each watched prompt is delivered once per watcher.
-   A watcher automatically finishes when all its prompts settle. `unwatch`
-   removes delivery interest but does not cancel prompt execution.
+   A watcher automatically finishes when all its prompts settle; there is no
+   separate cancellation operation for watcher delivery.
 5. **Existing wait remains authoritative for its callers** — do not modify the
    `shepherd_wait` tool, its schemas, its public result format, or its current
    timeout/cancellation semantics. Watcher observation may settle the shared
@@ -64,7 +64,7 @@ wait types:
 - watcher handle and watcher result types;
 - watcher records with prompt ids, delivery state, and lifecycle state;
 - prompt-to-watcher indexes;
-- registration, lookup, completion, and unwatch operations;
+- registration, completion, and automatic cleanup operations;
 - normalization and validation for one id or an array of ids.
 
 The existing prompt result type should be reused for completed entries wherever
@@ -106,7 +106,7 @@ settlement or fieldnote finalization.
 
 ## Phase 4 — Register tools and integrate guidance
 
-Add `shepherd_watch` and `shepherd_unwatch` to the extension surface:
+Add `shepherd_watch` to the extension surface:
 
 - declare all tool metadata directly in each `pi.registerTool` call;
 - use the existing public result formatting and opaque-id conventions;
@@ -123,10 +123,10 @@ Ensure watcher state is bounded to the parent extension session:
 
 - clean active monitors at `session_shutdown`;
 - remove watcher registrations on reload/session replacement;
-- do not close child panes as part of unwatch or watcher completion;
+- do not close child panes as part of watcher completion;
 - retain existing child result files and fieldnotes;
 - avoid duplicate monitors after reload or repeated registration;
-- ensure completion after an unwatch is still available to `shepherd_wait`.
+- ensure completion remains available to `shepherd_wait` after notification delivery.
 
 ## Phase 6 — Verification and rollout
 

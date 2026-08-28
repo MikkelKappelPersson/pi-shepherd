@@ -11,9 +11,15 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { discoverAgents } from './src/core/discovery.ts';
 import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/config.ts';
 import { openSettings } from './src/extension/settings-ui.ts';
-import { doAction, registerShepherdTools, type ShepherdArgs } from './src/extension/shepherd.ts';
+import {
+  doAction,
+  registerShepherdTools,
+  setPromptWatcherSessionActive,
+  type ShepherdArgs,
+} from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
+import { shutdownPromptWatchers } from './src/core/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
@@ -345,6 +351,7 @@ function currentCwd(): string {
 
 export default function (pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
+    setPromptWatcherSessionActive(true);
     activeSessionCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
@@ -354,6 +361,11 @@ export default function (pi: ExtensionAPI) {
     bindSessionOwner(ctx.sessionManager?.getSessionId?.());
   });
   pi.on('session_shutdown', (_event, _ctx) => {
+    // Watchers are parent-session scoped. Stop timers and discard delivery
+    // registrations, but leave prompts, child panes, result files, and notes
+    // untouched for normal lifecycle retention.
+    setPromptWatcherSessionActive(false);
+    shutdownPromptWatchers();
     // Drop the binding on teardown so a reload/new-session cycle without a
     // fresh identity never attributes fresh panes to a stale session.
     bindSessionOwner(undefined);

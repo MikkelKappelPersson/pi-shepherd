@@ -24,6 +24,7 @@ const expectedNames = [
   'shepherd_spawn',
   'shepherd_prompt',
   'shepherd_wait',
+  'shepherd_watch',
   'shepherd_status',
   'shepherd_close',
   'shepherd_read',
@@ -31,7 +32,7 @@ const expectedNames = [
 assert.deepEqual(
   registered.map(tool => tool.name),
   expectedNames,
-  'registerShepherdTools must register the seven shepherd tools'
+  'registerShepherdTools must register the nine shepherd tools'
 );
 
 let failed = 0;
@@ -44,7 +45,7 @@ for (const tool of registered) {
       schema.properties && typeof schema.properties === 'object',
       'root schema must declare properties'
     );
-    if (['shepherd_prompt', 'shepherd_wait', 'shepherd_status', 'shepherd_close'].includes(tool.name)) {
+    if (['shepherd_prompt', 'shepherd_wait', 'shepherd_watch', 'shepherd_status', 'shepherd_close'].includes(tool.name)) {
       assert.ok('id' in schema.properties, `${tool.name} must expose a top-level id`);
       assert.ok(!('handle' in schema.properties), `${tool.name} must not expose a public handle`);
     }

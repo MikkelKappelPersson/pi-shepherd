@@ -46,12 +46,13 @@
     "effective-prompt:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-effective-prompt.mjs",
     "registry:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-registry.mjs",
     "multi-wait:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-multi-wait.mjs",
+    "watchers:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-watchers.mjs",
     "artifact-sessions:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-artifact-sessions.mjs",
     "settings:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-settings.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
     "extract:system-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/extract-pi-system-prompt.mjs",
-    "test": "npm run schemas:test && npm run cli:test && npm run parent-surface:test && npm run status-widget:test && npm run command-ux:test && npm run discovery:test && npm run launch:test && npm run effective-prompt:test && npm run registry:test && npm run multi-wait:test && npm run artifact-sessions:test && npm run settings:test"
+    "test": "npm run schemas:test && npm run cli:test && npm run parent-surface:test && npm run status-widget:test && npm run command-ux:test && npm run discovery:test && npm run launch:test && npm run effective-prompt:test && npm run registry:test && npm run multi-wait:test && npm run watchers:test && npm run artifact-sessions:test && npm run settings:test"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

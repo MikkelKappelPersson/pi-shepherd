@@ -2,7 +2,7 @@
  * Shepherd tool — the model-facing `shepherd` tool for the parent pi session.
  *
  * One tool surface:
- *   - spawn/prompt/wait/status/read/close/prune — manage pi agents living in
+ *   - spawn/prompt/wait/watch/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
  * Registered by index.ts in the parent session only. Launched agents get the
@@ -21,10 +21,19 @@ import {
   SpawnParams,
   LifecyclePromptParams,
   WaitParams,
+  WatchParams,
   LifecycleStatusParams,
   LifecycleCloseParams,
 } from '../core/types.ts';
-import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from '../core/lifecycle.ts';
+import {
+  startAgent,
+  promptAgent,
+  waitPrompts,
+  statusAgent,
+  closeAgent,
+  promptWatcherService,
+  configurePromptWatcherNotifications,
+} from '../core/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './config.ts';
 import { lifecycleRegistry } from '../core/orchestration.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
@@ -98,6 +107,7 @@ const AnyShepherdUnion = Type.Union(
     SpawnParams,
     LifecyclePromptParams,
     WaitParams,
+    WatchParams,
     LifecycleStatusParams,
     LifecycleCloseParams,
     ReadParams,
@@ -282,6 +292,50 @@ function reusableText(lastComponent: unknown): Text {
   return lastComponent instanceof Text ? lastComponent : new Text('', 0, 0);
 }
 
+let watcherParentSessionActive = true;
+
+/** Enable/disable delivery without changing the core watcher's state model. */
+export function setPromptWatcherSessionActive(active: boolean): void {
+  watcherParentSessionActive = active;
+}
+
+/** Narrow extension-owned bridge from core watcher completions to pi. */
+function configurePromptWatcherBridge(pi: ExtensionAPI): void {
+  configurePromptWatcherNotifications(notification => {
+    if (!watcherParentSessionActive) return;
+    const summary = notification.completions
+      .map(completion => {
+        const identity = completion.label
+          ? `${completion.agent ?? completion.agentId}: ${completion.label}`
+          : completion.agent ?? completion.agentId;
+        return `${completion.promptId} (${identity}) ${completion.status}`;
+      })
+      .join(', ');
+    const content = [
+      `Shepherd watcher ${notification.watcherId} completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
+      'Process the structured completion details below; promptId is the primary correlation key.',
+      JSON.stringify(notification.completions),
+    ].join('\n');
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.prompt.completion',
+          content,
+          display: true,
+          details: notification,
+        },
+        { deliverAs: 'followUp', triggerTurn: true }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort. The completion remains in the lifecycle
+      // prompt registry and can still be retrieved by shepherd_wait.
+    }
+  });
+}
+
 type ShepherdContext = {
   cwd: string;
   model?: DelegatorModel;
@@ -384,6 +438,20 @@ export async function doAction(
       const names = results.map(item => displayAgentName(item.agentId));
       const summary = `waited for ${names.join(', ')}`;
       return textResult(summary, { returnCode, result, returnValue: result });
+    }
+    case 'watch': {
+      const a: any = args;
+      const registration = promptWatcherService.watch(a.id);
+      const summary = registration.pending.length > 0
+        ? `watching ${registration.pending.length} prompt${registration.pending.length === 1 ? '' : 's'} asynchronously`
+        : 'watch registered; all prompts were already settled';
+      return textResult(summary, {
+        watcherId: registration.watcherId,
+        promptIds: registration.promptIds,
+        pending: registration.pending,
+        completed: registration.completed,
+        returnValue: registration,
+      });
     }
     case 'status': {
       const a: any = args;
@@ -537,7 +605,10 @@ async function executeShepherd(
   signal?: AbortSignal,
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
-  if (!isHerdrAvailable()) {
+  // Watch registration/unregistration operate on the parent lifecycle
+  // registry and remain useful even if Herdr briefly disappears. The watcher
+  // will resume polling when the runtime is reachable again.
+  if (!isHerdrAvailable() && label !== 'watch') {
     return withUserFacingContent(unavailableResult(label, args));
   }
   try {
@@ -566,6 +637,7 @@ async function executeShepherd(
 }
 
 export function registerShepherdTools(pi: ExtensionAPI) {
+  configurePromptWatcherBridge(pi);
   pi.registerTool({
     name: 'shepherd',
     label: 'Shepherd (manage Herdr agents)',
@@ -573,14 +645,15 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
       'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: spawn, prompt, wait, status, close, read.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
     promptSnippet:
       'Subagent orchestration tool for herdr.',
     promptGuidelines: [
-      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait or shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+      'Use shepherd_watch after shepherd_prompt when the parent should continue without blocking; it accepts one prompt id or an array and sends custom completion follow-ups. Use shepherd_wait when a deterministic barrier and input-order results are needed. Waiting does not close an agent; close each agent explicitly when finished.',
       'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
       'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
     ],
@@ -753,6 +826,50 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof WaitParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
+    renderResult: (result, options, theme, context) =>
+      renderUserFacingResult(result, options, theme, context),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_watch',
+    label: 'Shepherd: watch prompt',
+    description:
+      'Register a non-blocking one-shot watcher for one prompt or an array of prompt ids. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Use shepherd_wait when a deterministic blocking barrier is required.',
+    promptSnippet:
+      'Watch prompt completion asynchronously without blocking the parent turn.',
+    promptGuidelines: [
+      'Pass prompt ids returned by shepherd_prompt, never agent ids or Herdr pane ids.',
+      'Array watchers report each prompt as it settles and may coalesce close-together completions into one notification. Use shepherd_wait for input-order barrier semantics.',
+    ],
+    parameters: Type.Object({
+      id: Type.Union(
+        [
+          Type.String({
+            description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
+          }),
+          Type.Array(
+            Type.String({
+              description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
+            }),
+            {
+              minItems: 1,
+              description: 'Array of opaque prompt ids; completions are reported independently as they settle.',
+            }
+          ),
+        ],
+        {
+          description: 'One opaque prompt id or a non-empty array of prompt ids returned by shepherd_prompt.',
+        }
+      ),
+    }),
+    prepareArguments: input => prepareForSchema<Omit<Static<typeof WatchParams>, 'action'>>(input),
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd('watch', { action: 'watch', ...params } as ShepherdArgs, ctx, signal, onUpdate),
     renderCall(_args, _theme, context) {
       const component = reusableText(context.lastComponent);
       component.setText('');

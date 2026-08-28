@@ -79,6 +79,26 @@ export interface PromptResult {
   artifactSession?: ShepherdSession;
 }
 
+/** A prompt completion enriched with the persistent agent's display identity. */
+export interface WatcherCompletion extends PromptResult {
+  agent?: string;
+  label?: string;
+}
+
+export interface WatcherRegistration {
+  watcherId: string;
+  promptIds: string[];
+  pending: string[];
+  completed: PromptResult[];
+}
+
+export interface WatcherNotification {
+  watcherId: string;
+  completions: WatcherCompletion[];
+}
+
+export type PromptWatcherCallback = (completion: WatcherCompletion) => void;
+
 export class LifecycleError extends Error {
   readonly code: 'unknown_handle' | 'closed_handle' | 'active_prompt' | 'invalid_handle';
   constructor(code: LifecycleError['code'], message: string) {
@@ -145,8 +165,15 @@ export class LifecycleRegistry {
   private readonly sessionId = randomUUID().slice(0, 8);
   private readonly agents = new Map<string, AgentRecord>();
   private readonly prompts = new Map<string, PromptRecord>();
+  private readonly watchers = new Map<string, {
+    promptIds: string[];
+    pending: Set<string>;
+    callback?: PromptWatcherCallback;
+    delivered: Set<string>;
+  }>();
+  private readonly promptWatchers = new Map<string, Set<string>>();
 
-  private id(kind: 'agent' | 'prompt'): string {
+  private id(kind: 'agent' | 'prompt' | 'watch'): string {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
   }
 
@@ -263,6 +290,73 @@ export class LifecycleRegistry {
     return { ...this.getPrompt(input).handle };
   }
 
+  /** Return the terminal result when one is already available. */
+  promptResult(input: PromptHandleInput | unknown): PromptResult | undefined {
+    return this.getPrompt(input).settled ? { ...this.getPrompt(input).result! } : undefined;
+  }
+
+  /**
+   * Register a one-shot observer for specific prompt invocations. This method
+   * is deliberately synchronous: callers receive settled results that already
+   * exist and pending ids without waiting for the child.
+   */
+  watchPrompts(
+    handles: PromptHandleInput | PromptHandleInput[],
+    callback?: PromptWatcherCallback
+  ): WatcherRegistration {
+    const values = Array.isArray(handles) ? handles : [handles];
+    if (values.length === 0) {
+      throw new LifecycleError('invalid_handle', 'Expected one or more opaque prompt ids to watch.');
+    }
+    const promptIds = values.map(value => this.canonicalPromptHandle(value).id);
+    if (new Set(promptIds).size !== promptIds.length) {
+      throw new LifecycleError('invalid_handle', 'A watcher cannot contain duplicate prompt ids.');
+    }
+    const watcherId = this.id('watch');
+    const pending = new Set<string>();
+    const completed: PromptResult[] = [];
+    for (const promptId of promptIds) {
+      const prompt = this.prompts.get(promptId)!;
+      if (prompt.settled) completed.push({ ...prompt.result! });
+      else pending.add(promptId);
+    }
+    if (pending.size > 0) {
+      this.watchers.set(watcherId, {
+        promptIds: [...promptIds],
+        pending,
+        callback,
+        delivered: new Set(),
+      });
+      for (const promptId of pending) {
+        let watchers = this.promptWatchers.get(promptId);
+        if (!watchers) this.promptWatchers.set(promptId, (watchers = new Set()));
+        watchers.add(watcherId);
+      }
+    }
+    return { watcherId, promptIds, pending: [...pending], completed };
+  }
+
+  /** Prompt ids that still have at least one active watcher. */
+  watchedPromptIds(): string[] {
+    return [...this.promptWatchers.keys()];
+  }
+
+  /** Remove all watchers during parent session teardown. */
+  clearWatchers(): void {
+    for (const [watcherId, watcher] of this.watchers) this.removeWatcher(watcherId, watcher);
+    this.watchers.clear();
+    this.promptWatchers.clear();
+  }
+
+  private removeWatcher(watcherId: string, watcher: { pending: Set<string> }): void {
+    for (const promptId of watcher.pending) {
+      const watchers = this.promptWatchers.get(promptId);
+      watchers?.delete(watcherId);
+      if (watchers && watchers.size === 0) this.promptWatchers.delete(promptId);
+    }
+    this.watchers.delete(watcherId);
+  }
+
   wait(handle: PromptHandleInput | unknown): Promise<PromptResult> {
     return this.getPrompt(handle).promise;
   }
@@ -343,6 +437,27 @@ export class LifecycleRegistry {
       prompt.onSettled?.({ ...prompt.result });
     } catch {
       /* persistence must not break lifecycle settlement */
+    }
+    // Notify each watcher exactly once, using the prompt id as the primary
+    // correlation key. Settlement is still authoritative in the prompt
+    // record; a callback failure must never affect waiters or artifacts.
+    const watcherIds = [...(this.promptWatchers.get(prompt.handle.id) ?? [])];
+    this.promptWatchers.delete(prompt.handle.id);
+    const agentForWatcher = this.agents.get(prompt.handle.agentId)?.handle;
+    for (const watcherId of watcherIds) {
+      const watcher = this.watchers.get(watcherId);
+      if (!watcher || watcher.delivered.has(prompt.handle.id)) continue;
+      watcher.delivered.add(prompt.handle.id);
+      watcher.pending.delete(prompt.handle.id);
+      try {
+        watcher.callback?.({
+          ...prompt.result,
+          ...(agentForWatcher ? { agent: agentForWatcher.agent, label: agentForWatcher.label } : {}),
+        });
+      } catch {
+        /* notification delivery must not break lifecycle settlement */
+      }
+      if (watcher.pending.size === 0) this.watchers.delete(watcherId);
     }
     const agent = this.agents.get(prompt.handle.agentId);
     if (agent?.activePromptId === prompt.handle.id) {

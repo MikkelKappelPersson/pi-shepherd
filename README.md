@@ -4,13 +4,14 @@ A Herdr-native pi extension for explicit agent lifecycle orchestration.
 The Shepherd is the parent pi session and orchestrator. Its herd is made up of
 specialized agents (also called sheep), created from their Markdown
 definitions and visible in Herdr. The model-facing surface has one umbrella
-control tool plus six composable lifecycle tools:
+control tool plus eight composable lifecycle tools:
 
 ```text
 shepherd({ action: "agents" | "herd" | "prune" })
 shepherd_spawn({ agent, label, placement?, cwd?, model? }) -> agent id
 shepherd_prompt(agent id, message, options) -> prompt id
 shepherd_wait(prompt id | prompt ids) -> Result | Result[]
+shepherd_watch(prompt id | prompt ids) -> watcher id (non-blocking)
 shepherd_status(agent id) -> Status
 shepherd_close(agent id) -> void
 shepherd_read(target, options) -> terminal output
@@ -41,9 +42,25 @@ result = shepherd_wait({ id: prompt.id })
 shepherd_close({ id: agent.id })
 ```
 
-Prompt submission is non-blocking. `shepherd_wait` is the synchronization point.
-Every tool result includes `details.returnCode`: `0` means success; `1` is a
-failure; `2` is blocked; `124` is a timeout; and `130` is cancelled. The spawned pane prints the effective provider-qualified child model and exact
+For work that should notify the parent without blocking its current turn:
+
+```text
+watcher = shepherd_watch({ id: prompt.id })
+# The call returns immediately; process the custom Shepherd follow-up when it arrives.
+```
+
+Prompt submission is non-blocking. Use `shepherd_wait` as a deterministic
+synchronization point, or use `shepherd_watch` when the parent should continue
+without blocking. A watcher accepts one prompt id or an array of prompt ids and
+returns immediately with `watcherId`, `pending`, and any `completed` results
+that were already available. Later completions arrive as a custom Shepherd
+follow-up message containing the watcher id, exact prompt id and agent id,
+status, return code, error, and the child's final assistant text. Array watcher
+completions are delivered as they settle and close-together completions may be
+coalesced into one notification; coalesced arrays preserve the watch input
+order. Watchers finish automatically after all
+watched prompts settle; they do not close agents. Every tool result
+includes `details.returnCode`: `0` means success; `1` is a failure; `2` is blocked; `124` is a timeout; and `130` is cancelled. The spawned pane prints the effective provider-qualified child model and exact
 `pi` invocation for diagnostics. For parallel
 work, spawn multiple agents, prompt each one, then wait on the array of prompt ids:
 
@@ -73,6 +90,7 @@ needed.
 | `shepherd_spawn` | Create an idle persistent agent in a background Herdr tab (or requested pane/workspace placement) |
 | `shepherd_prompt` | Submit one message using an agent id; returns a prompt id immediately |
 | `shepherd_wait` | Wait for one or many prompt ids |
+| `shepherd_watch` | Register a non-blocking watcher for one or many prompt ids |
 | `shepherd_status` | Inspect an agent id without focusing or mutating Herdr |
 | `shepherd_close` | Explicitly close an owned agent id and cancel unresolved prompts |
 | `shepherd_read` | Read recent output for diagnostics |

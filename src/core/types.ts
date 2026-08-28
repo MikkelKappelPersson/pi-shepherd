@@ -35,6 +35,23 @@ export const LifecyclePromptParams = Type.Object({
   message: Type.String({ description: 'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.' }),
   timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. The completion timeout belongs to shepherd_wait.' })),
 });
+export const WatchParams = Type.Object({
+  action: Type.Literal('watch', {
+    description: 'Register a non-blocking one-shot watcher for prompt completions.',
+  }),
+  id: Type.Union(
+    [
+      PromptIdSchema,
+      Type.Array(PromptIdSchema, {
+        minItems: 1,
+        description: 'Array of opaque prompt ids; completions are reported as each prompt settles.',
+      }),
+    ],
+    {
+      description: 'One opaque prompt id or a non-empty array of prompt ids returned by shepherd_prompt.',
+    }
+  ),
+});
 export const WaitParams = Type.Object({
   action: Type.Literal('wait', {
     description: 'Wait for one or more prompt ids; agents remain alive.',

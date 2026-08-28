@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed specification.
+Implemented. Focused registry, notification, schema, and lifecycle tests pass;
+live Herdr verification remains an operational follow-up.
 
 ## Summary
 
@@ -47,7 +48,6 @@ spawn
 - Do not watch by Herdr pane id or infer a prompt from an agent id.
 - Do not make watcher registration block until a child completes.
 - Do not use a synthetic user message for a Shepherd-generated notification.
-- Do not cancel a prompt or close an agent when a watcher is removed.
 - Do not automatically close agents when watched prompts complete.
 - Do not make watcher notifications depend on the parent calling another
   blocking tool.
@@ -62,8 +62,7 @@ prompt invocation, not all future work submitted to an agent.
 ### Watcher
 
 A one-shot subscription associated with one or more prompt ids. It remains
-active until all watched prompts settle, it is explicitly unwatched, or the
-parent session shuts down.
+active until all watched prompts settle or the parent session shuts down.
 
 ### Completion notification
 
@@ -119,13 +118,6 @@ A representative result is:
 The public Shepherd tool result must continue to use the standard service
 message, `call:`, `return:`, and `details:` structure.
 
-### `shepherd_unwatch({ id })`
-
-`id` is an opaque watcher id. Unwatching stops future notifications for that
-watcher and releases its monitoring resources. It does not settle, cancel, or
-otherwise mutate the underlying prompt. The prompt remains available to
-`shepherd_wait` and to any other watcher.
-
 ## Completion notifications
 
 When a watched prompt settles, Shepherd sends a custom message through the
@@ -161,7 +153,8 @@ as watcher correlation ids.
 For an array watcher, completions should be delivered independently as they
 arrive. Completions occurring close together may be coalesced into one custom
 message containing an array of completion results to avoid triggering one
-parent turn per child.
+parent turn per child. Coalesced completion arrays preserve the watcher's input
+prompt order so their presentation is deterministic.
 
 ## Lifecycle and correctness
 
@@ -181,8 +174,8 @@ parent turn per child.
   against pre-submit idle state and stale completion signals.
 - Successful, failed, blocked, timed-out, and close-cancelled prompts all
   produce terminal watcher results.
-- Watchers and monitor timers are released after completion, unwatch, or parent
-  session shutdown.
+- Watchers and monitor timers are released after completion or parent session
+  shutdown.
 - The watcher must not delete child session files, fieldnotes, or other
   existing retained lifecycle resources.
 - When the parent is shutting down or reloading, no new parent turn should be
@@ -205,5 +198,5 @@ prompt observation, result buffering, deduplication, and cleanup.
 
 The implementation is complete only when focused unit tests and live Herdr
 checks verify single and array watchers, fast completions, notification
-queuing, completion ordering, failure states, duplicate observation, unwatch
-semantics, and parent session cleanup. `npm test` must pass.
+queuing, completion ordering, failure states, duplicate observation, and parent
+session cleanup. `npm test` must pass.
