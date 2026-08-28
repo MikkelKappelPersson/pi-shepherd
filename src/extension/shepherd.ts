@@ -699,15 +699,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('prompt', args, context.expanded);
-      const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_prompt ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
-      return component;
-    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -753,15 +744,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof WaitParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('wait', args, context.expanded);
-      const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_wait ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
-      return component;
-    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -788,15 +770,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('status', args, context.expanded);
-      const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_status ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
-      return component;
-    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -823,15 +796,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('close', args, context.expanded);
-      const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_close ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
-      return component;
-    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -855,15 +819,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof ReadParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('read', { action: 'read', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('read', args, context.expanded);
-      const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_read ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
-      return component;
-    },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
@@ -905,7 +860,27 @@ function renderUserFacingResult(result: any, options: { expanded?: boolean }, th
   const rendered = formatUserFacingText(result);
   if (rendered === undefined) return renderToolResult(result, options, theme, context);
   const component = reusableText(context.lastComponent);
-  component.setText(theme.fg('toolOutput', rendered));
+  const callName = result?.details?.call?.name;
+  if (typeof callName !== 'string') {
+    component.setText(theme.fg('toolOutput', rendered));
+    return component;
+  }
+
+  const lines = rendered.split('\n');
+  const firstLine = lines.shift() ?? '';
+  const prefix = `${callName} `;
+  const summary = firstLine.startsWith(prefix) ? firstLine.slice(prefix.length) : firstLine;
+  const styled =
+    theme.fg('toolTitle', theme.bold(callName)) +
+    (summary ? ` ${theme.fg('accent', summary)}` : '');
+  const remainder = lines
+    .map(line =>
+      ['call:', 'return:', 'details:'].includes(line)
+        ? theme.fg('accent', line)
+        : theme.fg('toolOutput', line)
+    )
+    .join('\n');
+  component.setText(styled + (lines.length ? `\n${remainder}` : ''));
   return component;
 }
 
