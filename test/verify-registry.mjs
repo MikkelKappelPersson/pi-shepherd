@@ -47,11 +47,13 @@ catch (e) {
 }
 try { registry.createPrompt(agent); assert(false, "duplicate active prompt rejected"); } catch (e) { assert(e.code === "active_prompt", "duplicate active prompt rejected"); }
 registry.settlePrompt(prompt, { promptId: prompt.id, agentId: agent.id, status: "done", ok: true, text: "ok" });
+assert((await registry.wait(prompt)).returnCode === 0, "successful prompt includes return code 0");
 assert(registry.status(agent).state === "done", "settlement updates agent state");
 assert(registry.settlePrompt(prompt, { promptId: prompt.id, agentId: agent.id, status: "failed", ok: false }).status === "done", "settlement is idempotent");
 const second = registry.createPrompt(agent);
 registry.close(agent);
 assert((await registry.wait(second)).status === "cancelled", "close cancels unresolved prompt");
+assert((await registry.wait(second)).returnCode === 130, "cancelled prompt includes return code 130");
 assert(registry.status(agent).state === "closed", "close marks agent closed");
 try { registry.getAgent({ id: "foreign" }); assert(false, "unknown handle rejected"); } catch (e) { assert(e.code === "unknown_handle", "unknown handle rejected"); }
 if (failures) process.exit(1);

@@ -16,6 +16,7 @@ import {
   readPaneTail,
   readLastAssistantText,
   readCompletionSignal,
+  readLaunchExitCode,
 } from './herdr.ts';
 import {
   lifecycleRegistry,
@@ -91,6 +92,7 @@ export async function startAgent(
   let tabId = '';
   let workspaceId = '';
   try {
+    const delegatedModel = resolveDelegatedModel(options.model ?? found.model, ctx.model);
     const created = createHerdrInstance(
       formatAgentName(name, label),
       cwd,
@@ -112,16 +114,24 @@ export async function startAgent(
       // An explicit start option wins, then the agent definition, then the
       // parent Shepherd's current provider/model. This keeps slash-command
       // starts and model-facing starts on the same resolution path.
-      model: resolveDelegatedModel(options.model ?? found.model, ctx.model),
+      model: delegatedModel,
       tools: found.tools,
     });
     setCreatedPaneDir(paneId, files.dir);
     // Keep the launch directory registered while the persistent child is alive;
     // its completion sidecar is also the reliable fast-completion signal.
     const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
-    if (!ready.detected) throw new Error(`Agent "${name}" did not become ready.`);
+    if (!ready.detected) {
+      const returnCode = await readLaunchExitCode(paneId);
+      const output = (await readPaneTail(paneId)).trim();
+      const suffix = returnCode === null ? '' : ` (return code ${returnCode})`;
+      throw Object.assign(
+        new Error(`Agent "${name}" did not become ready${suffix}.${output ? `\n${output}` : ''}`),
+        { returnCode: returnCode ?? 1, code: 'agent_not_ready' }
+      );
+    }
     return lifecycleRegistry.registerAgent(
-      { agent: name, label, paneId, tabId, workspaceId },
+      { agent: name, label, model: delegatedModel, paneId, tabId, workspaceId },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         completionResultPath: files.sessionFile,
@@ -223,6 +233,7 @@ export async function promptAgent(
       agentId: prompt.agentId,
       status: 'failed',
       ok: false,
+      returnCode: 1,
       error: String((error as any)?.message ?? error),
     });
     throw new Error(`Prompt submission failed: ${String((error as any)?.message ?? error)}`);
@@ -239,6 +250,7 @@ async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<P
         : 'unknown',
     status: 'failed',
     ok: false,
+    returnCode: 1,
     error: String((error as any)?.message ?? error),
   });
   try {

@@ -90,7 +90,9 @@ export function normalizeModel(model: unknown): string | undefined {
  * wins; otherwise inherit the parent's provider/id when both are available. */
 export function resolveDelegatedModel(agentModel: unknown, parentModel: DelegatorModel | undefined): string | undefined {
 	const explicit = normalizeModel(agentModel);
-	if (explicit) return explicit;
+	// The orchestration API uses "default" as a sentinel when no model was
+	// selected. It means inherit the parent model; it is not a Pi model id.
+	if (explicit && explicit.toLowerCase() !== 'default') return explicit;
 	if (!parentModel || typeof parentModel !== "object") return undefined;
 	const model = parentModel as { provider?: unknown; id?: unknown };
 	const provider = normalizeModel(model.provider);

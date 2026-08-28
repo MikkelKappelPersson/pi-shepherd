@@ -569,6 +569,9 @@ export function writePiLaunchFiles(opts: {
 
 		`export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
 		opts.stayOpen || opts.persistent ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
+		// Keep the effective child invocation visible in the spawned pane. This is
+		// invaluable when a model/provider sentinel (such as "default") is rejected.
+		`printf '%s\\n' ${shellQuote(`Launching: pi ${args.join(" ")}`)}`,
 		`pi ${args.join(" ")}; echo '__SHEPHERD_DONE_'$?'__'`,
 	].join("\n");
 	fs.writeFileSync(scriptFile, launchScript, { mode: 0o700 });
@@ -769,4 +772,9 @@ async function doneSentinelInTail(paneId: string): Promise<number | null> {
 	// Sentinel text alone is not proof (see above) — require pi to be gone.
 	if (!(await piProcessGone(paneId))) return null;
 	return code;
+}
+
+/** Read the exit code emitted by a completed launch script, if available. */
+export async function readLaunchExitCode(paneId: string): Promise<number | null> {
+	return doneSentinelInTail(paneId);
 }

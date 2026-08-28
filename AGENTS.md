@@ -42,6 +42,12 @@ user-file-only.
 - `src/core/herdr.ts` owns Herdr launch, pane, and created-pane registry
   operations.
 - `src/extension/shepherd-done.ts` is the in-tab completion extension.
+- User-facing Shepherd tool results use a consistent structure: first the service
+  message, then a `call:` block containing the actual tool name and JSON
+  arguments, then a `return:` block containing the operation's returned value,
+  then a `details:` block with indented detail entries. This format is the
+  default for every Shepherd tool result, including errors; do not hide the
+  call or return behind expanded output or replace them with only a summary.
 
 ## Invariants
 

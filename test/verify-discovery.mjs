@@ -56,6 +56,8 @@ assert(!!descOf(user, "only-user"), "user scope: includes only-user");
 assert(!!descOf(user, "shared-only"), "user scope: includes shared-only (user2)");
 assert(!descOf(user, "project-pi"), "user scope: excludes project-pi");
 assert(!descOf(user, "proj-shared"), "user scope: excludes proj-shared");
+assert(resolveDelegatedModel("default", { provider: "test-provider", id: "test-model" }) === "test-provider/test-model", "model: default sentinel inherits parent");
+assert(resolveDelegatedModel("explicit/model", { provider: "test-provider", id: "test-model" }) === "explicit/model", "model: explicit model still wins");
 const omitTrue = user.agents.find((a) => a.name === "omit-true");
 const omitFalse = user.agents.find((a) => a.name === "omit-false");
 const omitInvalid = user.agents.find((a) => a.name === "omit-invalid");

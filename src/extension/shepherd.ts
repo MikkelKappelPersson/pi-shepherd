@@ -176,12 +176,21 @@ export function prepareShepherdArguments(input: unknown): ShepherdArgs {
   return args as ShepherdArgs;
 }
 
-function unavailableResult(): AgentToolResult<Record<string, unknown>> {
+function unavailableResult(
+  action?: string,
+  args?: ShepherdArgs
+): AgentToolResult<Record<string, unknown>> {
   return {
     content: [
       { type: 'text', text: `Herd requires a running Herdr session.\n${HERDR_SETUP_HINT}` },
     ],
-    details: { error: 'herdr not available' },
+    details: {
+      ...(action && args ? { call: publicToolCall(action, args) } : {}),
+      code: 'herdr_unavailable',
+      returnCode: 1,
+      returnValue: { code: 'herdr_unavailable', error: 'herdr not available', returnCode: 1 },
+      error: 'herdr not available',
+    },
   };
 }
 
@@ -189,12 +198,68 @@ function textResult(
   text: string,
   details: Record<string, unknown>
 ): AgentToolResult<Record<string, unknown>> {
-  return { content: [{ type: 'text' as const, text }], details };
+  return {
+    content: [{ type: 'text' as const, text }],
+    // Every completed Shepherd operation exposes its return value and a
+    // process-style return code. Individual operations can override these for
+    // a structured/failed/partial result.
+    details: { returnValue: text, returnCode: 0, ...details },
+  };
 }
 
 /** Keep the opaque lifecycle id easy to copy from model-visible tool text. */
 export function formatIdForModel(id: string): string {
   return id;
+}
+
+/** Keep the exact public tool invocation visible alongside its result. */
+function publicToolCall(action: string, args: ShepherdArgs): Record<string, unknown> {
+  const { action: _action, artifactSession: _artifactSession, ...parameters } = args as any;
+  const name = ['herd', 'agents', 'prune'].includes(action) ? 'shepherd' : `shepherd_${action}`;
+  return { name, arguments: parameters };
+}
+
+function formatUserFacingText(result: any): string | undefined {
+  const body = result?.content?.[0]?.type === 'text' ? (result.content[0].text ?? '') : undefined;
+  const details = result?.details && typeof result.details === 'object' ? result.details : {};
+  const call = details.call;
+  if (!call?.name) return body;
+  // executeShepherd embeds the structured text for non-TUI/API callers. Do
+  // not append a second call/return/details block when the renderer sees it.
+  if (typeof body === 'string' && body.includes('\ncall:\n')) return body;
+
+  const returnValue = details.returnValue ?? details.result;
+  const visibleDetails = Object.entries(details)
+    .filter(([key]) => !['call', 'agent', 'label', 'model', 'status', 'artifactSession', 'returnValue', 'result'].includes(key))
+    .sort(([left], [right]) => Number(left === 'returnCode') - Number(right === 'returnCode'))
+    .map(([key, value]) => {
+      let displayKey = key.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`);
+      if (key === 'id' && call.name === 'shepherd_spawn') displayKey = 'agent id';
+      if (key === 'fieldnote' && call.name === 'shepherd_spawn') displayKey = 'agent fieldnote';
+      const displayValue = value === null && key === 'fieldnote'
+        ? 'none'
+        : typeof value === 'string' ? value : JSON.stringify(value);
+      return `   ${displayKey}: ${displayValue ?? 'null'}`;
+    });
+  const callText = `${call.name} ${JSON.stringify(call.arguments ?? {})}`;
+  const renderedReturn = typeof returnValue === 'string'
+    ? returnValue
+    : JSON.stringify(returnValue ?? null);
+  return [
+    body ?? '(no output)',
+    '',
+    'call:',
+    `    ${callText}`,
+    '',
+    'return:',
+    `    ${renderedReturn}`,
+    ...(visibleDetails.length ? ['', 'details:', ...visibleDetails] : []),
+  ].join('\n');
+}
+
+function withUserFacingContent(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
+  const text = formatUserFacingText(result);
+  return text === undefined ? result : { ...result, content: [{ type: 'text', text }] };
 }
 
 function reusableText(lastComponent: unknown): Text {
@@ -252,11 +317,18 @@ export async function doAction(
         ctx
       );
       return textResult(
-        `Started idle agent ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'}\nAgent id for the next call: ${formatIdForModel(handle.id)}\nNext: call shepherd_prompt with this id and your message.`,
+        `spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
         {
           id: handle.id,
           agent: handle.agent,
           label: handle.label,
+          model: handle.model ?? null,
+          returnValue: {
+            id: handle.id,
+            agent: handle.agent,
+            label: handle.label,
+            model: handle.model ?? null,
+          },
           fieldnote: artifactSession?.sessionRelativePath ?? null,
           ...(artifactSession ? { artifactSession } : {}),
         }
@@ -275,6 +347,10 @@ export async function doAction(
         `Prompt submitted (${handle.id}); note: ${artifact.artifact?.relativePath ?? 'none'}.\nPrompt id for shepherd_wait: ${formatIdForModel(handle.id)}\nNext: call shepherd_wait with this id. For parallel work, pass an array of prompt ids.`,
         {
           id: handle.id,
+          returnValue: {
+            id: handle.id,
+            ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
+          },
           ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
           ...(artifact.session ? { artifactSession: artifact.session } : {}),
         }
@@ -288,7 +364,12 @@ export async function doAction(
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
       const result = await waitPrompts(a.id ?? a.handle, { timeout: timeoutMs });
-      return textResult(JSON.stringify(result), { result });
+      const results = Array.isArray(result) ? result : [result];
+      const returnCode = results.find(r => typeof r.returnCode === 'number' && r.returnCode !== 0)?.returnCode ?? 0;
+      const summary = results.length === 1
+        ? `wait completed (${results[0]?.status ?? 'unknown'}).`
+        : `wait completed for ${results.length} prompts.`;
+      return textResult(summary, { returnCode, result, returnValue: result });
     }
     case 'status': {
       const a: any = args;
@@ -298,12 +379,12 @@ export async function doAction(
         state: result.state,
         ...(result.error ? { error: result.error } : {}),
       };
-      return textResult(JSON.stringify(publicResult), { status: publicResult });
+      return textResult(`agent ${publicResult.state}.`, { status: publicResult, returnValue: publicResult });
     }
     case 'close': {
       const a: any = args;
       const handle = closeAgent(a.id ?? a.handle);
-      return textResult(`Closed agent ${handle.id}.`, { id: handle.id });
+      return textResult(`Closed agent ${handle.id}.`, { id: handle.id, returnValue: { id: handle.id } });
     }
     case 'agents': {
       // List available agent definitions for the shepherd's herd.
@@ -439,15 +520,31 @@ async function executeShepherd(
   signal?: AbortSignal,
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
-  if (!isHerdrAvailable()) return unavailableResult();
+  if (!isHerdrAvailable()) {
+    return withUserFacingContent(unavailableResult(label, args));
+  }
   try {
-    return await doAction(args, ctx, signal, onUpdate);
+    const result = await doAction(args, ctx, signal, onUpdate);
+    const details = result.details && typeof result.details === 'object' ? result.details : {};
+    return withUserFacingContent({
+      ...result,
+      details: { call: publicToolCall(label, args), ...(details as Record<string, unknown>) },
+    });
   } catch (error: any) {
     const message = String(error?.message ?? error);
-    return {
-      content: [{ type: 'text', text: `Herd ${label} failed: ${message}` }],
-      details: { action: label, error: String(error?.message ?? error) },
-    };
+    const returnCode = typeof error?.returnCode === 'number' ? error.returnCode : 1;
+    const code = typeof error?.code === 'string' ? error.code : 'shepherd_error';
+    return withUserFacingContent({
+      content: [{ type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` }],
+      details: {
+        call: publicToolCall(label, args),
+        action: label,
+        code,
+        returnCode,
+        returnValue: { code, error: message, returnCode },
+        error: message,
+      },
+    });
   }
 }
 
@@ -506,7 +603,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     },
 
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -607,7 +704,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -661,7 +758,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -696,7 +793,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -731,7 +828,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -763,29 +860,21 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderUserFacingResult(result, options, theme, context),
   });
 }
 
 function renderSpawnResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
-  const details = result?.details;
-  if (details?.agent) {
-    const name = details.label ? `${details.agent}: ${details.label}` : details.agent;
-    const summary = `spawned ${name}`;
-    const component = reusableText(context.lastComponent);
-    if (!(options?.expanded ?? false)) {
-      component.setText(theme.fg('toolOutput', summary));
-      return component;
-    }
-    const expandedDetails = [
-      'details:',
-      `- agent id: ${details.id ?? '(unavailable)'}`,
-      `- agent fieldnote: ${details.fieldnote ?? details.artifactSession?.sessionRelativePath ?? 'none'}`,
-    ];
-    component.setText(theme.fg('toolOutput', `${summary}\n\n${expandedDetails.join('\n')}`));
-    return component;
-  }
-  return renderToolResult(result, options, theme, context);
+  return renderUserFacingResult(result, options, theme, context);
+}
+
+/** Render every Shepherd result with the same user-facing structure. */
+function renderUserFacingResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
+  const rendered = formatUserFacingText(result);
+  if (rendered === undefined) return renderToolResult(result, options, theme, context);
+  const component = reusableText(context.lastComponent);
+  component.setText(theme.fg('toolOutput', rendered));
+  return component;
 }
 
 function renderToolResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {

@@ -17,6 +17,8 @@ export interface AgentHandle {
   id: string;
   agent: string;
   label: string;
+  /** Provider-qualified model actually selected for the child, when known. */
+  model?: string;
   paneId?: string;
   tabId?: string;
   workspaceId?: string;
@@ -69,6 +71,8 @@ export interface PromptResult {
   agentId: string;
   status: PromptResultStatus;
   ok: boolean;
+  /** Stable process-style outcome: 0 success, 1 failure, 2 blocked, 124 timeout, 130 cancelled. */
+  returnCode?: number;
   text?: string;
   error?: string;
   artifact?: ArtifactReservation;
@@ -315,8 +319,15 @@ export class LifecycleRegistry {
   settlePrompt(handle: PromptHandle, result: PromptResult): PromptResult {
     const prompt = this.getPrompt(handle);
     if (prompt.settled) return { ...prompt.result! };
+    const returnCode = result.returnCode ?? (
+      result.status === 'cancelled' ? 130 :
+      result.status === 'timeout' ? 124 :
+      result.status === 'blocked' ? 2 :
+      result.ok ? 0 : 1
+    );
     prompt.result = {
       ...result,
+      returnCode,
       promptId: prompt.handle.id,
       agentId: prompt.handle.agentId,
       ...(prompt.artifact ? { artifact: prompt.artifact } : {}),
@@ -352,6 +363,7 @@ export class LifecycleRegistry {
           agentId: handle.id,
           status: 'cancelled',
           ok: false,
+          returnCode: 130,
           error: reason,
         });
     }

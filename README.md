@@ -41,8 +41,10 @@ shepherd_close({ id: agent.id })
 ```
 
 Prompt submission is non-blocking. `shepherd_wait` is the synchronization point.
-For parallel work, spawn multiple agents, prompt each one, then wait on the
-array of prompt ids:
+Every tool result includes `details.returnCode`: `0` means success; `1` is a
+failure; `2` is blocked; `124` is a timeout; and `130` is cancelled. The spawned pane prints the effective provider-qualified child model and exact
+`pi` invocation for diagnostics. For parallel
+work, spawn multiple agents, prompt each one, then wait on the array of prompt ids:
 
 ```text
 scoutA = shepherd_spawn({ agent: "scout", ...options })
