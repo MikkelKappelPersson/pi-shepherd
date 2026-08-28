@@ -331,7 +331,7 @@ export async function doAction(
         ctx
       );
       return textResult(
-        `spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
+        `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
         {
           id: handle.id,
           agent: handle.agent,
@@ -655,13 +655,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(args, theme, context) {
-      const render = formatShepherdCommand('spawn', args, context.expanded);
+    // Suppress the default tool-name-only call preview. The result text below
+    // carries the complete, single-line spawn status instead.
+    renderCall(_args, _theme, context) {
       const component = reusableText(context.lastComponent);
-      component.setText(
-        theme.fg('toolTitle', theme.bold('shepherd_spawn ')) +
-          (render.rest ? theme.fg('dim', render.rest) : '')
-      );
+      component.setText('');
       return component;
     },
     renderResult: (result, options, theme, context) =>
@@ -872,7 +870,34 @@ export function registerShepherdTools(pi: ExtensionAPI) {
 }
 
 function renderSpawnResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
-  return renderUserFacingResult(result, options, theme, context);
+  const rendered = formatUserFacingText(result);
+  if (rendered === undefined) return renderToolResult(result, options, theme, context);
+  const component = reusableText(context.lastComponent);
+  const details = result?.details && typeof result.details === 'object' ? result.details : {};
+  const agent = typeof details.agent === 'string' ? details.agent : undefined;
+  const label = typeof details.label === 'string' ? details.label : undefined;
+
+  // Keep the compact one-line spawn status, but use the standard semantic
+  // theme colors: tool title, success state, and highlighted agent identity.
+  if (agent) {
+    const firstLine =
+      theme.fg('toolTitle', theme.bold('shepherd_spawn')) +
+      ' ' + theme.fg('accent', `spawned ${agent}${label ? `: ${label}` : ''}`);
+    const newline = rendered.indexOf('\n');
+    const remainder = newline >= 0 ? rendered.slice(newline) : '';
+    const styledRemainder = remainder
+      .split('\n')
+      .map(line =>
+        ['call:', 'return:', 'details:'].includes(line)
+          ? theme.fg('accent', line)
+          : theme.fg('toolOutput', line)
+      )
+      .join('\n');
+    component.setText(firstLine + styledRemainder);
+  } else {
+    component.setText(theme.fg('toolOutput', rendered));
+  }
+  return component;
 }
 
 /** Render every Shepherd result with the same user-facing structure. */
