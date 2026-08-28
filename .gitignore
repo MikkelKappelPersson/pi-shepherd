@@ -13,3 +13,7 @@ node_modules/
 
 # Runtime artifact-backed delegation sessions
 .shepherd/
+
+# Locally installed project skills
+.agents/skills/
+skills-lock.json
