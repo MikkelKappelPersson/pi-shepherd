@@ -39,6 +39,7 @@ interface OptionSpec {
 
 const OPTION_SPECS: Record<string, OptionSpec> = {
   agentScope: { flag: 'scope', aliases: ['agent-scope'], key: 'agentScope', values: SCOPE_VALUES },
+  label: { flag: 'label', key: 'label' },
   placement: { flag: 'placement', key: 'placement', values: PLACEMENT_VALUES },
   direction: { flag: 'direction', key: 'direction', values: DIRECTION_VALUES },
   confirmProjectAgents: { flag: 'confirm-project-agents', key: 'confirmProjectAgents', boolean: true },
@@ -57,12 +58,12 @@ for (const spec of Object.values(OPTION_SPECS)) {
 }
 
 // Which option keys each command verb accepts (renderer and parser agree).
-const SPAWN_OPTION_KEYS = ['agentScope', 'placement', 'direction', 'confirmProjectAgents', 'cwd', 'model', 'omitSystemPrompt'];
+const SPAWN_OPTION_KEYS = ['agentScope', 'label', 'placement', 'direction', 'confirmProjectAgents', 'cwd', 'model', 'omitSystemPrompt'];
 const READ_OPTION_KEYS = ['lines', 'source'];
 
 const USAGE =
   'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
-  '  spawn options: --scope user|project|both, --placement pane|tab|workspace, --direction right|down, --cwd <path>, --model <provider/model>, --omit-system-prompt, --confirm-project-agents true|false\n' +
+  '  spawn options: --scope user|project|both, --label \"task label\", --placement pane|tab|workspace, --direction right|down, --cwd <path>, --model <provider/model>, --omit-system-prompt, --confirm-project-agents true|false\n' +
   '  read options: --lines <n>, --source ' + SOURCE_VALUES.join('|');
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
     const [agent, ...extra] = positional;
     if (!agent) return { error: `spawn requires an agent name.\n${USAGE}` };
     if (extra.length > 0) return { error: `Unexpected argument "${extra[0]}".\n${USAGE}` };
-    return { action: 'spawn', args: { action: 'spawn', agent, ...options } };
+    return { action: 'spawn', args: { action: 'spawn', agent, label: options.label ?? '', ...options } };
   }
 
   if (action === 'status') {
@@ -263,6 +264,19 @@ function previewText(value: unknown, maxLength = 40): string {
 
 /** Render opaque lifecycle ids as compact CLI-like values. */
 function handlePreview(value: unknown, maxLength = 40): string {
+  const rawId = typeof value === 'string' ? value : value && typeof value === 'object' && 'id' in value ? (value as any).id : undefined;
+  if (typeof rawId === 'string') {
+    try {
+      const agent = lifecycleRegistry.getAgent(rawId);
+      return previewText(`${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`, maxLength);
+    } catch {
+      try {
+        const prompt = lifecycleRegistry.getPrompt(rawId) as any;
+        const agent = lifecycleRegistry.getAgent(prompt.handle.agentId);
+        return previewText(`${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`, maxLength);
+      } catch { /* retain opaque id for unknown handles */ }
+    }
+  }
   if (Array.isArray(value)) {
     return `[${value.map(item => handlePreview(item, maxLength)).join(', ')}]`;
   }
@@ -293,7 +307,7 @@ function cliValue(value: unknown, maxLength = 80): string {
 }
 
 function cliOption(key: string, value: unknown, maxLength = 80): string {
-  if (value === undefined || value === null) return '';
+  if (value === undefined || value === null || value === '') return '';
   const spec = OPTION_SPECS[key];
   // Bare flags render without a value; `false` cannot be expressed as a bare
   // flag, so it is omitted (the schema default applies).

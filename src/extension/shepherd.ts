@@ -252,8 +252,14 @@ export async function doAction(
         ctx
       );
       return textResult(
-        `Started idle agent ${a.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'}\nAgent id for the next call: ${formatIdForModel(handle.id)}\nNext: call shepherd_prompt with this id and your message.`,
-        { id: handle.id, ...(artifactSession ? { artifactSession } : {}) }
+        `Started idle agent ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent} (${handle.id}).${artifactSession ? ` Shared fieldnotes session: ${artifactSession.sessionRelativePath}.` : ' Fieldnotes are disabled for this session.'}\nAgent id for the next call: ${formatIdForModel(handle.id)}\nNext: call shepherd_prompt with this id and your message.`,
+        {
+          id: handle.id,
+          agent: handle.agent,
+          label: handle.label,
+          fieldnote: artifactSession?.sessionRelativePath ?? null,
+          ...(artifactSession ? { artifactSession } : {}),
+        }
       );
     }
     case 'prompt': {
@@ -507,7 +513,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_spawn',
     label: 'Shepherd: spawn agent',
     description:
-      'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
+      'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
       'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to a new tab; placement pane/workspace and a direction are only requested when explicitly asked.',
     promptSnippet:
       'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
@@ -516,6 +522,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         description:
           'Exact discovered agent name (case-sensitive). If unsure, call shepherd with action "agents" first.',
       }),
+      label: Type.String({ description: 'Short task-specific label (max 64 characters).' }),
       agentScope: Type.Optional(AgentScopeSchema),
       placement: Type.Optional(
         StringEnum(['pane', 'tab', 'workspace'] as const, {
@@ -554,7 +561,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       return component;
     },
     renderResult: (result, options, theme, context) =>
-      renderToolResult(result, options, theme, context),
+      renderSpawnResult(result, options, theme, context),
   });
 
   pi.registerTool({
@@ -758,6 +765,27 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     renderResult: (result, options, theme, context) =>
       renderToolResult(result, options, theme, context),
   });
+}
+
+function renderSpawnResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
+  const details = result?.details;
+  if (details?.agent) {
+    const name = details.label ? `${details.agent}: ${details.label}` : details.agent;
+    const summary = `spawned ${name}`;
+    const component = reusableText(context.lastComponent);
+    if (!(options?.expanded ?? false)) {
+      component.setText(theme.fg('toolOutput', summary));
+      return component;
+    }
+    const expandedDetails = [
+      'details:',
+      `- agent id: ${details.id ?? '(unavailable)'}`,
+      `- agent fieldnote: ${details.fieldnote ?? details.artifactSession?.sessionRelativePath ?? 'none'}`,
+    ];
+    component.setText(theme.fg('toolOutput', `${summary}\n\n${expandedDetails.join('\n')}`));
+    return component;
+  }
+  return renderToolResult(result, options, theme, context);
 }
 
 function renderToolResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {

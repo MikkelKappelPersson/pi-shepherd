@@ -16,6 +16,7 @@ export type PromptResultStatus = 'idle' | 'done' | 'blocked' | 'failed' | 'timeo
 export interface AgentHandle {
   id: string;
   agent: string;
+  label: string;
   paneId?: string;
   tabId?: string;
   workspaceId?: string;
@@ -28,6 +29,22 @@ export interface AgentHandle {
  */
 /** Public lifecycle calls use the opaque id; internal callers may still hold the full handle. */
 export type AgentHandleInput = AgentHandle | string;
+
+export function formatAgentName(agent: string, label?: string): string {
+  const trimmed = label?.trim() ?? '';
+  return trimmed ? `${agent}: ${trimmed}` : agent;
+}
+
+export function validateAgentLabel(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value !== 'string') throw new Error('Agent label must be a string.');
+  const label = value.trim();
+  if (!label) return '';
+  if (label.length > 64) throw new Error('Agent label must be at most 64 characters.');
+  if (!/^[\p{L}\p{N} _.-]+$/u.test(label) || label.includes(':'))
+    throw new Error('Agent label may contain only letters, numbers, spaces, _, -, and .; colons and control characters are not allowed.');
+  return label;
+}
 
 export interface PromptHandle {
   id: string;
@@ -133,7 +150,11 @@ export class LifecycleRegistry {
     input: Omit<AgentHandle, 'id'>,
     metadata: { completionSignalPath?: string; completionResultPath?: string; artifactSession?: ShepherdSession } = {}
   ): AgentHandle {
-    const handle = { ...input, id: this.id('agent') };
+    const label = validateAgentLabel(input.label);
+    const display = formatAgentName(input.agent, label);
+    if (label && [...this.agents.values()].some(a => formatAgentName(a.handle.agent, a.handle.label) === display))
+      throw new Error(`Duplicate agent label "${display}".`);
+    const handle = { ...input, label, id: this.id('agent') };
     this.agents.set(handle.id, {
       handle,
       completionSignalPath: metadata.completionSignalPath,

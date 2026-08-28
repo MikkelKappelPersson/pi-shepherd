@@ -20,6 +20,7 @@ export const SpawnParams = Type.Object({
     description: 'Spawn an idle persistent agent; does not submit work.',
   }),
   agent: Type.String({ description: 'Exact discovered agent name (case-sensitive). If unsure, call shepherd with action "agents" first.' }),
+  label: Type.String({ description: 'Short task-specific human label for this spawned instance. Letters, numbers, spaces, _, -, and . only; max 64 characters.' }),
   agentScope: Type.Optional(AgentScopeSchema),
   placement: Type.Optional(SpawnPlacementSchema),
   direction: Type.Optional(SpawnDirectionSchema),

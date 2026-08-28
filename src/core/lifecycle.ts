@@ -25,6 +25,8 @@ import {
   type PromptHandleInput,
   type PromptResult,
   type AgentStatus,
+  formatAgentName,
+  validateAgentLabel,
 } from './orchestration.ts';
 import {
   reserveArtifacts,
@@ -42,6 +44,7 @@ export interface StartOptions {
   omitSystemPrompt?: boolean;
   placement?: 'pane' | 'tab' | 'workspace';
   direction?: 'right' | 'down';
+  label?: string;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
 }
@@ -57,6 +60,7 @@ export async function startAgent(
   }
 ): Promise<AgentHandle> {
   const cwd = options.cwd ?? ctx.cwd;
+  const label = validateAgentLabel(options.label);
   const settings = loadSettings(cwd);
   const agentScope = options.agentScope ?? settings.agentScope;
   const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
@@ -88,7 +92,7 @@ export async function startAgent(
   let workspaceId = '';
   try {
     const created = createHerdrInstance(
-      name,
+      formatAgentName(name, label),
       cwd,
       placement,
       placement === 'workspace' ? undefined : getHerdrWorkspaceId(),
@@ -117,7 +121,7 @@ export async function startAgent(
     const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
     if (!ready.detected) throw new Error(`Agent "${name}" did not become ready.`);
     return lifecycleRegistry.registerAgent(
-      { agent: name, paneId, tabId, workspaceId },
+      { agent: name, label, paneId, tabId, workspaceId },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         completionResultPath: files.sessionFile,
