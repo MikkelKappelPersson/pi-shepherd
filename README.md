@@ -8,7 +8,7 @@ control tool plus six composable lifecycle tools:
 
 ```text
 shepherd({ action: "agents" | "herd" | "prune" })
-shepherd_spawn(agent, options) -> agent id
+shepherd_spawn({ agent, label, placement?, cwd?, model? }) -> agent id
 shepherd_prompt(agent id, message, options) -> prompt id
 shepherd_wait(prompt id | prompt ids) -> Result | Result[]
 shepherd_status(agent id) -> Status
@@ -24,14 +24,15 @@ creation, prompting, waiting, inspection, closing, and terminal reads.
 
 `shepherd_spawn` launches an idle persistent agent. It never submits a task
 and has no `stayOpen` option. The agent remains alive until explicitly closed.
-By default it creates a new background tab; pass `placement: "pane"` to split
-the current pane, or `placement: "workspace"` to create a new workspace. Pane
-placement uses a right split by default; pass `direction: "down"` for a pane
-below. Use pi-shepherd only when explicitly instructed because too many Herdr
-panes may crash pi.
+By default it creates a new background tab; pass `placement: "pane_right"` or
+`placement: "pane_down"` to split the current pane, or `placement: "workspace"`
+to create a new workspace. The working directory and model default to the
+parent session. Agent scope, project approval, and prompt-shaping options come
+from Shepherd settings and the discovered agent definition. Use pi-shepherd
+only when explicitly instructed because too many Herdr panes may crash pi.
 
 ```text
-agent = shepherd_spawn({ agent: "scout", cwd: project })
+agent = shepherd_spawn({ agent: "scout", label: "authentication research", cwd: project })
 prompt = shepherd_prompt({
   id: agent.id,
   message: "Research the authentication code",
@@ -47,8 +48,8 @@ failure; `2` is blocked; `124` is a timeout; and `130` is cancelled. The spawned
 work, spawn multiple agents, prompt each one, then wait on the array of prompt ids:
 
 ```text
-scoutA = shepherd_spawn({ agent: "scout", ...options })
-scoutB = shepherd_spawn({ agent: "scout", ...options })
+scoutA = shepherd_spawn({ agent: "scout", label: "authentication", ...options })
+scoutB = shepherd_spawn({ agent: "scout", label: "authorization", ...options })
 promptA = shepherd_prompt({ id: scoutA.id, message: "Research authentication" })
 promptB = shepherd_prompt({ id: scoutB.id, message: "Research authorization" })
 [resultA, resultB] = shepherd_wait({ id: [promptA.id, promptB.id] })
@@ -228,9 +229,10 @@ The slash command uses the same action vocabulary as the model-facing
 
 `/shepherd list` and `/shepherd agents` remain accepted as compatibility
 aliases for `/shepherd agents`, but `agents` is canonical. Optional `spawn` flags
-include `--scope user|project|both`, `--placement pane|tab|workspace`,
-`--direction right|down`, `--cwd <path>`, `--model <provider/model>`, and
-`--omit-system-prompt`.
+include `--placement pane_right|pane_down|tab|workspace`, `--cwd <path>`, and
+`--model <provider/model>`. Agent scope, project approval, and prompt-shaping
+flags are not spawn arguments; they are controlled by settings and the agent
+definition.
 
 For one-shot delegation, prompting, waiting, parallel work, and opaque-id
 lifecycle control, use the structured `shepherd_*` tool protocol

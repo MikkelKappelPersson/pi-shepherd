@@ -5,14 +5,9 @@ export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const,
   description: 'Which agent-definition directories to use. Defaults to the persisted Shepherd setting; an explicit value overrides it.',
 });
 
-export const SpawnPlacementSchema = StringEnum(['pane', 'tab', 'workspace'] as const, {
+export const SpawnPlacementSchema = StringEnum(['pane_right', 'pane_down', 'tab', 'workspace'] as const, {
   description:
-    'Where to create the agent: pane splits the current pane, tab creates a new tab, workspace creates a new workspace. Default: tab.',
-  default: 'tab',
-});
-export const SpawnDirectionSchema = StringEnum(['right', 'down'] as const, {
-  description: 'Pane split direction when placement is pane. Default: right.',
-  default: 'right',
+    'Optional placement: pane_right or pane_down splits the current pane, tab creates a new tab, and workspace creates a new workspace. If omitted, uses a background tab.',
 });
 
 export const SpawnParams = Type.Object({
@@ -21,13 +16,9 @@ export const SpawnParams = Type.Object({
   }),
   agent: Type.String({ description: 'Exact discovered agent name (case-sensitive). If unsure, call shepherd with action "agents" first.' }),
   label: Type.String({ description: 'Short task-specific human label for this spawned instance. Letters, numbers, spaces, _, -, and . only; max 64 characters.' }),
-  agentScope: Type.Optional(AgentScopeSchema),
   placement: Type.Optional(SpawnPlacementSchema),
-  direction: Type.Optional(SpawnDirectionSchema),
-  confirmProjectAgents: Type.Optional(Type.Boolean({ default: true })),
   cwd: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
-  omitSystemPrompt: Type.Optional(Type.Boolean()),
 });
 export const AgentIdSchema = Type.String({
   description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',

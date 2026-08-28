@@ -48,6 +48,18 @@ for (const tool of registered) {
       assert.ok('id' in schema.properties, `${tool.name} must expose a top-level id`);
       assert.ok(!('handle' in schema.properties), `${tool.name} must not expose a public handle`);
     }
+    if (tool.name === 'shepherd_spawn') {
+      assert.deepEqual(schema.required, ['agent', 'label'], 'shepherd_spawn requires only agent and label');
+      assert.deepEqual(
+        Object.keys(schema.properties).sort(),
+        ['agent', 'cwd', 'label', 'model', 'placement'],
+        'shepherd_spawn exposes only the public spawn arguments'
+      );
+      for (const removed of ['agentScope', 'direction', 'confirmProjectAgents', 'omitSystemPrompt']) {
+        assert.ok(!(removed in schema.properties), `shepherd_spawn must not expose ${removed}`);
+      }
+      assert.deepEqual(schema.properties.placement.enum, ['pane_right', 'pane_down', 'tab', 'workspace']);
+    }
     console.log(`PASS ${tool.name}: root is a flat object with the intended fields`);
   } catch (error) {
     failed++;

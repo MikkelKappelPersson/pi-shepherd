@@ -23,9 +23,9 @@ const preparedArray = prepareShepherdArguments({
 assert(JSON.stringify(preparedArray.id) === JSON.stringify(["prompt-1", "prompt-2"]), "stringified id array is normalized before validation");
 assert(formatIdForModel("shepherd-agent-1") === "shepherd-agent-1", "model-facing id text remains copyable");
 const normalizedOptions = prepareShepherdArguments({
- action: "spawn", agent: "worker", confirmProjectAgents: "False", omitSystemPrompt: "True", timeout: "120000",
+ action: "spawn", agent: "worker", agentScope: "project", direction: "down", confirmProjectAgents: "False", omitSystemPrompt: "True", timeout: "120000",
 });
-assert(normalizedOptions.confirmProjectAgents === false && normalizedOptions.omitSystemPrompt === true, "stringified booleans are normalized");
+assert(!('agentScope' in normalizedOptions) && !('direction' in normalizedOptions) && !('confirmProjectAgents' in normalizedOptions) && !('omitSystemPrompt' in normalizedOptions), "settings-owned spawn options are discarded");
 assert(normalizedOptions.timeout === 120000, "stringified integer is normalized");
 
 const registry = new LifecycleRegistry();

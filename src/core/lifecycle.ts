@@ -1,4 +1,4 @@
-import { discoverAgents, resolveDelegatedModel, type AgentScope } from './discovery.ts';
+import { discoverAgents, resolveDelegatedModel } from './discovery.ts';
 import { loadSettings } from '../extension/config.ts';
 import {
   ensureHerdrRuntime,
@@ -40,11 +40,7 @@ import {
 export interface StartOptions {
   cwd?: string;
   model?: string;
-  agentScope?: AgentScope;
-  confirmProjectAgents?: boolean;
-  omitSystemPrompt?: boolean;
-  placement?: 'pane' | 'tab' | 'workspace';
-  direction?: 'right' | 'down';
+  placement?: 'pane_right' | 'pane_down' | 'tab' | 'workspace';
   label?: string;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
@@ -63,8 +59,10 @@ export async function startAgent(
   const cwd = options.cwd ?? ctx.cwd;
   const label = validateAgentLabel(options.label);
   const settings = loadSettings(cwd);
-  const agentScope = options.agentScope ?? settings.agentScope;
-  const confirmProjectAgents = options.confirmProjectAgents ?? settings.confirmProjectAgents;
+  // Agent scope and project approval are settings-owned; callers cannot
+  // override them per spawn.
+  const agentScope = settings.agentScope;
+  const confirmProjectAgents = settings.confirmProjectAgents;
   const discovered = discoverAgents(cwd, agentScope, {
     includeBundled: settings.includeBundledAgents,
   }).agents;
@@ -88,6 +86,8 @@ export async function startAgent(
   }
   await ensureHerdrRuntime();
   const placement = options.placement ?? 'tab';
+  const herdrPlacement = placement === 'pane_right' || placement === 'pane_down' ? 'pane' : placement;
+  const direction = placement === 'pane_down' ? 'down' : 'right';
   let paneId = '';
   let tabId = '';
   let workspaceId = '';
@@ -96,9 +96,9 @@ export async function startAgent(
     const created = createHerdrInstance(
       formatAgentName(name, label),
       cwd,
-      placement,
-      placement === 'workspace' ? undefined : getHerdrWorkspaceId(),
-      options.direction
+      herdrPlacement,
+      herdrPlacement === 'workspace' ? undefined : getHerdrWorkspaceId(),
+      direction
     );
     paneId = created.paneId;
     tabId = created.tabId;
@@ -108,7 +108,8 @@ export async function startAgent(
       name,
       persistent: true,
       systemPrompt: found.systemPrompt,
-      omitSystemPrompt: options.omitSystemPrompt ?? found.omitSystemPrompt,
+      // Prompt-shaping options belong to the discovered agent definition.
+      omitSystemPrompt: found.omitSystemPrompt,
       omitPiDocumentation: found.omitPiDocumentation === true,
       omitContextFiles: found.omitContextFiles === true,
       // An explicit start option wins, then the agent definition, then the

@@ -59,22 +59,20 @@ ready. It returns only after the agent is addressable.
 
 `start` does **not** send a task or user message.
 
-The selected agent definition supplies its system prompt and default agent
-configuration. Start options may override supported launch settings, including
-model, working directory, tools, and system-prompt behavior. Placement options
-control the Herdr topology and must follow Herdr's layout rules.
+The selected agent definition supplies its system prompt and agent-specific
+launch configuration. Start callers may optionally provide only a working
+directory, model, label, or placement. Agent scope, project approval, and
+system-prompt behavior are controlled by Shepherd settings and the discovered
+agent definition; callers cannot override them per spawn.
 
 Illustrative options:
 
 ```ts
 start("reviewer", {
   cwd: "/project",
-  placement: {
-    kind: "tab",          // or an explicitly requested sibling pane layout
-    direction: "right",
-    noFocus: true,
-  },
+  placement: "pane_right", // or "pane_down", "tab", or "workspace"
   model: "provider/model",
+  label: "authentication review",
 })
 ```
 

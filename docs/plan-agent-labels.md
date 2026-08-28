@@ -40,9 +40,10 @@ not `reviewer:`, `reviewer-`, or an automatically numbered variant.
 reviewer + code review → reviewer: code review
 ```
 
-The model-facing `shepherd_spawn` input accepts an optional label so the calling
-agent can provide one. Tool guidance should make providing a short,
-task-specific label the normal behavior. The human `/shepherd spawn reviewer`
+The model-facing `shepherd_spawn` input requires a label so every spawned
+instance has a short, task-specific human identifier. Tool guidance should make
+providing that label explicit. The label is separate from the discovered agent
+name and is validated for safe display. The human `/shepherd spawn reviewer`
 command remains valid without a label and passes an empty label through
 unchanged. A human can provide one explicitly with:
 

@@ -122,8 +122,10 @@ Files: `shepherd.ts`. ✅ Done
 One registration helper, six declarative tools. All roots are plain objects.
 
 - [x] Generalize `registerShepherdTool` into `registerShepherdTools(pi)` registering:
-      - `shepherd_spawn`: `agent` (required), `agentScope`, `placement`, `direction`,
-        `confirmProjectAgents`, `cwd`, `model`, `omitSystemPrompt`. ✅ (deliberately no
+      - `shepherd_spawn`: `agent` (required), `label` (required), and optional
+        `placement` (`pane_right`, `pane_down`, `tab`, or `workspace`), `cwd`, and
+        `model`. Agent scope, project approval, and system-prompt behavior come
+        from settings and the discovered agent definition. ✅ (deliberately no
         `timeout`: startup readiness uses fixed internal grace periods; timeout only
         applies to prompts/waits — see the start-case comment in `doAction`)
       - `shepherd_prompt`: `id` (required agent id), `message` (required), `timeout` ✅

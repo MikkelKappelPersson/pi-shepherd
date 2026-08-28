@@ -27,7 +27,7 @@ import {
 import { startAgent, promptAgent, waitPrompts, statusAgent, closeAgent } from '../core/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './config.ts';
 import { lifecycleRegistry } from '../core/orchestration.ts';
-import { formatShepherdCommand } from './cli.ts';
+import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from '../core/artifact-sessions.ts';
 import type { DelegatorModel } from '../core/discovery.ts';
 import { discoverAgents, formatAgentList } from '../core/discovery.ts';
@@ -149,15 +149,11 @@ export function prepareShepherdArguments(input: unknown): ShepherdArgs {
     }
     delete args.handle;
   }
-  // A few tool transports stringify primitive JSON values (and some emit
-  // Python-style `True`/`False`). Recover only the fields whose schemas are
-  // explicitly boolean/integer; leave all other strings alone so validation
-  // remains strict. Native values are copied unchanged.
-  for (const name of ['confirmProjectAgents', 'omitSystemPrompt']) {
-    const value = args[name];
-    if (typeof value === 'string' && /^(true|false)$/i.test(value.trim())) {
-      args[name] = value.trim().toLowerCase() === 'true';
-    }
+  // These values are deliberately not part of the spawn protocol. Settings
+  // and the discovered agent definition own them; silently discard legacy
+  // callers' copies so they cannot override those sources before validation.
+  for (const name of ['agentScope', 'confirmProjectAgents', 'omitSystemPrompt', 'direction']) {
+    delete args[name];
   }
   if (typeof args.id === 'string' && args.id.trim().startsWith('[')) {
     try {
@@ -213,10 +209,14 @@ export function formatIdForModel(id: string): string {
 }
 
 /** Keep the exact public tool invocation visible alongside its result. */
-function publicToolCall(action: string, args: ShepherdArgs): Record<string, unknown> {
+function publicToolCall(
+  action: string,
+  args: ShepherdArgs,
+  defaultCwd = process.cwd()
+): Record<string, unknown> {
   const { action: _action, artifactSession: _artifactSession, ...parameters } = args as any;
   const name = ['herd', 'agents', 'prune'].includes(action) ? 'shepherd' : `shepherd_${action}`;
-  return { name, arguments: parameters };
+  return { name, arguments: omitMaterializedDefaults(action, parameters, defaultCwd) };
 }
 
 function displayAgentName(agentId: string): string {
@@ -317,17 +317,15 @@ export async function doAction(
       // tolerantly); otherwise resolve/require the parent artifact session.
       const artifactSession =
         'artifactSession' in a ? a.artifactSession : parentArtifactSession(ctx);
-      const settings = loadSettings(ctx.cwd);
       // Startup readiness has its own fixed internal grace periods; timeout
-      // settings apply only to submitted prompts and their waits. Undefined
-      // options inherit persisted settings; explicitly supplied options win.
-      const { timeout: _ignoredTimeout, ...startOptions } = a;
+      // settings apply only to submitted prompts and their waits.
       const handle = await startAgent(
         a.agent,
         {
-          ...startOptions,
-          agentScope: a.agentScope ?? settings.agentScope,
-          confirmProjectAgents: a.confirmProjectAgents ?? settings.confirmProjectAgents,
+          label: a.label,
+          placement: a.placement,
+          cwd: a.cwd,
+          model: a.model,
           artifactSession,
         },
         ctx
@@ -547,7 +545,7 @@ async function executeShepherd(
     const details = result.details && typeof result.details === 'object' ? result.details : {};
     return withUserFacingContent({
       ...result,
-      details: { call: publicToolCall(label, args), ...(details as Record<string, unknown>) },
+      details: { call: publicToolCall(label, args, ctx.cwd), ...(details as Record<string, unknown>) },
     });
   } catch (error: any) {
     const message = String(error?.message ?? error);
@@ -556,7 +554,7 @@ async function executeShepherd(
     return withUserFacingContent({
       content: [{ type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` }],
       details: {
-        call: publicToolCall(label, args),
+        call: publicToolCall(label, args, ctx.cwd),
         action: label,
         code,
         returnCode,
@@ -630,7 +628,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: spawn agent',
     description:
       'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
-      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to a new tab; placement pane/workspace and a direction are only requested when explicitly asked.',
+      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model, and a new tab. Use placement pane_right or pane_down to split the current pane.',
     promptSnippet:
       'Shepherd lifecycle: spawn/prompt/wait/status/close/read pi agents (sheep) in Herdr panes.',
     parameters: Type.Object({
@@ -639,24 +637,14 @@ export function registerShepherdTools(pi: ExtensionAPI) {
           'Exact discovered agent name (case-sensitive). If unsure, call shepherd with action "agents" first.',
       }),
       label: Type.String({ description: 'Short task-specific label (max 64 characters).' }),
-      agentScope: Type.Optional(AgentScopeSchema),
       placement: Type.Optional(
-        StringEnum(['pane', 'tab', 'workspace'] as const, {
+        StringEnum(['pane_right', 'pane_down', 'tab', 'workspace'] as const, {
           description:
-            'Where to create the agent: pane splits the current pane, tab creates a new tab, workspace creates a new workspace. Default: tab.',
-          default: 'tab',
+            'Optional placement: pane_right or pane_down splits the current pane, tab creates a new tab, and workspace creates a new workspace. If omitted, uses a background tab.',
         })
       ),
-      direction: Type.Optional(
-        StringEnum(['right', 'down'] as const, {
-          description: 'Pane split direction when placement is pane. Default: right.',
-          default: 'right',
-        })
-      ),
-      confirmProjectAgents: Type.Optional(Type.Boolean({ default: true })),
-      cwd: Type.Optional(Type.String()),
-      model: Type.Optional(Type.String()),
-      omitSystemPrompt: Type.Optional(Type.Boolean()),
+      cwd: Type.Optional(Type.String({ description: 'Working directory for the child; defaults to the parent cwd.' })),
+      model: Type.Optional(Type.String({ description: 'Provider-qualified child model; defaults to the parent model.' })),
     }),
     prepareArguments: input => prepareForSchema<Omit<Static<typeof SpawnParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
@@ -668,7 +656,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         onUpdate
       ),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_spawn', args, context.expanded);
+      const render = formatShepherdCommand('spawn', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_spawn ')) +
@@ -714,7 +702,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         onUpdate
       ),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_prompt', args, context.expanded);
+      const render = formatShepherdCommand('prompt', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_prompt ')) +
@@ -768,7 +756,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_wait', args, context.expanded);
+      const render = formatShepherdCommand('wait', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_wait ')) +
@@ -803,7 +791,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         onUpdate
       ),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_status', args, context.expanded);
+      const render = formatShepherdCommand('status', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_status ')) +
@@ -838,7 +826,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         onUpdate
       ),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_close', args, context.expanded);
+      const render = formatShepherdCommand('close', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_close ')) +
@@ -870,7 +858,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('read', { action: 'read', ...params } as ShepherdArgs, ctx, signal, onUpdate),
     renderCall(args, theme, context) {
-      const render = formatShepherdCommand('shepherd_read', args, context.expanded);
+      const render = formatShepherdCommand('read', args, context.expanded);
       const component = reusableText(context.lastComponent);
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_read ')) +

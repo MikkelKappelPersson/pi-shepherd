@@ -13,17 +13,17 @@
  * args.
  */
 
+import { resolve } from 'node:path';
 import { lifecycleRegistry } from '../core/orchestration.ts';
 
 export const SCOPE_VALUES = ['user', 'project', 'both'] as const;
-export const PLACEMENT_VALUES = ['pane', 'tab', 'workspace'] as const;
-export const DIRECTION_VALUES = ['right', 'down'] as const;
+export const PLACEMENT_VALUES = ['pane_right', 'pane_down', 'tab', 'workspace'] as const;
 export const SOURCE_VALUES = ['visible', 'recent', 'recent-unwrapped', 'detection'] as const;
 
 interface OptionSpec {
   /** Canonical CLI flag name (without `--`). */
   flag: string;
-  /** Extra accepted spellings (e.g. `agentScope` is also `--agent-scope`). */
+  /** Extra accepted spellings for the human CLI. */
   aliases?: string[];
   /** doAction args key. */
   key: string;
@@ -38,14 +38,13 @@ interface OptionSpec {
 }
 
 const OPTION_SPECS: Record<string, OptionSpec> = {
+  // Scope remains available for `agents` discovery; it is intentionally not a
+  // spawn option because spawn must use the persisted settings scope.
   agentScope: { flag: 'scope', aliases: ['agent-scope'], key: 'agentScope', values: SCOPE_VALUES },
   label: { flag: 'label', key: 'label' },
   placement: { flag: 'placement', key: 'placement', values: PLACEMENT_VALUES },
-  direction: { flag: 'direction', key: 'direction', values: DIRECTION_VALUES },
-  confirmProjectAgents: { flag: 'confirm-project-agents', key: 'confirmProjectAgents', boolean: true },
   cwd: { flag: 'cwd', key: 'cwd' },
   model: { flag: 'model', key: 'model' },
-  omitSystemPrompt: { flag: 'omit-system-prompt', key: 'omitSystemPrompt', bare: true },
   lines: { flag: 'lines', key: 'lines', integer: true },
   source: { flag: 'source', key: 'source', values: SOURCE_VALUES },
   timeout: { flag: 'timeout', key: 'timeout', integer: true },
@@ -58,12 +57,12 @@ for (const spec of Object.values(OPTION_SPECS)) {
 }
 
 // Which option keys each command verb accepts (renderer and parser agree).
-const SPAWN_OPTION_KEYS = ['agentScope', 'label', 'placement', 'direction', 'confirmProjectAgents', 'cwd', 'model', 'omitSystemPrompt'];
+const SPAWN_OPTION_KEYS = ['label', 'placement', 'cwd', 'model'];
 const READ_OPTION_KEYS = ['lines', 'source'];
 
 const USAGE =
   'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
-  '  spawn options: --scope user|project|both, --label \"task label\", --placement pane|tab|workspace, --direction right|down, --cwd <path>, --model <provider/model>, --omit-system-prompt, --confirm-project-agents true|false\n' +
+  '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --cwd <path>, --model <provider/model>\n' +
   '  read options: --lines <n>, --source ' + SOURCE_VALUES.join('|');
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -256,6 +255,24 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
 
 // ── Rendering (inverse of the parser) ───────────────────────────────────────
 
+/**
+ * Tool transports may materialize optional spawn defaults before the renderer
+ * sees them. Keep those implementation defaults out of user-facing text so a
+ * required-only call still reads like a required-only call.
+ */
+export function omitMaterializedDefaults(
+  verb: string,
+  options: Record<string, any>,
+  defaultCwd = process.cwd()
+): Record<string, any> {
+  const result = { ...options };
+  if (verb !== 'spawn') return result;
+  if (result.placement === 'tab') delete result.placement;
+  if (result.model === 'default') delete result.model;
+  if (typeof result.cwd === 'string' && resolve(result.cwd) === resolve(defaultCwd)) delete result.cwd;
+  return result;
+}
+
 /** Keep tool-call previews compact without rendering an empty placeholder. */
 function previewText(value: unknown, maxLength = 40): string {
   const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : String(value ?? '');
@@ -335,6 +352,7 @@ export function formatShepherdCommand(
   options: Record<string, any>,
   expanded = false
 ): ShepherdCommandRender {
+  const displayOptions = omitMaterializedDefaults(verb, options);
   const valueLimit = expanded ? Number.POSITIVE_INFINITY : 80;
   const idLimit = expanded ? Number.POSITIVE_INFINITY : 48;
   const tokens: string[] = [];
@@ -345,8 +363,11 @@ export function formatShepherdCommand(
 
   switch (verb) {
     case 'spawn':
-      tokens.push(cliValue(options.agent, valueLimit));
-      for (const key of SPAWN_OPTION_KEYS) add(key);
+      tokens.push(cliValue(displayOptions.agent, valueLimit));
+      for (const key of SPAWN_OPTION_KEYS) {
+        const option = cliOption(key, displayOptions[key], valueLimit);
+        if (option) tokens.push(option);
+      }
       break;
     case 'prompt':
       tokens.push(handlePreview(options.id, idLimit));

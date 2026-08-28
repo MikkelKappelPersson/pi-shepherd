@@ -55,6 +55,10 @@ user-file-only.
   bundled pi agents, bundled shared agents.
 - User agent discovery is the default. Project agent definitions are
   repo-controlled and require explicit scope and interactive confirmation.
+- Spawn uses the persisted agent scope and project-approval settings, plus the
+  discovered definition's prompt options; these cannot be overridden by spawn
+  arguments. Spawn placement is one optional value: `pane_right`, `pane_down`,
+  `tab`, or `workspace`.
 - Model-facing lifecycle tools accept opaque agent/prompt ids; internal handles
   must never be confused with raw Herdr pane IDs.
 - Only panes recorded in `~/.pi/agent/pi-shepherd/created-panes.json` may be
