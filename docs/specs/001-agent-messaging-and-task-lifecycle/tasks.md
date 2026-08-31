@@ -575,67 +575,67 @@ This checklist tracks implementation of:
 
 ### Configuration
 
-- [ ] Add a `staleWaitThreshold` setting.
-- [ ] Choose and document the default threshold.
-- [ ] Add validation and fallback behavior.
-- [ ] Add the setting to user-layer configuration.
-- [ ] Add project-delta support where appropriate.
-- [ ] Add the setting to the settings UI.
-- [ ] Add the setting to user-facing documentation.
+- [x] Add a `staleWaitThreshold` setting.
+- [x] Choose and document the default threshold.
+- [x] Add validation and fallback behavior.
+- [x] Add the setting to user-layer configuration.
+- [x] Add project-delta support where appropriate.
+- [x] Add the setting to the settings UI.
+- [x] Add the setting to user-facing documentation.
 
 ### Monitor
 
-- [ ] Start the monitor only when waiting tasks exist.
-- [ ] Inspect task state rather than raw agent state.
-- [ ] Require an unresolved expected reply.
-- [ ] Track `waitingSince`.
-- [ ] Calculate elapsed wait time.
-- [ ] Emit one notification per waiting episode.
-- [ ] Record notification delivery time.
-- [ ] Reset stale-notification state after a reply.
-- [ ] Add request timeout handling.
-- [ ] Stop the monitor when no waiting tasks remain.
-- [ ] Ensure the timer does not keep the process alive.
+- [x] Start the monitor only when waiting tasks exist.
+- [x] Inspect task state rather than raw agent state.
+- [x] Require an unresolved expected reply.
+- [x] Track `waitingSince`.
+- [x] Calculate elapsed wait time.
+- [x] Emit one notification per waiting episode.
+- [x] Record notification delivery time.
+- [x] Reset stale-notification state after a reply.
+- [x] Add request timeout handling.
+- [x] Stop the monitor when no waiting tasks remain.
+- [x] Ensure the timer does not keep the process alive.
 
 ### Notification content
 
-- [ ] Include task ID.
-- [ ] Include owning agent.
-- [ ] Include task description.
-- [ ] Include elapsed waiting time.
-- [ ] Include pending request ID.
-- [ ] Include question content.
-- [ ] Include recipient identity.
-- [ ] Include recipient process/task state.
-- [ ] Include possible Shepherd actions.
-- [ ] Preserve message/request correlation.
+- [x] Include task ID.
+- [x] Include owning agent.
+- [x] Include task description.
+- [x] Include elapsed waiting time.
+- [x] Include pending request ID.
+- [x] Include question content.
+- [x] Include recipient identity.
+- [x] Include recipient process/task state.
+- [x] Include possible Shepherd actions.
+- [x] Preserve message/request correlation.
 
 ### Parent delivery
 
-- [ ] Deliver stale-wait notifications as custom Shepherd messages.
-- [ ] Queue notifications as follow-ups.
-- [ ] Decide when stale notifications trigger an idle parent turn.
-- [ ] Avoid waking the parent on every normal waiting transition.
-- [ ] Avoid repeated notification storms.
-- [ ] Add optional later escalation only if justified by usage.
+- [x] Deliver stale-wait notifications as custom Shepherd messages.
+- [x] Queue notifications as follow-ups.
+- [x] Decide when stale notifications trigger an idle parent turn.
+- [x] Avoid waking the parent on every normal waiting transition.
+- [x] Avoid repeated notification storms.
+- [x] Add optional later escalation only if justified by usage.
 
 ### Tests
 
-- [ ] Add `test/verify-stale-wait.mjs`.
-- [ ] Test threshold crossing.
-- [ ] Test one notification per waiting episode.
-- [ ] Test notification content.
-- [ ] Test reset after reply.
-- [ ] Test completed task has no stale notification.
-- [ ] Test idle agent without a waiting task has no stale notification.
-- [ ] Test request timeout.
-- [ ] Test parent shutdown.
+- [x] Add `test/verify-stale-wait.mjs`.
+- [x] Test threshold crossing.
+- [x] Test one notification per waiting episode.
+- [x] Test notification content.
+- [x] Test reset after reply.
+- [x] Test completed task has no stale notification.
+- [x] Test idle agent without a waiting task has no stale notification.
+- [x] Test request timeout.
+- [x] Test parent shutdown.
 
 ### Exit gate
 
-- [ ] A waiting scout produces one useful stale-wait notification.
-- [ ] A reply clears the stale condition.
-- [ ] Completed and ordinary idle agents do not generate stale notifications.
+- [x] A waiting scout produces one useful stale-wait notification.
+- [x] A reply clears the stale condition.
+- [x] Completed and ordinary idle agents do not generate stale notifications.
 
 ---
 

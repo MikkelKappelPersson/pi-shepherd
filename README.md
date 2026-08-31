@@ -198,8 +198,13 @@ Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu show
 | **Enable fieldnotes** (`fieldnotes`) | on, off | on | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts. |
 | **Use sheep emoji** (`emojiSheep`) | on, off | on | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead. |
 | **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `20` minutes | Set the default time limit before a Herdr run is reported as timed out. |
+| **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
 
 The settings menu also supports fuzzy search with `/`. Configuration is validated when read; invalid or missing values fall back to the next layer or the defaults above.
+
+### Stale-wait reminders
+
+When a delegated task is **waiting** on a required reply (set with `shepherd_message` + `expectsReply`, or set by the child asking another participant), it can sit there for a while if the target is busy. `staleWaitThreshold` controls how long a task may wait before the parent receives a **single** stale-wait reminder naming the task, the question, the target, and how long it has been waiting. The reminder is informational: it never cancels, times out, or blocks the task. The task's own reply deadline (`timeout`) remains the authoritative bound and settles the task as `blocked` if the reply never comes. A reply (or the task resuming/completing) clears the episode, so the same wait never re-notifies while open.
 
 User settings are stored in `pi-shepherd/config.json` inside the active pi agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). Project overrides are stored in `.shepherd/config.json` in the current working directory. Project configuration is a field-by-field delta over the user configuration: only values different from the user layer are written, and unset fields continue to inherit from it. The settings scope itself is always stored in the user file. A project configuration therefore requires selecting the `project` settings scope; project files are not searched by default.
 
@@ -215,7 +220,8 @@ For example, a user configuration can contain:
   "stayOpen": false,
   "fieldnotes": true,
   "emojiSheep": true,
-  "timeout": 20
+  "timeout": 20,
+  "staleWaitThreshold": 5
 }
 ```
 

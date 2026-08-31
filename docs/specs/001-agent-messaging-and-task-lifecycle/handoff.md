@@ -225,6 +225,53 @@ rejections, bridge delivery and shutdown suppression).
 
 See `phase7-notes.md` in this directory for the design decisions.
 
+### Phase 8 — Stale-wait monitoring
+
+Complete.
+
+Implemented:
+
+- `staleWaitThreshold` setting in `src/extension/config.ts` (minutes, default
+  `5`; `0` disables reminders; invalid values fall back to the default).
+  Wired into `OVERRIDABLE_FIELDS` so it participates in user + project layer
+  resolution, the `/shepherd settings` menu (`src/extension/settings-ui.ts`
+  adds a `Stale wait reminder` row with an `off` option), and the README
+  settings table plus a short stale-wait explanation.
+- `LifecycleRegistry.markStaleNotified(taskId)` (orchestration) stamps the
+  episode with a wall-clock time so the monitor issues at most one reminder
+  per episode. `staleNotifiedAt` is cleared by `setTaskRunning`,
+  `resolvePendingRequest`, `resolveReplyForTask`, and `settleTask` — a reply
+  (or any terminal event) resets the state, a re-entry into `waiting` later
+  can produce a new reminder.
+- `StaleWaitMonitor` (lifecycle.ts) + the `staleWaitMonitor` singleton and
+  `configureStaleWaitNotifications()` / `shutdownStaleWaitMonitor()`. The
+  monitor only starts when a task opens a pending reply
+  (`sendParentMessage` and the child `runtime` mirror call
+  `staleWaitMonitor.kick()`), polls at 1s (unref'd), inspects *task* state
+  (not raw agent state), and emits at most one notification per episode with
+  full context (task, owner, description, question, pending request id,
+  target, target state, elapsed wait, threshold).
+- The parent bridge (`configureStaleWaitBridge` in
+  `src/extension/shepherd.ts`) registers a `shepherd.stale.wait` custom
+  message renderer and delivers via `sendMessage` with
+  `deliverAs: 'followUp'` and **no** turn trigger, so the idle parent sees
+  the nudge without being forced to act; the parent only wakes on a real
+  `shepherd_watch` completion or on a user interaction.
+- `index.ts` toggles `setStaleWaitSessionActive` on session
+  start/shutdown and calls `shutdownStaleWaitMonitor()` on shutdown so the
+  timer is released with the session.
+- Reply deadline (already present, Phase 6) settles a task as `blocked` if
+  the reply never arrives; the stale reminder is strictly informational and
+  never changes task state.
+
+Tests: `test/verify-stale-wait.mjs` (threshold crossing, one notification per
+episode, content coverage, reset after a reply, completed + idle (no task)
+agents stay quiet, stale-wait does not settle a task, monitor starts/stops
+with the waiting set, disabled threshold, and bridge delivery + shutdown
+suppression).
+
+See `phase8-notes.md` in this directory for the design decisions.
+
 ## Important current architecture
 
 ### Parent task completion
@@ -283,14 +330,13 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, and
-7 are complete. The main remaining work is:
+Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, and
+8 are complete. The main remaining work is:
 
 ### Later phases
 
-After Phase 7 (Phases 6 and 7 are complete):
+After Phase 8 (Phases 6, 7, and 8 are complete):
 
-- Phase 8: stale-wait monitoring and configuration
 - Phase 9: task-aware status and TUI widget
 - Phase 10: final artifact/cleanup/compatibility integration and documentation
 - Phase 11: complete live Herdr verification
@@ -312,6 +358,7 @@ npm run task-completion:test
 npm run task-failures:test
 npm run message-routing:test
 npm run task-watchers:test
+npm run stale-wait:test
 npm run launch:test
 ```
 
@@ -352,5 +399,6 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Finish remaining Phase 5 tests.
 - [x] Implement Phase 6 parent message routing.
 - [x] Implement Phase 7 task-aware `shepherd_watch`.
+- [x] Implement Phase 8 stale-wait monitoring + `staleWaitThreshold` setting.
 - [x] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.

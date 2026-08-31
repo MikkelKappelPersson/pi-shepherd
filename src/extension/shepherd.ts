@@ -39,6 +39,8 @@ import {
   configurePromptWatcherNotifications,
   taskWatcherService,
   configureTaskWatcherNotifications,
+  configureStaleWaitNotifications,
+  type StaleWaitInfo,
   sendParentMessage,
   configureParentMessageNotifications,
 } from '../core/lifecycle.ts';
@@ -348,6 +350,93 @@ function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
 let taskWatcherParentSessionActive = false;
 export function setTaskWatcherSessionActive(active: boolean): void {
   taskWatcherParentSessionActive = active;
+}
+
+/** Enable/disable stale-wait delivery without changing the core monitor's state model. */
+let staleWaitParentSessionActive = false;
+export function setStaleWaitSessionActive(active: boolean): void {
+  staleWaitParentSessionActive = active;
+}
+
+function formatElapsedMs(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${s}s`;
+}
+
+function registerStaleWaitRenderer(pi: ExtensionAPI): void {
+  pi.registerMessageRenderer('shepherd.stale.wait', (message, options, theme) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const rendered = [
+      theme.fg('toolTitle', theme.bold('shepherd_stale_wait')),
+      theme.fg('accent', firstLine),
+      ...lines.map(line =>
+        ['action:'].includes(line) ? theme.fg('accent', line) : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  });
+}
+
+function configureStaleWaitBridge(pi: ExtensionAPI): void {
+  registerStaleWaitRenderer(pi);
+  configureStaleWaitNotifications(info => {
+    if (!staleWaitParentSessionActive) return;
+    const owner = info.label
+      ? `${info.agent ?? info.agentId}: ${info.label}`
+      : info.agent ?? info.agentId;
+    const recipient = info.recipientName
+      ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
+      : 'the target agent';
+    const body = [
+      `Waiting ${formatElapsedMs(info.elapsedMs)} for a reply (stale after ${info.thresholdMinutes} min).`,
+      `Task: ${info.taskId}`,
+      `Owner: ${owner} - ${info.description}`,
+      `Question: ${info.question}`,
+      `Pending request: ${info.requestMessageId} (waiting on ${recipient})`,
+    ].filter(Boolean).join('\n');
+    const actions = [
+      'Reply to the recipient on the owner\'s behalf via shepherd_message (set replyTo to the pending request).',
+      `Or nudge ${recipient} with shepherd_message (targetId = recipient).`,
+      'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
+    ].join('\n');
+    const content = formatUserFacingText({
+      content: [{ type: 'text' as const, text: body }],
+      details: {
+        call: {
+          name: 'shepherd_message (possible follow-up)',
+          arguments: { taskId: info.taskId, replyTo: info.requestMessageId },
+        },
+        taskId: info.taskId,
+        agentId: info.agentId,
+        elapsedMs: info.elapsedMs,
+        requestMessageId: info.requestMessageId,
+        action: actions,
+        returnValue: info,
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.stale.wait',
+          content,
+          display: true,
+          details: info,
+        },
+        { deliverAs: 'followUp', triggerTurn: false }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the reply deadline is the authoritative outcome.
+    }
+  });
 }
 
 function registerTaskCompletionRenderer(pi: ExtensionAPI): void {
@@ -957,6 +1046,7 @@ async function executeShepherd(
 export function registerShepherdTools(pi: ExtensionAPI) {
   configurePromptWatcherBridge(pi);
   configureTaskWatcherBridge(pi);
+  configureStaleWaitBridge(pi);
   pi.registerTool({
     name: 'shepherd',
     label: 'Shepherd (manage Herdr agents)',

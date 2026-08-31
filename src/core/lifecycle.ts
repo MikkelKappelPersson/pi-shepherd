@@ -81,6 +81,7 @@ function stopParentBrokerMonitor(): void {
   parentBrokerTimer = undefined;
   parentBrokerTicking = false;
   lastTrackedTaskRuntimeCheck = 0;
+  shutdownStaleWaitMonitor();
 }
 
 /** Ensure one parent-owned mailbox exists for the current Shepherd session. */
@@ -468,6 +469,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
       deadlineAt: replyDeadline,
       text: input.message,
     });
+    staleWaitMonitor.kick();
     try {
       const envelope = provisional;
       const accepted = publishFromParent(broker, envelope);
@@ -616,6 +618,7 @@ function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnv
                 targetAgentId: envelope.requestTargetId,
                 text: envelope.summary ?? envelope.content,
               });
+              staleWaitMonitor.kick();
             } catch {
               // The task already has an outstanding tracked reply; keep the
               // first one per the one-request policy.
@@ -1118,6 +1121,185 @@ export function configureTaskWatcherNotifications(notifier?: TaskWatcherNotifier
 
 export function shutdownTaskWatchers(): void {
   taskWatcherService.shutdown();
+}
+
+/**
+ * One stale-wait observation, produced when a task has been waiting on a
+ * required reply for longer than the configured threshold. Delivered to the
+ * parent once per waiting episode (it is information, never a settlement).
+ */
+export interface StaleWaitInfo {
+  taskId: string;
+  agentId: string;
+  agent?: string;
+  label?: string;
+  description: string;
+  waitingSince: number;
+  /** Milliseconds the task has been waiting as of the observation. */
+  elapsedMs: number;
+  /** The pending request (message) id being waited on. */
+  requestMessageId: string;
+  /** The question the recipient was asked. */
+  question: string;
+  recipientId?: string;
+  recipientName?: string;
+  /** The recipient agent's own lifecycle state (idle/working/...). */
+  recipientState?: string;
+  /** Configured threshold, in minutes, that was crossed. */
+  thresholdMinutes: number;
+}
+
+export type StaleWaitNotifier = (info: StaleWaitInfo) => void | Promise<void>;
+
+/**
+ * Watches tasks that are waiting on a required reply and surfaces one
+ * non-repeating, non-settling reminder to the parent once the configured
+ * `staleWaitThreshold` is crossed. It inspects task state (not raw agent
+ * state), so an idle agent without a waiting task, or a completed task, never
+ * raises a stale notification. It only starts when a waiting task exists and
+ * stops once none remain, and its timer is unref'd so it never keeps the
+ * process alive.
+ */
+export class StaleWaitMonitor {
+  private timer?: ReturnType<typeof setInterval>;
+  private readonly notifier?: StaleWaitNotifier;
+  private readonly registry: typeof lifecycleRegistry;
+  private readonly intervalMs: number;
+
+  constructor(registry = lifecycleRegistry, notifier?: StaleWaitNotifier, intervalMs = 1_000) {
+    this.registry = registry;
+    this.notifier = notifier;
+    this.intervalMs = intervalMs;
+  }
+
+  /** Begin watching; idempotent — called when a task enters `waiting`. */
+  kick(): void {
+    this.ensureStarted();
+    void this.poll();
+  }
+
+  /** Stop the monitor and drop it (parent session teardown). */
+  shutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  setNotifier(notifier?: StaleWaitNotifier): void {
+    this.notifier = notifier;
+  }
+
+  private ensureStarted(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.poll(), this.intervalMs);
+    // A stale-wait reminder is lifecycle state, not a reason for the parent
+    // host process to stay alive.
+    (this.timer as any).unref?.();
+  }
+
+  private maybeStop(): void {
+    if (this.waitingTasks().length === 0 && this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+
+  private waitingTasks() {
+    return this.registry.allTasks().filter(
+      t => t.state === 'waiting' && t.pendingReplyMessageId !== undefined
+    );
+  }
+
+  /** Scan waiting tasks and emit at most one reminder per episode. */
+  async poll(): Promise<void> {
+    const now = Date.now();
+    const waiting = this.waitingTasks();
+    if (waiting.length === 0) {
+      this.maybeStop();
+      return;
+    }
+    const thresholdMinutes = (() => {
+      try {
+        return loadSettings(process.cwd()).staleWaitThreshold;
+      } catch {
+        return 5;
+      }
+    })();
+    // A threshold below 1 minute disables stale-wait reminders entirely.
+    if (thresholdMinutes < 1) {
+      this.maybeStop();
+      return;
+    }
+    const thresholdMs = thresholdMinutes * 60_000;
+    for (const task of waiting) {
+      const waitingSince = task.waitingSince ?? now;
+      const elapsedMs = now - waitingSince;
+      if (elapsedMs < thresholdMs) continue;
+      // One notification per episode: `staleNotifiedAt` is set below and is
+      // cleared whenever the episode ends (a reply, a resume, or settlement),
+      // so the next episode is allowed its own reminder.
+      if (task.staleNotifiedAt !== undefined) continue;
+      const info = await this.buildInfo(task, elapsedMs, thresholdMinutes);
+      try {
+        this.registry.markStaleNotified(task.taskId);
+        const result = this.notifier?.(info);
+        if (result && typeof (result as Promise<void>).catch === 'function') {
+          (result as Promise<void>).catch(() => undefined);
+        }
+      } catch {
+        // The reminder is best-effort; task state is unchanged and the reply
+        // deadline (a settlement) is authoritative.
+      }
+    }
+    this.maybeStop();
+  }
+
+  private async buildInfo(task: any, elapsedMs: number, thresholdMinutes: number): Promise<StaleWaitInfo> {
+    let ownerHandle: AgentHandle | undefined;
+    try {
+      ownerHandle = this.registry.getAgent({ id: task.agentId }).handle;
+    } catch {
+      /* owner may have been closed; still report what we can */
+    }
+    let recipientName: string | undefined;
+    let recipientState: string | undefined;
+    if (task.pendingReplyTargetAgentId) {
+      try {
+        const recipient = this.registry.getAgent({ id: task.pendingReplyTargetAgentId });
+        recipientName = recipient.handle.agent
+          ? recipient.handle.label
+            ? `${recipient.handle.agent}: ${recipient.handle.label}`
+            : recipient.handle.agent
+          : recipient.handle.label;
+        recipientState = recipient.state;
+      } catch {
+        /* unknown recipient: leave these empty */
+      }
+    }
+    return {
+      taskId: task.taskId,
+      agentId: task.agentId,
+      ...(ownerHandle ? { agent: ownerHandle.agent, label: ownerHandle.label } : {}),
+      description: task.description,
+      waitingSince: task.waitingSince ?? Date.now(),
+      elapsedMs,
+      requestMessageId: task.pendingReplyMessageId ?? '',
+      question: task.pendingReplyText ?? '',
+      ...(task.pendingReplyTargetAgentId ? { recipientId: task.pendingReplyTargetAgentId } : {}),
+      ...(recipientName ? { recipientName } : {}),
+      ...(recipientState ? { recipientState } : {}),
+      thresholdMinutes,
+    };
+  }
+}
+
+export const staleWaitMonitor = new StaleWaitMonitor();
+
+export function configureStaleWaitNotifications(notifier?: StaleWaitNotifier): void {
+  staleWaitMonitor.setNotifier(notifier);
+}
+
+export function shutdownStaleWaitMonitor(): void {
+  staleWaitMonitor.shutdown();
 }
 
 async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<PromptResult> {

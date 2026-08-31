@@ -605,6 +605,18 @@ export class LifecycleRegistry {
     return this.taskSnapshot(record);
   }
 
+  /**
+   * Record that a stale-wait reminder for this task was just surfaced to the
+   * parent, so the monitor does not repeat it while the task is still waiting.
+   * Cleared automatically by a reply (resolvePendingRequest), a resume
+   * (setTaskRunning), or any settlement.
+   */
+  markStaleNotified(input: TaskHandleInput | unknown): TaskRecord {
+    const record = this.taskRecord(input);
+    record.staleNotifiedAt = Date.now();
+    return this.taskSnapshot(record);
+  }
+
   addPendingRequest(input: TaskHandleInput | unknown, requestId: string): TaskRecord {
     const record = this.taskRecord(input);
     if (record.settled) {

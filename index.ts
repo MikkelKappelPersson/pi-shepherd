@@ -16,12 +16,13 @@ import {
   registerShepherdTools,
   setPromptWatcherSessionActive,
   setTaskWatcherSessionActive,
+  setStaleWaitSessionActive,
   setShepherdMessageSessionActive,
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
-import { shutdownPromptWatchers, shutdownTaskWatchers } from './src/core/lifecycle.ts';
+import { shutdownPromptWatchers, shutdownTaskWatchers, shutdownStaleWaitMonitor } from './src/core/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
@@ -355,6 +356,7 @@ export default function (pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
     setPromptWatcherSessionActive(true);
     setTaskWatcherSessionActive(true);
+    setStaleWaitSessionActive(true);
     setShepherdMessageSessionActive(true);
     activeSessionCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
@@ -370,9 +372,11 @@ export default function (pi: ExtensionAPI) {
     // untouched for normal lifecycle retention.
     setPromptWatcherSessionActive(false);
     setTaskWatcherSessionActive(false);
+    setStaleWaitSessionActive(false);
     setShepherdMessageSessionActive(false);
     shutdownPromptWatchers();
     shutdownTaskWatchers();
+    shutdownStaleWaitMonitor();
     // Drop the binding on teardown so a reload/new-session cycle without a
     // fresh identity never attributes fresh panes to a stale session.
     bindSessionOwner(undefined);

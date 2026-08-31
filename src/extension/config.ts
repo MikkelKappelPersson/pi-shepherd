@@ -39,6 +39,7 @@ const OVERRIDABLE_FIELDS = [
 	"fieldnotes",
 	"emojiSheep",
 	"timeout",
+	"staleWaitThreshold",
 ] as const;
 type OverridableField = (typeof OVERRIDABLE_FIELDS)[number];
 
@@ -61,6 +62,10 @@ export interface ShepherdSettings {
 	emojiSheep: boolean;
 	/** Default time limit (minutes) for a Herdr run before it's reported timed out. */
 	timeout: number;
+	/** Minutes after which a task waiting on a required reply is flagged as
+	 *  stale and a single reminder is surfaced to the parent. A value below 1
+	 *  means stale-wait reminders are disabled. */
+	staleWaitThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: ShepherdSettings = {
@@ -73,6 +78,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 	fieldnotes: true,
 	emojiSheep: true,
 	timeout: 20,
+	staleWaitThreshold: 5,
 };
 
 export function userConfigFile(): string {
@@ -103,6 +109,17 @@ function validTimeout(v: unknown): number {
 	return v >= 1000 ? Math.round(v / 60_000) : v;
 }
 
+/**
+ * Stale-wait threshold is stored in minutes. Negative or zero values are a
+ * valid way to *disable* stale-wait reminders entirely; anything that is not
+ * a finite number (including a value misinterpreted as ms) falls back to the
+ * default.
+ */
+function validStaleWaitThreshold(v: unknown): number {
+	if (typeof v !== "number" || !Number.isFinite(v)) return DEFAULT_SETTINGS.staleWaitThreshold;
+	return v;
+}
+
 interface LayerCacheEntry {
 	mtimeMs: number;
 	/** Validated known fields actually present in the file (no defaults). */
@@ -129,6 +146,10 @@ function validField(field: OverridableField, raw: Record<string, unknown>): unkn
 			return typeof raw[field] === "boolean" ? raw[field] : undefined;
 		case "timeout":
 			return raw[field] !== undefined ? validTimeout(raw[field]) : undefined;
+		case "staleWaitThreshold":
+			// Unlike timeout, 0 / negative is a *valid* value (disables the
+			// reminder) so we cannot use a "raw !== undefined" guard alone.
+			return typeof raw[field] === "number" ? validStaleWaitThreshold(raw[field]) : undefined;
 	}
 }
 
