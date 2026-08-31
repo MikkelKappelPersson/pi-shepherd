@@ -408,10 +408,10 @@ This checklist tracks implementation of:
 - [x] Test duplicate completion.
 - [x] Test completion with pending requests.
 - [x] Test blocked task completion.
-- [ ] Test provider failure.
-- [ ] Test unexpected child exit.
-- [ ] Test close cancellation.
-- [ ] Test timeout.
+- [x] Test provider failure.
+- [x] Test unexpected child exit.
+- [x] Test close cancellation.
+- [x] Test timeout.
 - [x] Test no completion from `agent_end`.
 - [x] Test no completion from `agent_settled`.
 - [x] Test no completion from idle state.

@@ -4,7 +4,7 @@
 
 - Branch: `feature/001-agent-messaging-and-task-lifecycle`
 - Repository: `MikkelKappelPersson/pi-shepherd`
-- Current HEAD: `b2c3b59 feat: wire tracked delegation and task completion`
+- Current HEAD: tip of the feature branch — `b2c3b59` plus the Phase 5 failure-test commit and this handoff update (hashes shift when this doc changes; use `git log --oneline`)
 - Working tree: clean before adding this handoff
 - Last full verification: `npm test` passed
 
@@ -130,11 +130,11 @@ shepherd_delegate
 The old `shepherd_prompt` path remains separate and is still legacy behavior.
 Its compatibility mapping to task IDs is deliberately deferred.
 
-### Phase 5 — Explicit completion groundwork
+### Phase 5 — Explicit completion and failures
 
-Partially implemented in `b2c3b59`.
+Complete.
 
-Implemented:
+Implemented in `b2c3b59` and the task-failure tests:
 
 - Parent broker polling via `processParentBrokerMessages()`
 - `task_done` envelope consumption
@@ -151,15 +151,22 @@ Implemented:
 - Normal tracked-task `agent_end` no longer claims success
 - Task ID inclusion in retained sidecars
 
-Tests currently cover:
+Tests:
 
-- Owning child completion
-- Foreign child rejection
-- Duplicate consumed completion behavior
-- Pending-request completion rejection
-- Blocked completion
-- Idle child plus explicit completion
-- Normal tracked-task `agent_end` behavior
+- `test/verify-task-completion.mjs`: owning-child completion, foreign-child
+  rejection, duplicate completion, pending-request rejection, blocked
+  completion, idle-child + explicit completion, and no-premature-completion
+  from `agent_end`/`agent_settled`/idle state.
+- `test/verify-task-failures.mjs`: provider-error failure, unexpected pane
+  exit failure, close-to-cancellation, and deadline timeout. Uses a
+  Node-script fake `herdr` on PATH backed by a JSON state file so `pane
+  list`, `pane close`, and `agent read` observations are deterministic.
+
+Deferred (tracked in `tasks.md`):
+
+- Preserve useful child output in failure results (completion-diagnostics
+  follow-up).
+- Preserve runtime observations for status output (Phase 9).
 
 ## Important current architecture
 
@@ -218,18 +225,9 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. The main remaining
-work is:
-
-### Finish Phase 5 verification
-
-- Add provider-failure test using a fake Herdr pane/output.
-- Add unexpected-pane-exit test.
-- Add close-cancellation integration test.
-- Add actual deadline-timer test.
-- Add stronger queued-follow-up/no-premature-completion test.
-- Preserve useful child output in failure results.
-- Decide whether runtime observations need a separate record before Phase 9.
+Consult `tasks.md` for the authoritative checkbox state. Phase 5 is complete
+(the remaining unchecked boxes are explicitly deferred to later phases). The
+main remaining work is:
 
 ### Phase 6 — Asynchronous message routing
 
@@ -273,6 +271,7 @@ npm run messaging:test
 npm run child-surface:test
 npm run delegate:test
 npm run task-completion:test
+npm run task-failures:test
 npm run launch:test
 ```
 
@@ -293,6 +292,7 @@ git log --oneline --decorate -10
 ## Commit history for this feature
 
 ```text
+(test: cover phase five task failure paths)  <- tip after the Phase 5 test work
 b2c3b59 feat: wire tracked delegation and task completion
 44b5ae8 feat: add child messaging and completion surface
 e48666d feat: add parent-owned messaging mailbox
@@ -303,13 +303,13 @@ a0dab9f test: establish async task lifecycle phase zero
 
 ## Continuation checklist
 
-- [ ] Read this handoff.
-- [ ] Read `spec.md`.
-- [ ] Read `plan.md`.
-- [ ] Read the current checkbox state in `tasks.md`.
-- [ ] Confirm the feature branch is checked out.
-- [ ] Run `npm test` before making further changes.
-- [ ] Finish remaining Phase 5 tests.
+- [x] Read this handoff.
+- [x] Read `spec.md`.
+- [x] Read `plan.md`.
+- [x] Read the current checkbox state in `tasks.md`.
+- [x] Confirm the feature branch is checked out.
+- [x] Run `npm test` before making further changes.
+- [x] Finish remaining Phase 5 tests.
 - [ ] Implement Phase 6 parent message routing.
 - [ ] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.
