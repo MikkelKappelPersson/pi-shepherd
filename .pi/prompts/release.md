@@ -1,5 +1,5 @@
 ---
-description: Cut the next pi-shepherd release: verify, bump the package version, commit, tag, and push
+description: "Cut the next pi-shepherd release: verify, bump the package version, commit, tag, and push"
 argument-hint: "[version] [bump-level: patch|minor|major]"
 ---
 Cut the next release of this repository following the established v0.1.x pattern.
