@@ -246,6 +246,12 @@ This captures the prompt at pi’s `before_agent_start` hook without making a pr
 
 The command lists all active agents currently detected in Herdr. For one agent, use `/shepherd status` or `/shepherd read`.
 
+### Reading status
+
+`shepherd_status` reports **process state and task state independently**. A process can be `idle` while its delegated task is still `waiting` on a required reply, and one can be `working` while its task is `running`. When an agent owns an open task the status also includes the task ID, how long it has been `waiting`, the pending request (message) ID, the agent the reply is expected from, and a `stale` flag once a stale-wait reminder has fired.
+
+The persistent "below the editor" widget tracks the same two dimensions: it lists agents that are `working` **or** that are idle-but-`waiting` on a required reply (so an idle child parked on a peer reply is never hidden as done). Waiting rows render distinctly, show how long the wait has lasted, and name the agent being waited on; a `stale` wait is flagged. Pane and task IDs never leak into the display — rows use only display names.
+
 ## Fieldnotes
 
 When fieldnotes are enabled, all agents orchestrated by one Shepherd session in the same project share a durable note session:

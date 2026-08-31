@@ -866,9 +866,27 @@ export async function doAction(
       const publicResult = {
         id: result.handle.id,
         state: result.state,
+        ...(result.task
+          ? {
+              task: {
+                id: result.task.id,
+                state: result.task.state,
+                ...(result.task.waitingMs !== undefined ? { waitingMs: result.task.waitingMs } : {}),
+                ...(result.task.pendingRequestMessageId
+                  ? { pendingRequest: result.task.pendingRequestMessageId }
+                  : {}),
+                ...(result.task.waitingRecipient ? { waitingOn: result.task.waitingRecipient } : {}),
+                ...(result.task.stale ? { stale: true } : {}),
+              },
+            }
+          : {}),
         ...(result.error ? { error: result.error } : {}),
       };
-      return textResult(`agent ${publicResult.state}.`, { status: publicResult, returnValue: publicResult });
+      const taskNote = result.task ? `; task ${result.task.id} ${result.task.state}` : '';
+      return textResult(`agent ${result.state}${taskNote}.`, {
+        status: publicResult,
+        returnValue: publicResult,
+      });
     }
     case 'close': {
       const a: any = args;

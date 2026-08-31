@@ -643,43 +643,43 @@ This checklist tracks implementation of:
 
 ### Status model
 
-- [ ] Extend `shepherd_status` with process state.
-- [ ] Extend `shepherd_status` with task state.
-- [ ] Include task ID when a task is active.
-- [ ] Include waiting age when applicable.
-- [ ] Include pending request ID when applicable.
-- [ ] Include waiting recipient when applicable.
-- [ ] Include stale flag when applicable.
-- [ ] Keep Herdr pane identity internal to diagnostics.
-- [ ] Preserve opaque agent IDs in public lifecycle results.
+- [x] Extend `shepherd_status` with process state.
+- [x] Extend `shepherd_status` with task state.
+- [x] Include task ID when a task is active.
+- [x] Include waiting age when applicable.
+- [x] Include pending request ID when applicable.
+- [x] Include waiting recipient when applicable.
+- [x] Include stale flag when applicable.
+- [x] Keep Herdr pane identity internal to diagnostics.
+- [x] Preserve opaque agent IDs in public lifecycle results.
 
 ### Status widget
 
-- [ ] Include waiting tasks in the status projection.
-- [ ] Do not filter waiting tasks out because the process is idle.
-- [ ] Render waiting distinctly from working.
-- [ ] Render waiting recipient where available.
-- [ ] Render waiting elapsed time.
-- [ ] Render stale state distinctly.
-- [ ] Preserve current session ownership filtering.
-- [ ] Avoid mailbox reads during every render frame.
-- [ ] Reuse bounded polling/snapshot behavior.
+- [x] Include waiting tasks in the status projection.
+- [x] Do not filter waiting tasks out because the process is idle.
+- [x] Render waiting distinctly from working.
+- [x] Render waiting recipient where available.
+- [x] Render waiting elapsed time.
+- [x] Render stale state distinctly.
+- [x] Preserve current session ownership filtering.
+- [x] Avoid mailbox reads during every render frame.
+- [x] Reuse bounded polling/snapshot behavior.
 
 ### Tests
 
-- [ ] Update `test/verify-status-widget.mjs`.
-- [ ] Test idle process with waiting task.
-- [ ] Test working process with running task.
-- [ ] Test completed task removal.
-- [ ] Test stale waiting display.
-- [ ] Test session ownership filtering.
-- [ ] Test parent/child status separation.
+- [x] Update `test/verify-status-widget.mjs`.
+- [x] Test idle process with waiting task.
+- [x] Test working process with running task.
+- [x] Test completed task removal.
+- [x] Test stale waiting display.
+- [x] Test session ownership filtering.
+- [x] Test parent/child status separation.
 
 ### Exit gate
 
-- [ ] Status shows process state and task state independently.
-- [ ] An idle waiting scout remains visible.
-- [ ] Status/widget tests pass.
+- [x] Status shows process state and task state independently.
+- [x] An idle waiting scout remains visible.
+- [x] Status/widget tests pass.
 
 ---
 

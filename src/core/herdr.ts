@@ -26,8 +26,9 @@ import { promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
-import { sessionOwner } from "./orchestration.ts";
+import { lifecycleRegistry, sessionOwner } from "./orchestration.ts";
 import type { ChildCapability } from "./messaging.ts";
+import type { AgentHandle, AgentTaskStatus } from "./orchestration.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -161,24 +162,70 @@ export function listHerdrAgents(): HerdrAgentSummary[] {
 }
 
 /**
- * The subagents pi-shepherd is currently working on in THIS parent session:
- * our own panes (owned by this session) whose agent is not idle (working,
- * waiting on input, errored, …). Used for the persistent "below the editor"
- * status widget. Panes owned by other shepherd sessions are excluded so each
- * widget only shows the sheep its shepherd spawned.
+ * The active tracked task for every pane owned by this session, keyed by pane
+ * id. Reads only the in-memory lifecycle registry (no Herdr or mailbox calls)
+ * so it is safe to call on each status-widget poll tick. An agent can own an
+ * open task while its Herdr process is idle — most importantly a `waiting`
+ * task, where the child is parked until a peer reply arrives.
  */
-export function workingSubagents(): HerdrAgentSummary[] {
+export interface ActiveTaskByPane {
+	paneId: string;
+	agentHandle: AgentHandle;
+	task: AgentTaskStatus;
+}
+
+export function activeTasksByPane(): Map<string, ActiveTaskByPane> {
+	const out = new Map<string, ActiveTaskByPane>();
+	let handles: AgentHandle[];
+	try {
+		handles = lifecycleRegistry.allAgents();
+	} catch {
+		return out;
+	}
+	for (const handle of handles) {
+		if (!handle.paneId) continue;
+		let status: ReturnType<typeof lifecycleRegistry.status>;
+		try {
+			status = lifecycleRegistry.status(handle);
+		} catch {
+			continue;
+		}
+		if (status.task) out.set(handle.paneId, { paneId: handle.paneId, agentHandle: handle, task: status.task });
+	}
+	return out;
+}
+
+/**
+ * The subagents pi-shepherd is working on **or waiting on** in THIS parent
+ * session: our own panes (owned by this session) whose Herdr agent is not
+ * idle, OR whose process is idle but which still own an open tracked task.
+ * The second case matters: an idle child may own a `waiting` task parked on a
+ * peer reply, and dropping it here would silently hide in-flight work. Used
+ * for the persistent "below the editor" status widget. Panes owned by other
+ * shepherd sessions are excluded so each widget only shows the sheep its
+ * shepherd spawned.
+ */
+export function workingOrWaitingSubagents(): HerdrAgentSummary[] {
 	// `rec.agent` in `herdr agent list` is always the program name (“pi”),
 	// not the agent kind. For shepherd panes the agent kind (scout/worker/…)
 	// is what we recorded when the tab was created — use that for the label.
 	const panes = loadCreatedPanes().filter((p) => paneOwner(p) === sessionOwner());
 	const kindByPane = new Map(panes.map((p) => [p.paneId, p.name]));
+	const taskByPane = activeTasksByPane();
 	return listHerdrAgents()
-		.filter((s) => s.shepherd && s.state !== "idle" && kindByPane.has(s.paneId))
+		.filter((s) => s.shepherd && kindByPane.has(s.paneId) && (s.state !== "idle" || taskByPane.has(s.paneId)))
 		.map((s) => {
 			const kind = kindByPane.get(s.paneId);
 			return kind && kind !== "pi" ? { ...s, name: kind } : s;
 		});
+}
+
+/**
+ * Backwards-compatible name for the working set; retained for callers that
+ * do not need idle-but-waiting agents.
+ */
+export function workingSubagents(): HerdrAgentSummary[] {
+	return workingOrWaitingSubagents().filter((s) => s.state !== "idle");
 }
 
 export async function herdrExec(args: string[]): Promise<unknown> {

@@ -272,6 +272,47 @@ suppression).
 
 See `phase8-notes.md` in this directory for the design decisions.
 
+### Phase 9 — Status and TUI integration
+
+Complete.
+
+Implemented:
+
+- `AgentStatus` in `src/core/orchestration.ts` now carries a `task` view
+  (`id`, `state`, `waitingSince`/`waitingMs`, `pendingRequestMessageId`,
+  `waitingRecipient`, `stale`) computed by a new
+  `LifecycleRegistry.taskStatusForAgent()`; process state and task state stay
+  independent (an idle process owns the waiting task; a completed task leaves
+  the process `done` with no `task` field).
+- `src/extension/shepherd.ts` `status` action exposes a compact public task
+  view (`waitingMs`, `pendingRequest` (renamed from the long field),
+  `waitingOn`, `stale`) and names both process and task state in the summary
+  text. Herdr pane ids remain internal diagnostics (not part of the public
+  `status` result).
+- `src/core/herdr.ts` adds `activeTasksByPane()` (in-memory registry only,
+  safe for every snapshot tick) and `workingOrWaitingSubagents()`: an owned
+  pane is listed when the process is not idle **or** it still owns an open
+  tracked task, so an idle child parked on a required reply is never filtered
+  out as "done". `workingSubagents()` remains as a working-only projection.
+- The status widget in `index.ts` now renders task state distinctly: the
+  header counts `N working · N waiting`, rows show the **task** state while a
+  task is open (a working process with a waiting task renders `waiting`),
+  and waiting rows append ` ⏳<m>m ←<recipient>` (elapsed wait + who is
+  expected to answer). A stale episode renders as `waiting (stale)`. Pane and
+  task ids are not painted into rows.
+- README: "Reading status" section documents independent process/task state,
+  the task fields, and the widget's idle-but-waiting projection.
+
+Tests: `test/verify-status.mjs` (process/task independence for idle+waiting,
+working+running, and no-task agents; reply clears waiting/stale; completion
+removes the task view; doAction public mapping keeps opaque ids and never
+leaks pane data). `test/verify-status-widget.mjs` now covers the idle process
+with a waiting (stale) task, working process with a running task, completed
+task removal, session ownership filtering, and phase-1/2 glyph/width checks
+across three snapshot phases.
+
+See `phase9-notes.md` in this directory for the design decisions.
+
 ## Important current architecture
 
 ### Parent task completion
@@ -330,14 +371,13 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, and
-8 are complete. The main remaining work is:
+Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, 8,
+and 9 are complete. The main remaining work is:
 
 ### Later phases
 
-After Phase 8 (Phases 6, 7, and 8 are complete):
+After Phase 9 (Phases 6, 7, 8, and 9 are complete):
 
-- Phase 9: task-aware status and TUI widget
 - Phase 10: final artifact/cleanup/compatibility integration and documentation
 - Phase 11: complete live Herdr verification
 
@@ -359,6 +399,8 @@ npm run task-failures:test
 npm run message-routing:test
 npm run task-watchers:test
 npm run stale-wait:test
+npm run status:test
+npm run status-widget:test
 npm run launch:test
 ```
 
@@ -400,5 +442,6 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Implement Phase 6 parent message routing.
 - [x] Implement Phase 7 task-aware `shepherd_watch`.
 - [x] Implement Phase 8 stale-wait monitoring + `staleWaitThreshold` setting.
+- [x] Implement Phase 9 task-aware status and TUI projection.
 - [x] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.

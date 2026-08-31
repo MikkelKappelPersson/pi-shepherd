@@ -138,9 +138,28 @@ export interface CreateTaskOptions {
   artifactSession?: ShepherdSession;
 }
 
+/** Public, task-scoped view of an agent's active tracked task. */
+export interface AgentTaskStatus {
+  id: string;
+  state: TaskState;
+  description: string;
+  /** Milliseconds the task has been waiting on its required reply. */
+  waitingMs?: number;
+  waitingSince?: number;
+  /** Id of the pending request (message) the task is waiting on. */
+  pendingRequestMessageId?: string;
+  /** Display name of the agent the reply is expected from. */
+  waitingRecipient?: string;
+  /** True when the stale-wait monitor has already reminded for this episode. */
+  stale?: boolean;
+}
+
 export interface AgentStatus {
   handle: AgentHandle;
+  /** The owning process/agent's lifecycle state (idle/working/blocked/done/failed/closed). */
   state: AgentLifecycleState;
+  /** The agent's active tracked task, if one is still open. Independent of `state`. */
+  task?: AgentTaskStatus;
   paneId?: string;
   tabId?: string;
   workspaceId?: string;
@@ -388,10 +407,46 @@ export class LifecycleRegistry {
     const record = this.getAgent(handle);
     if (state) record.state = state;
     if (error) record.error = error;
+    const task = this.taskStatusForAgent(record);
     return {
       handle: { ...record.handle },
       state: record.state,
+      ...(task ? { task } : {}),
       ...(record.error ? { error: record.error } : {}),
+    };
+  }
+
+  /**
+   * The agent's active tracked task as a public status view, or undefined when
+   * the agent owns no open task. Independent of the process/agent state: an
+   * idle process can own a `waiting` task and a working process a `running` one.
+   */
+  taskStatusForAgent(record: AgentRecord): AgentTaskStatus | undefined {
+    if (!record.activeTaskId) return undefined;
+    const task = this.tasks.get(record.activeTaskId);
+    if (!task || task.settled) return undefined;
+    const waiting = task.state === 'waiting' ? task.waitingSince : undefined;
+    let waitingRecipient: string | undefined;
+    if (task.pendingReplyTargetAgentId) {
+      try {
+        const recipient = this.agents.get(task.pendingReplyTargetAgentId);
+        waitingRecipient = recipient
+          ? formatAgentName(recipient.handle.agent, recipient.handle.label)
+          : task.pendingReplyTargetAgentId;
+      } catch {
+        waitingRecipient = task.pendingReplyTargetAgentId;
+      }
+    }
+    return {
+      id: task.taskId,
+      state: task.state,
+      description: task.description,
+      ...(waiting !== undefined
+        ? { waitingSince: waiting, waitingMs: Math.max(0, Date.now() - waiting) }
+        : {}),
+      ...(task.pendingReplyMessageId ? { pendingRequestMessageId: task.pendingReplyMessageId } : {}),
+      ...(waitingRecipient ? { waitingRecipient } : {}),
+      ...(task.staleNotifiedAt !== undefined ? { stale: true } : {}),
     };
   }
 
