@@ -50,6 +50,11 @@ import {
   type CreateTaskOptions,
   type TaskHandle,
   type TaskResult,
+  type TaskHandleInput,
+  type TaskWatcherCompletion,
+  type TaskWatcherRegistration,
+  type TaskWatcherNotification,
+  type TaskWatcherCallback,
 } from './orchestration.ts';
 import {
   reserveArtifacts,
@@ -986,6 +991,133 @@ export function configurePromptWatcherNotifications(notifier?: PromptWatcherNoti
 
 export function shutdownPromptWatchers(): void {
   promptWatcherService.shutdown();
+}
+
+export type TaskWatcherNotifier = (notification: TaskWatcherNotification) => void | Promise<void>;
+
+/**
+ * Non-blocking terminal-state observer for tracked delegated tasks.
+ *
+ * Unlike {@link PromptWatcherService}, the task path settles only from explicit
+ * lifecycle events — a child calling `shepherd_done` or an explicit failure,
+ * cancellation, or timeout. A child becoming idle, ending a turn
+ * (`agent_end`/`agent_settled`), or entering `waiting` is deliberately NOT a
+ * completion signal, so the registry drives the watcher directly from
+ * `settleTask`; this service only coalesces and delivers those completions to
+ * the parent without polling.
+ */
+export class TaskWatcherService {
+  private notifier?: TaskWatcherNotifier;
+  private readonly registry: typeof lifecycleRegistry;
+  private readonly coalesceMs: number;
+  private readonly queued = new Map<string, TaskWatcherCompletion[]>();
+  private readonly taskOrder = new Map<string, Map<string, number>>();
+  private readonly remaining = new Map<string, number>();
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  constructor(
+    registry = lifecycleRegistry,
+    notifier?: TaskWatcherNotifier,
+    coalesceMs = 25
+  ) {
+    this.registry = registry;
+    this.notifier = notifier;
+    this.coalesceMs = coalesceMs;
+  }
+
+  setNotifier(notifier?: TaskWatcherNotifier): void {
+    this.notifier = notifier;
+  }
+
+  /**
+   * Register a one-shot watcher for one task id or a non-empty array. Returns
+   * synchronously with already-completed results and pending ids; later
+   * terminal outcomes arrive via the notifier exactly once per task. Agent ids
+   * and Herdr pane ids are rejected by the registry (unknown task id).
+   */
+  watch(handles: TaskHandleInput | TaskHandleInput[]): TaskWatcherRegistration {
+    let watcherId = '';
+    const registration = this.registry.watchTasks(handles, completion => {
+      this.queue(watcherId, completion);
+    });
+    watcherId = registration.watcherId;
+    if (registration.pending.length > 0) {
+      this.taskOrder.set(
+        watcherId,
+        new Map(registration.taskIds.map((taskId, index) => [taskId, index]))
+      );
+      this.remaining.set(watcherId, registration.pending.length);
+    }
+    return registration;
+  }
+
+  /** Stop delivery state for the parent session and drop any live registrations. */
+  shutdown(): void {
+    for (const timer of this.flushTimers.values()) clearTimeout(timer);
+    this.flushTimers.clear();
+    this.queued.clear();
+    this.taskOrder.clear();
+    this.remaining.clear();
+    this.registry.clearWatchers();
+  }
+
+  private queue(watcherId: string, completion: TaskWatcherCompletion): void {
+    if (!watcherId) return;
+    const list = this.queued.get(watcherId) ?? [];
+    list.push({ ...completion });
+    this.queued.set(watcherId, list);
+    const remaining = this.remaining.get(watcherId);
+    if (remaining !== undefined) this.remaining.set(watcherId, Math.max(0, remaining - 1));
+    if (!this.flushTimers.has(watcherId)) {
+      const timer = setTimeout(() => this.flush(watcherId), this.coalesceMs);
+      (timer as any).unref?.();
+      this.flushTimers.set(watcherId, timer);
+    }
+  }
+
+  private flush(watcherId: string): void {
+    this.flushTimers.delete(watcherId);
+    const completions = this.queued.get(watcherId);
+    this.queued.delete(watcherId);
+    if (!completions || completions.length === 0) return;
+    // When several completions coalesce into one notification, keep the array
+    // in the caller's input order so the result is deterministic without
+    // delaying an individual completion until earlier tasks finish.
+    const order = this.taskOrder.get(watcherId);
+    if (order) {
+      completions.sort((left, right) =>
+        (order.get(left.taskId) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(right.taskId) ?? Number.MAX_SAFE_INTEGER)
+      );
+    }
+    const notification: TaskWatcherNotification = {
+      watcherId,
+      completions: completions as TaskResult[],
+    };
+    if (this.remaining.get(watcherId) === 0) {
+      this.taskOrder.delete(watcherId);
+      this.remaining.delete(watcherId);
+    }
+    try {
+      const result = this.notifier?.(notification);
+      if (result && typeof (result as Promise<void>).catch === 'function') {
+        (result as Promise<void>).catch(() => undefined);
+      }
+    } catch {
+      // The task result is already durable in the registry; a missing parent
+      // bridge must not corrupt settlement or fieldnote finalization.
+    }
+  }
+}
+
+export const taskWatcherService = new TaskWatcherService();
+
+export function configureTaskWatcherNotifications(notifier?: TaskWatcherNotifier): void {
+  taskWatcherService.setNotifier(notifier);
+}
+
+export function shutdownTaskWatchers(): void {
+  taskWatcherService.shutdown();
 }
 
 async function waitOne(handle: PromptHandleInput, timeoutMs = 120000): Promise<PromptResult> {

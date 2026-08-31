@@ -507,67 +507,67 @@ This checklist tracks implementation of:
 
 ### Watcher core
 
-- [ ] Generalize or extend the watcher registry to accept task IDs.
-- [ ] Support one task ID.
-- [ ] Support an array of task IDs.
-- [ ] Return already-completed task results on registration.
-- [ ] Keep watcher registration non-blocking.
-- [ ] Preserve one-shot watcher behavior.
-- [ ] Make watcher delivery idempotent.
-- [ ] Preserve deterministic ordering for coalesced arrays.
-- [ ] Release watcher state after all tasks settle.
-- [ ] Release watcher timers at parent shutdown.
+- [x] Generalize or extend the watcher registry to accept task IDs.
+- [x] Support one task ID.
+- [x] Support an array of task IDs.
+- [x] Return already-completed task results on registration.
+- [x] Keep watcher registration non-blocking.
+- [x] Preserve one-shot watcher behavior.
+- [x] Make watcher delivery idempotent.
+- [x] Preserve deterministic ordering for coalesced arrays.
+- [x] Release watcher state after all tasks settle.
+- [x] Release watcher timers at parent shutdown.
 
 ### Completion behavior
 
-- [ ] Watch only terminal task states.
-- [ ] Do not settle on child idle state.
-- [ ] Do not settle on `agent_end`.
-- [ ] Do not settle on `agent_settled`.
-- [ ] Do not settle when a task enters `waiting`.
-- [ ] Include task ID in every completion.
-- [ ] Include agent ID in every completion.
-- [ ] Include terminal status and return code.
-- [ ] Include summary text where available.
-- [ ] Include error data where available.
+- [x] Watch only terminal task states.
+- [x] Do not settle on child idle state.
+- [x] Do not settle on `agent_end`.
+- [x] Do not settle on `agent_settled`.
+- [x] Do not settle when a task enters `waiting`.
+- [x] Include task ID in every completion.
+- [x] Include agent ID in every completion.
+- [x] Include terminal status and return code.
+- [x] Include summary text where available.
+- [x] Include error data where available.
 
 ### Parent notification bridge
 
-- [ ] Deliver watcher results through a custom Shepherd parent message.
-- [ ] Use follow-up delivery for completion notifications.
-- [ ] Trigger a parent turn only according to watcher policy.
-- [ ] Suppress notifications after parent shutdown.
-- [ ] Preserve standard call/return/details formatting.
+- [x] Deliver watcher results through a custom Shepherd parent message.
+- [x] Use follow-up delivery for completion notifications.
+- [x] Trigger a parent turn only according to watcher policy.
+- [x] Suppress notifications after parent shutdown.
+- [x] Preserve standard call/return/details formatting.
 
 ### Compatibility
 
-- [ ] Decide whether `shepherd_watch` accepts legacy prompt IDs.
-- [ ] If accepted, map prompt IDs explicitly to task IDs.
-- [ ] Reject agent IDs and pane IDs as watcher targets.
-- [ ] Document the chosen compatibility behavior.
-- [ ] Update the existing watcher tests or retain a compatibility test suite.
+- [x] Decide whether `shepherd_watch` accepts legacy prompt IDs.
+- [x] If accepted, map prompt IDs explicitly to task IDs.
+- [x] Reject agent IDs and pane IDs as watcher targets.
+- [x] Document the chosen compatibility behavior.
+- [x] Update the existing watcher tests or retain a compatibility test suite.
 
 ### Tests
 
-- [ ] Add `test/verify-task-watchers.mjs`.
-- [ ] Test a pending task.
-- [ ] Test an already-completed task.
-- [ ] Test multiple task IDs.
-- [ ] Test independent watchers.
-- [ ] Test completion ordering.
-- [ ] Test blocked completion.
-- [ ] Test failed completion.
-- [ ] Test cancelled completion.
-- [ ] Test timeout completion.
-- [ ] Test no completion from waiting state.
-- [ ] Test no duplicate completion notification.
-- [ ] Test parent shutdown.
+- [x] Add `test/verify-task-watchers.mjs`.
+- [x] Test a pending task.
+- [x] Test an already-completed task.
+- [x] Test multiple task IDs.
+- [x] Test independent watchers.
+- [x] Test completion ordering.
+- [x] Test blocked completion.
+- [x] Test failed completion.
+- [x] Test cancelled completion.
+- [x] Test timeout completion.
+- [x] Test no completion from waiting state.
+- [x] Test no duplicate completion notification.
+- [x] Test parent shutdown.
 
 ### Exit gate
 
-- [ ] `shepherd_watch` tracks tasks rather than turns.
-- [ ] The canonical scout/planner scenario remains pending during the wait.
-- [ ] The watcher reports exactly one result after `shepherd_done`.
+- [x] `shepherd_watch` tracks tasks rather than turns.
+- [x] The canonical scout/planner scenario remains pending during the wait.
+- [x] The watcher reports exactly one result after `shepherd_done`.
 
 ---
 

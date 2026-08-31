@@ -166,8 +166,35 @@ export interface WatcherCompletion extends PromptResult {
   label?: string;
 }
 
+/** A task completion enriched with the owning agent's display identity. */
+export interface TaskWatcherCompletion extends TaskResult {
+  agent?: string;
+  label?: string;
+}
+
+export interface TaskWatcherRegistration {
+  watcherId: string;
+  taskIds: string[];
+  pending: string[];
+  completed: TaskResult[];
+}
+
+/**
+ * A watcher notification payload. Completions are heterogeneous: task
+ * completions (Phase 7 and later) and legacy prompt completions (watchers that
+ * were registered with prompt ids) are not mixed in a single notification.
+ */
+export interface TaskWatcherNotification {
+  watcherId: string;
+  completions: TaskResult[];
+}
+
+export type TaskWatcherCallback = (completion: TaskWatcherCompletion) => void;
+
 export interface WatcherRegistration {
   watcherId: string;
+  /** Task ids in this watcher; empty for purely prompt-based watchers. */
+  taskIds: string[];
   promptIds: string[];
   pending: string[];
   completed: PromptResult[];
@@ -282,12 +309,15 @@ export class LifecycleRegistry {
   private readonly prompts = new Map<string, PromptRecord>();
   private readonly tasks = new Map<string, TaskRecordInternal>();
   private readonly watchers = new Map<string, {
+    kind: 'prompt' | 'task';
     promptIds: string[];
+    taskIds: string[];
     pending: Set<string>;
     callback?: PromptWatcherCallback;
     delivered: Set<string>;
   }>();
   private readonly promptWatchers = new Map<string, Set<string>>();
+  private readonly taskWatchers = new Map<string, Set<string>>();
 
   private id(kind: 'agent' | 'prompt' | 'task' | 'watch'): string {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
@@ -793,6 +823,29 @@ export class LifecycleRegistry {
             : 'failed';
       }
     }
+    // Notify each task watcher exactly once, using the task id as the primary
+    // correlation key. Settlement is authoritative in the task record; a
+    // callback failure must never affect waiters or artifacts. This is the
+    // only signal that drives task watcher completion — entering `waiting`,
+    // `idle`, or `agent_settled` is intentionally not a settlement here.
+    const watcherIds = [...(this.taskWatchers.get(record.taskId) ?? [])];
+    this.taskWatchers.delete(record.taskId);
+    const agentHandle = this.agents.get(record.agentId)?.handle;
+    for (const watcherId of watcherIds) {
+      const watcher = this.watchers.get(watcherId);
+      if (!watcher || watcher.delivered.has(record.taskId)) continue;
+      watcher.delivered.add(record.taskId);
+      watcher.pending.delete(record.taskId);
+      try {
+        (watcher.callback as TaskWatcherCallback)?.({
+          ...result,
+          ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+        });
+      } catch {
+        /* notification delivery must not break lifecycle settlement */
+      }
+      if (watcher.pending.size === 0) this.watchers.delete(watcherId);
+    }
     return { ...result };
   }
 
@@ -901,7 +954,9 @@ export class LifecycleRegistry {
     }
     if (pending.size > 0) {
       this.watchers.set(watcherId, {
+        kind: 'prompt',
         promptIds: [...promptIds],
+        taskIds: [],
         pending,
         callback,
         delivered: new Set(),
@@ -912,7 +967,7 @@ export class LifecycleRegistry {
         watchers.add(watcherId);
       }
     }
-    return { watcherId, promptIds, pending: [...pending], completed };
+    return { watcherId, taskIds: [], promptIds, pending: [...pending], completed };
   }
 
   /** Prompt ids that still have at least one active watcher. */
@@ -920,18 +975,79 @@ export class LifecycleRegistry {
     return [...this.promptWatchers.keys()];
   }
 
+  /** True when an opaque handle string is a tracked task id for this session. */
+  isTaskId(id: string): boolean {
+    return this.tasks.has(id);
+  }
+
+  /** Task ids that still have at least one active watcher. */
+  watchedTaskIds(): string[] {
+    return [...this.taskWatchers.keys()];
+  }
+
+  /**
+   * Register a one-shot observer for specific tracked tasks. Synchronous, like
+   * {@link watchPrompts}: already-settled tasks are returned immediately and
+   * pending tasks are reported exactly once when they reach a terminal state.
+   * A watcher never observes a child entering `waiting`, `idle`, or
+   * `agent_settled`; only settlement (shepherd_done or an explicit
+   * failure/cancellation/timeout) fires the callback.
+   */
+  watchTasks(
+    handles: TaskHandleInput | TaskHandleInput[],
+    callback?: TaskWatcherCallback
+  ): TaskWatcherRegistration {
+    const values = Array.isArray(handles) ? handles : [handles];
+    if (values.length === 0) {
+      throw new LifecycleError('invalid_handle', 'Expected one or more opaque task ids to watch.');
+    }
+    const taskIds = values.map(value => {
+      const record = this.taskRecord(value);
+      return record.taskId;
+    });
+    if (new Set(taskIds).size !== taskIds.length) {
+      throw new LifecycleError('invalid_handle', 'A watcher cannot contain duplicate task ids.');
+    }
+    const watcherId = this.id('watch');
+    const pending = new Set<string>();
+    const completed: TaskResult[] = [];
+    for (const taskId of taskIds) {
+      const record = this.tasks.get(taskId)!;
+      if (record.settled && record.result) completed.push({ ...record.result });
+      else pending.add(taskId);
+    }
+    if (pending.size > 0) {
+      this.watchers.set(watcherId, {
+        kind: 'task',
+        promptIds: [],
+        taskIds: [...taskIds],
+        pending,
+        callback,
+        delivered: new Set(),
+      });
+      for (const taskId of pending) {
+        let watchers = this.taskWatchers.get(taskId);
+        if (!watchers) this.taskWatchers.set(taskId, (watchers = new Set()));
+        watchers.add(watcherId);
+      }
+    }
+    return { watcherId, taskIds, pending: [...pending], completed };
+  }
+
   /** Remove all watchers during parent session teardown. */
   clearWatchers(): void {
     for (const [watcherId, watcher] of this.watchers) this.removeWatcher(watcherId, watcher);
     this.watchers.clear();
     this.promptWatchers.clear();
+    this.taskWatchers.clear();
   }
 
-  private removeWatcher(watcherId: string, watcher: { pending: Set<string> }): void {
-    for (const promptId of watcher.pending) {
-      const watchers = this.promptWatchers.get(promptId);
+  private removeWatcher(watcherId: string, watcher: { kind: 'prompt' | 'task'; pending: Set<string> }): void {
+    const index = watcher.kind === 'task' ? this.taskWatchers : this.promptWatchers;
+    for (const id of watcher.pending) {
+      const watchers = index.get(id);
       watchers?.delete(watcherId);
-      if (watchers && watchers.size === 0) this.promptWatchers.delete(promptId);
+      if (watchers && watchers.size === 0) index.delete(id);
     }
     this.watchers.delete(watcherId);
   }

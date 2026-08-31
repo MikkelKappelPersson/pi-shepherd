@@ -199,6 +199,32 @@ replies, delivery failures, unknown/closed targets, task ownership check).
 See `phase6-notes.md` in this directory for the routing and correlation
 decisions.
 
+### Phase 7 — Task-aware `shepherd_watch`
+
+Complete.
+
+Implemented:
+
+- `LifecycleRegistry.watchTasks()` (plus the task side of `settleTask`
+  settlement) in `src/core/orchestration.ts`: one-shot, synchronous,
+  exactly-once per task, driven directly from settlement — no polling.
+  `settleTask` is the single authoritative hook, so `waiting`, `idle`,
+  `agent_end`, and `agent_settled` can never fire a task watcher.
+- `TaskWatcherService` in `src/core/lifecycle.ts`: coalescing, ordered
+  delivery with `unref()`'d flush timers and `shutdown()`.
+- `shepherd_watch` now accepts task ids (primary) and legacy prompt ids
+  (compat, routed to the existing prompt watcher); agent ids and pane ids
+  are rejected with a clear error; a call cannot mix both kinds.
+- Parent `shepherd.task.completion` message + bridge that sends a
+  follow-up with `triggerTurn: true` keyed by task id.
+
+Tests: `test/verify-task-watchers.mjs` (non-blocking registration, no
+completion from `waiting`, terminal-only settlement across completed/failed/
+blocked/cancelled/timed_out, coalesced input order, independent watchers,
+rejections, bridge delivery and shutdown suppression).
+
+See `phase7-notes.md` in this directory for the design decisions.
+
 ## Important current architecture
 
 ### Parent task completion
@@ -257,22 +283,13 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phases 5 and 6 are
-complete. The main remaining work is:
-
-### Phase 7 — Task-aware `shepherd_watch`
-
-Adapt the watcher implementation from prompt ids to task ids (watch a
-`waiting` task until a terminal outcome), preserving non-blocking one-shot
-delivery, custom message notifications, and deterministic order for arrays.
-See the Phase 6 notes below for how tasks settle and which events watchers
-may depend on.
+Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, and
+7 are complete. The main remaining work is:
 
 ### Later phases
 
-After Phase 7 (Phase 6 is complete):
+After Phase 7 (Phases 6 and 7 are complete):
 
-- Phase 8: stale-wait monitoring and configuration
 - Phase 8: stale-wait monitoring and configuration
 - Phase 9: task-aware status and TUI widget
 - Phase 10: final artifact/cleanup/compatibility integration and documentation
@@ -294,6 +311,7 @@ npm run delegate:test
 npm run task-completion:test
 npm run task-failures:test
 npm run message-routing:test
+npm run task-watchers:test
 npm run launch:test
 ```
 
@@ -333,6 +351,6 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Run `npm test` before making further changes.
 - [x] Finish remaining Phase 5 tests.
 - [x] Implement Phase 6 parent message routing.
-- [ ] Implement Phase 7 task-aware `shepherd_watch`.
-- [ ] Keep explicit `shepherd_done` completion authoritative.
+- [x] Implement Phase 7 task-aware `shepherd_watch`.
+- [x] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.

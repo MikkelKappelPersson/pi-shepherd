@@ -49,18 +49,22 @@ export const LifecyclePromptParams = Type.Object({
 });
 export const WatchParams = Type.Object({
   action: Type.Literal('watch', {
-    description: 'Register a non-blocking one-shot watcher for prompt completions.',
+    description: 'Register a non-blocking one-shot watcher for task completions (legacy prompt ids are also accepted).',
   }),
   id: Type.Union(
     [
+      TaskIdSchema,
       PromptIdSchema,
-      Type.Array(PromptIdSchema, {
-        minItems: 1,
-        description: 'Array of opaque prompt ids; completions are reported as each prompt settles.',
-      }),
+      Type.Array(
+        Type.Union([TaskIdSchema, PromptIdSchema]),
+        {
+          minItems: 1,
+          description: 'Array of opaque task (or legacy prompt) ids; completions are reported as each settles.',
+        }
+      ),
     ],
     {
-      description: 'One opaque prompt id or a non-empty array of prompt ids returned by shepherd_prompt.',
+      description: 'One opaque task id (preferred) or legacy prompt id, or a non-empty array of such ids returned by shepherd_delegate (or shepherd_prompt).',
     }
   ),
 });

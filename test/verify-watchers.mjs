@@ -56,7 +56,12 @@ registerShepherdTools({
   registerTool() {},
   registerMessageRenderer(customType, renderer) {
     assert.ok(
-      ['shepherd.prompt.completion', 'shepherd.message.incoming', 'shepherd.message.reply'].includes(customType),
+      [
+        'shepherd.prompt.completion',
+        'shepherd.task.completion',
+        'shepherd.message.incoming',
+        'shepherd.message.reply',
+      ].includes(customType),
       'unexpected custom message renderer: ' + customType
     );
     if (customType === 'shepherd.prompt.completion') registeredMessageRenderer = renderer;
