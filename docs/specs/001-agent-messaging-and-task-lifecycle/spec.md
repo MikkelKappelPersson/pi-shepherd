@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed specification.
+Implemented specification.
 
 ## Summary
 

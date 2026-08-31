@@ -565,6 +565,9 @@ function sendEscapeInHerdr(paneId: string): void {
  * The shepherd-done extension + env vars are always wired in, so the pane
  * participates in the same completion sidecar lifecycle as persistent runs.
  */
+/** Extension tools registered by shepherd-done.ts; always kept available even
+ *  when an agent definition passes a restrictive --tools allowlist. */
+const CHILD_SURFACE_TOOLS = ["shepherd_message", "shepherd_done"];
 export function writePiLaunchFiles(opts: {
 	name: string;
 	task?: string;
@@ -591,7 +594,13 @@ export function writePiLaunchFiles(opts: {
 	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
 	if (opts.model) args.push("--model", shellQuote(opts.model));
 	if (opts.omitContextFiles) args.push("--no-context-files");
-	if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
+	// --tools is an allowlist: adding the child-surface tools keeps the
+	// shepherd-done extension's shepherd_message/shepherd_done available even
+	// when the agent definition restricts built-in tools.
+	const tools = opts.tools
+		? [...new Set([...opts.tools, ...CHILD_SURFACE_TOOLS])]
+		: undefined;
+	if (tools && tools.length > 0) args.push("--tools", tools.join(","));
 
 	let systemPromptFile: string | undefined;
 	if (opts.systemPrompt !== undefined) {

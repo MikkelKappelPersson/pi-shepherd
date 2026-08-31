@@ -17,13 +17,13 @@ This checklist tracks implementation of:
 
 ## Overall status
 
-- [ ] Feature implementation complete
-- [ ] Focused tests written and passing
-- [ ] Existing regression tests updated and passing
-- [ ] Live Herdr verification complete
-- [ ] README and user documentation updated
-- [ ] Documentation and migration notes complete
-- [ ] `npm test` passes
+- [x] Feature implementation complete
+- [x] Focused tests written and passing
+- [x] Existing regression tests updated and passing
+- [x] Live Herdr verification complete
+- [x] README and user documentation updated
+- [x] Documentation and migration notes complete
+- [x] `npm test` passes
 
 ---
 
@@ -103,9 +103,9 @@ This checklist tracks implementation of:
 - [x] Decide the exact compatibility mapping between prompt IDs and task IDs:
       Phase 1 keeps prompt IDs and task IDs separate; compatibility mapping is
       deferred until the delegation adapter is implemented.
-- [ ] Add an explicit prompt-to-task mapping if compatibility is retained.
-- [ ] Ensure ordinary messages do not create task records.
-- [ ] Ensure ordinary messages do not consume the active task slot.
+- [x] Add an explicit prompt-to-task mapping if compatibility is retained.
+- [x] Ensure ordinary messages do not create task records.
+- [x] Ensure ordinary messages do not consume the active task slot.
 - [x] Keep existing prompt tests passing during the transition.
 
 ### Tests
@@ -115,7 +115,7 @@ This checklist tracks implementation of:
 - [x] Test valid state transitions.
 - [x] Test invalid state transitions.
 - [x] Test one active task per agent.
-- [ ] Test multiple ordinary messages while one task is active; messaging is
+- [x] Test multiple ordinary messages while one task is active; messaging is
       introduced in Phase 6.
 - [x] Test idle process plus waiting task remains non-terminal.
 - [x] Test idempotent completion.
@@ -329,7 +329,7 @@ This checklist tracks implementation of:
 ### Busy-agent behavior
 
 - [x] Reject a second active delegated task clearly.
-- [ ] Ensure ordinary messages remain accepted while a task is active; ordinary
+- [x] Ensure ordinary messages remain accepted while a task is active; ordinary
       messages are introduced in Phase 6.
 - [x] Define behavior when the target agent is not detected.
 - [x] Define behavior when the target agent is closed.
@@ -344,7 +344,7 @@ This checklist tracks implementation of:
 - [x] Test task artifact association.
 - [x] Test publication failure.
 - [x] Test delegation to a closed agent.
-- [ ] Test ordinary messages during an active task; messaging is introduced in
+- [x] Test ordinary messages during an active task; messaging is introduced in
       Phase 6.
 - [x] Update schema tests for `shepherd_delegate`.
 
@@ -380,7 +380,7 @@ This checklist tracks implementation of:
 - [x] Treat `agent_settled` as a non-terminal runtime event by keeping it out of
       the task settlement path.
 - [x] Treat Herdr idle state as a non-terminal runtime observation.
-- [ ] Preserve runtime observations for status output; deferred to Phase 9.
+- [x] Preserve runtime observations for status output; deferred to Phase 9.
 - [x] Map unexpected child exit to task failure.
 - [x] Map provider errors to task failure.
 - [x] Map close to task cancellation.
@@ -758,79 +758,79 @@ This checklist tracks implementation of:
 
 ### Automated verification
 
-- [ ] Run task registry tests.
-- [ ] Run mailbox tests.
-- [ ] Run child-surface tests.
-- [ ] Run delegation tests.
-- [ ] Run task-completion tests.
-- [ ] Run message-routing tests.
-- [ ] Run task-watcher tests.
-- [ ] Run stale-wait tests.
-- [ ] Run status-widget tests.
-- [ ] Run schema tests.
-- [ ] Run parent-surface tests.
-- [ ] Run launch tests.
-- [ ] Run artifact-session tests.
-- [ ] Run the complete `npm test` suite.
-- [ ] Resolve all regressions without weakening task completion invariants.
+- [x] Run task registry tests.
+- [x] Run mailbox tests.
+- [x] Run child-surface tests.
+- [x] Run delegation tests.
+- [x] Run task-completion tests.
+- [x] Run message-routing tests.
+- [x] Run task-watcher tests.
+- [x] Run stale-wait tests.
+- [x] Run status-widget tests.
+- [x] Run schema tests.
+- [x] Run parent-surface tests.
+- [x] Run launch tests.
+- [x] Run artifact-session tests.
+- [x] Run the complete `npm test` suite.
+- [x] Resolve all regressions without weakening task completion invariants.
 
 ### Live Herdr matrix
 
-- [ ] Start or attach to a Herdr session.
-- [ ] Spawn persistent scout and planner agents.
-- [ ] Delegate a tracked task to scout.
-- [ ] Confirm delegation returns without blocking.
-- [ ] Have scout send a question to planner.
-- [ ] Keep planner busy while scout's turn settles.
-- [ ] Confirm scout's Pi process becomes idle.
-- [ ] Confirm scout's task remains `waiting`.
-- [ ] Confirm no watcher completion is emitted.
-- [ ] Confirm the stale-wait notification appears after the threshold.
-- [ ] Have planner receive the queued question.
-- [ ] Have planner reply with the correct `replyTo` value.
-- [ ] Confirm scout receives the reply as a queued follow-up.
-- [ ] Confirm scout's task returns to `running`.
-- [ ] Have scout call `shepherd_done`.
-- [ ] Confirm exactly one watcher completion notification.
-- [ ] Confirm the completion contains the task summary.
-- [ ] Verify status output during `running`.
-- [ ] Verify status output during `waiting`.
-- [ ] Verify status output after completion.
-- [ ] Verify child-to-Shepherd messaging.
-- [ ] Verify Shepherd-to-child messaging.
-- [ ] Verify peer messaging through the parent broker.
-- [ ] Verify planner closure while scout waits.
-- [ ] Verify scout closure while planner has a queued question.
-- [ ] Verify task timeout.
-- [ ] Verify provider failure.
-- [ ] Verify parent shutdown.
-- [ ] Verify pane ownership protection.
-- [ ] Verify temporary-resource cleanup.
+- [x] Start or attach to a Herdr session.
+- [x] Spawn persistent scout and planner agents.
+- [x] Delegate a tracked task to scout.
+- [x] Confirm delegation returns without blocking.
+- [x] Have scout send a question to planner.
+- [x] Keep planner busy while scout’s turn settles.
+- [x] Confirm scout's Pi process becomes idle.
+- [x] Confirm scout's task remains `waiting`.
+- [x] Confirm no watcher completion is emitted.
+- [x] Confirm the stale-wait notification appears after the threshold.
+- [x] Have planner receive the queued question.
+- [x] Have planner reply with the correct `replyTo` value.
+- [x] Confirm scout receives the reply as a queued follow-up.
+- [x] Confirm scout's task returns to `running`.
+- [x] Have scout call `shepherd_done`.
+- [x] Confirm exactly one watcher completion notification.
+- [x] Confirm the completion contains the task summary.
+- [x] Verify status output during `running`.
+- [x] Verify status output during `waiting`.
+- [x] Verify status output after completion.
+- [x] Verify child-to-Shepherd messaging.
+- [x] Verify Shepherd-to-child messaging.
+- [x] Verify peer messaging through the parent broker.
+- [x] Verify planner closure while scout waits.
+- [x] Verify scout closure while planner has a queued question.
+- [x] Verify task timeout.
+- [x] Verify provider failure (model-not-found error observed; spawn readiness race recorded for follow-up).
+- [x] Verify parent shutdown.
+- [x] Verify pane ownership protection.
+- [x] Verify temporary-resource cleanup.
 
 ### Final review
 
-- [ ] Review all public tool schemas for flat object roots.
-- [ ] Review all public results for standard call/return/details formatting.
-- [ ] Review all child/parent identity checks.
-- [ ] Review all task terminal transitions.
-- [ ] Review all waiting-task transitions.
-- [ ] Review stale-wait notification rate limiting.
-- [ ] Review message queue limits and failure behavior.
-- [ ] Review fieldnote finalization behavior.
-- [ ] Review documentation against implemented behavior.
-- [ ] Mark the specification status as implemented only after all gates pass.
+- [x] Review all public tool schemas for flat object roots.
+- [x] Review all public results for standard call/return/details formatting.
+- [x] Review all child/parent identity checks.
+- [x] Review all task terminal transitions.
+- [x] Review all waiting-task transitions.
+- [x] Review stale-wait notification rate limiting.
+- [x] Review message queue limits and failure behavior.
+- [x] Review fieldnote finalization behavior.
+- [x] Review documentation against implemented behavior.
+- [x] Mark the specification status as implemented only after all gates pass.
 
 ## Definition of done
 
-- [ ] A delegated task can span multiple Pi turns.
-- [ ] A child can ask another participant a question and end its current turn.
-- [ ] An idle child with an outstanding request remains a waiting task, not a
+- [x] A delegated task can span multiple Pi turns.
+- [x] A child can ask another participant a question and end its current turn.
+- [x] An idle child with an outstanding request remains a waiting task, not a
       completed task.
-- [ ] A queued reply can resume the child later.
-- [ ] Only explicit `shepherd_done` normally completes the task.
-- [ ] `shepherd_watch` reports terminal task completion without requiring
+- [x] A queued reply can resume the child later.
+- [x] Only explicit `shepherd_done` normally completes the task.
+- [x] `shepherd_watch` reports terminal task completion without requiring
       `shepherd_wait`.
-- [ ] Long waits notify the Shepherd without producing notification storms.
-- [ ] Parent and child messaging works through the owned broker.
-- [ ] Existing pane ownership and fieldnote safety invariants remain intact.
-- [ ] All focused tests, live Herdr checks, and `npm test` pass.
+- [x] Long waits notify the Shepherd without producing notification storms.
+- [x] Parent and child messaging works through the owned broker.
+- [x] Existing pane ownership and fieldnote safety invariants remain intact.
+- [x] All focused tests, live Herdr checks, and `npm test` pass.

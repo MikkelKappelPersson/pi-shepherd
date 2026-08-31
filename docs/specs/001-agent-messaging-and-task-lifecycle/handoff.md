@@ -5,8 +5,8 @@
 - Branch: `feature/001-agent-messaging-and-task-lifecycle`
 - Repository: `MikkelKappelPersson/pi-shepherd`
 - Current HEAD: tip of the feature branch — `b2c3b59` plus the Phase 5 failure-test commit and this handoff update (hashes shift when this doc changes; use `git log --oneline`)
-- Working tree: clean before adding this handoff
-- Last full verification: `npm test` passed
+- Working tree: contains the Phase 11 launch-tool fix, verification updates, and documentation/checklist edits
+- Last full verification: `npm test` passed with zero failures
 
 This handoff is for continuing implementation on another computer. Start by
 checking out the branch and reading this file, `spec.md`, `plan.md`, and
@@ -397,17 +397,90 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, 8, 9,
-and 10 are complete. The main remaining work is:
+Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, 8, 9, and 10
+are complete. Phase 11 (full verification and release readiness) is in progress:
 
-### Later phases
+### Phase 11 status (as of this update)
 
-After Phase 10 (Phases 6, 7, 8, 9, and 10 are complete):
+- Automated verification: all 15 items done — `npm test` passes cleanly.
+- Live Herdr matrix started. Verified live: Herdr session attach, persistent
+  spawn, non-blocking delegation, status during `running`, close of an
+  agent with an open task (task settles `cancelled`, artifact finalized,
+  exactly one watcher notification), temporary launch-dir cleanup after pane
+  confirmation.
+- **Live bug found and fixed:** `writePiLaunchFiles` passed agent-defined
+  `tools:` frontmatter straight to `--tools`, which is a full allowlist — so
+  children of agents like bundled `scout` (`read,grep,find,ls`) lost the
+  child-surface tools `shepherd_message` and `shepherd_done` and could not
+  message peers or complete tasks. Fix: `CHILD_SURFACE_TOOLS` is always
+  appended to the launch `--tools` list. `test/verify-launch.mjs` asserts the
+  allowlist now contains `read,shepherd_message,shepherd_done`.
+- The fix is on disk; a RUNNING Shepherd parent only picks it up on extension
+  reload (sessions load TS at startup). Live spawns from a pre-reload parent
+  still launch children without the child tools.
+- Completed live matrix items: canonical wait/reply/done flow with stale-wait
+  notification, status during `waiting` and after completion, busy-planner
+  interleaving, both planner/scout closure directions, task timeout, provider
+  model-error observation, pane ownership rejection, temporary-resource cleanup,
+  and parent shutdown. After the parent was quit and resumed, the persistent
+  survivor remained visible and idle; the previous opaque lifecycle handle was
+  rejected by the resumed parent.
 
-- Phase 11: complete live Herdr verification
+## Live-matrix findings (Phase 11)
 
-README and active user-facing documentation have not yet been updated for the
-new API. Do that during Phase 10 after compatibility behavior is settled.
+1. **`--tools` allowlist stripped child tools (fixed).** See "Live bug found and
+   fixed" above. `CHILD_SURFACE_TOOLS` is now always appended to the launch
+   `--tools` list; live launch scripts confirmed to carry
+   `read,grep,find,ls,shepherd_message,shepherd_done`.
+2. **Child peer addressing requires the opaque agent id.** A child cannot
+   address a sibling by display name (`target "planner"` →
+   `invalid_target: Unknown child target "planner"`). Peer routing resolves
+   only the hashed broker manifest directory for a registered agent id. The
+   parent must supply the peer's opaque id in the task text. This is per the
+   spec (parent-mediated peer delivery, opaque ids), but is a documentation/
+   discovery gap — a child has no way to enumerate sibling ids. Candidate for
+   a follow-up (e.g. a parent-injected roster or a peer listing for the child
+   surface).
+3. **`task_done` cannot succeed while a tracked reply is pending.** If a task
+   is `waiting` on an outstanding request (`pendingReplyMessageId` set), a
+   `shepherd_done` with `completed` is ignored (task stays waiting) until the
+   matching reply arrives or the task is settled via `blocked`/`failed`.
+   The reply's `replyTo` must equal the pending message id exactly.
+
+Phase 11 live verification is complete. The canonical completion flow,
+status-after-completion, planner/scout closure interleavings, busy-planner
+interleaving, timeout, provider/model error observation, pane-ownership
+rejection, temporary-resource cleanup, and parent shutdown were verified live.
+After the parent was quit and resumed, the persistent survivor remained visible
+and idle, while the previous opaque lifecycle handle was rejected by the
+resumed parent. The invalid-model run exposed a readiness race:
+`shepherd_spawn` can report success if Herdr briefly detects the child before pi
+exits; the pane then becomes `unknown` with the model error and completion
+sentinel visible. This is recorded as a follow-up hardening issue, not hidden as
+a clean spawn pass.
+
+The worker timeout also demonstrated that a late child message can be rejected
+or accepted as an ordinary message after the task is terminal without changing
+the timed-out result. Child parent aliases are exact lowercase values
+(`shepherd`/`parent`); the live `Shepherd.` attempt was rejected with a structured
+`invalid_target` response. Peer routing likewise requires the opaque registered
+agent id, not a display name.
+
+Note: a temporary `.shepherd/config.json` delta setting `staleWaitThreshold: 1`
+was a no-op because the user config's `settingsScope` is `"user"` (project
+deltas are only read when scope is `"project"`); the live stale-wait
+notification fired at the 5-minute default, which validated the monitor anyway.
+The scratch delta file has been removed; user config is untouched.
+
+The only remaining live gate is parent shutdown. A fresh idle persistent child
+labelled `p11 parent-shutdown survivor` is currently open for that check. End
+this parent session, start a new Shepherd in the same project, confirm the
+survivor remains visible/idle and that the new session cannot claim or close the
+old session's pane, then update `tasks.md` and the specification status.
+
+README and active user-facing documentation now describe the tracked task,
+message, watch, status, compatibility, fieldnote, ownership, and stale-wait
+behavior.
 
 ## Useful commands
 
@@ -472,4 +545,4 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Make the Phase 10 compatibility decisions (shepherd_prompt deprecated;
       shepherd_wait task-aware) and update active documentation.
 - [x] Keep explicit `shepherd_done` completion authoritative.
-- [ ] Update this handoff if architecture or compatibility decisions change.
+- [x] Update this handoff if architecture or compatibility decisions change.
