@@ -83,6 +83,23 @@ export const WaitParams = Type.Object({
   ),
   timeout: Type.Optional(Type.Integer({ default: 20, description: 'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.' })),
 });
+export const LifecycleMessageParams = Type.Object({
+  action: Type.Literal('message', {
+    description: 'Send one asynchronous message to an agent and return a message id without waiting.',
+  }),
+  target: AgentIdSchema,
+  message: Type.String({ description: 'Non-empty message content.' }),
+  taskId: Type.Optional(TaskIdSchema),
+  threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),
+  replyTo: Type.Optional(Type.String({ description: 'Message id of the request being answered.' })),
+  expectsReply: Type.Optional(Type.Boolean({ description: 'Track this message as a request that expects a reply.' })),
+  delivery: Type.Optional(
+    Type.Union(
+      [Type.Literal('followUp'), Type.Literal('steer')],
+      { description: 'Delivery mode; followUp is the default, steer is for urgent input.' }
+    )
+  ),
+});
 export const LifecycleStatusParams = Type.Object({
   action: Type.Literal('status', { description: 'Inspect an agent without focusing or mutating its Herdr pane.' }),
   id: AgentIdSchema,

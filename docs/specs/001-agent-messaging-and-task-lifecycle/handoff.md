@@ -168,6 +168,37 @@ Deferred (tracked in `tasks.md`):
   follow-up).
 - Preserve runtime observations for status output (Phase 9).
 
+### Phase 6 — Asynchronous message routing
+
+Complete.
+
+Implemented:
+
+- Parent `shepherd_message` tool (`src/extension/shepherd.ts`, schema in
+  `src/core/types.ts`) with flat root object: `target` + `message` required;
+  `taskId`, `threadId`, `replyTo`, `expectsReply`, `delivery` optional.
+- `sendParentMessage()` and the parent message notifier/bridge in
+  `src/core/lifecycle.ts`; child message delivery via
+  `configureParentMessageNotifications()` and `sendUserMessage` delivery in
+  `src/extension/shepherd.ts` / `shepherd-done.ts`.
+- Task registry request/reply correlation in `src/core/orchestration.ts`
+  (`openPendingRequest`, `resolveReplyForTask`, `clearPendingReply`) with a
+  single outstanding request per task.
+- Child-side `runtime` request-open mirror and reply routing through the
+  parent broker, so a busy peer's queued question keeps the sender task in
+  the `waiting` state and a matching reply returns it to `running`.
+- Reply deadline tracking and `blocked` settlement on timeout.
+- Provenance preserved via `originSenderId` on the relayed reply.
+- Delivery failure diagnostic surfaced to the parent for failed local
+  `sendUserMessage`.
+
+Tests: `test/verify-message-routing.mjs` (parent/child, busy/idle recipient,
+request creation and timeout, valid/invalid/duplicate/origin-preserving
+replies, delivery failures, unknown/closed targets, task ownership check).
+
+See `phase6-notes.md` in this directory for the routing and correlation
+decisions.
+
 ## Important current architecture
 
 ### Parent task completion
@@ -179,8 +210,9 @@ and starts a 250ms unref'd monitor. The monitor calls
 The parent currently handles these inbox events:
 
 - `task_done`: validates and settles the task
-- Other message kinds: consumed by the transport but not yet routed to the
-  parent Pi session; this is Phase 6 work
+- `message` / `reply`: routed to the parent Pi session as a custom Shepherd message (followUp); a `reply` also resolves the matching pending request on the sender's task and is relayed back to the asker's child inbox
+- `runtime` with `requestOpen`: opens the task's pending request (task → waiting) so a busy recipient's queued question keeps the sender task open
+- Pane disappearance, provider error, and reply-deadline expiry settle tasks as failed / failed / blocked
 
 ### Child task completion
 
@@ -225,33 +257,22 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phase 5 is complete
-(the remaining unchecked boxes are explicitly deferred to later phases). The
-main remaining work is:
+Consult `tasks.md` for the authoritative checkbox state. Phases 5 and 6 are
+complete. The main remaining work is:
 
-### Phase 6 — Asynchronous message routing
+### Phase 7 — Task-aware `shepherd_watch`
 
-Implement next:
-
-- Parent `shepherd_message` tool
-- Parent inbox routing into Pi custom messages
-- Child-to-child routing through the parent
-- Request records and `expectsReply`
-- `replyTo` correlation
-- `running`/`waiting` transitions
-- Reply delivery to idle children
-- Parent and child message result formatting
-- Busy/idle recipient tests
-- Request timeout behavior
-
-The child-side message tool and transport already exist, but the parent-facing
-message tool and task/request integration are not complete.
+Adapt the watcher implementation from prompt ids to task ids (watch a
+`waiting` task until a terminal outcome), preserving non-blocking one-shot
+delivery, custom message notifications, and deterministic order for arrays.
+See the Phase 6 notes below for how tasks settle and which events watchers
+may depend on.
 
 ### Later phases
 
-After Phase 6:
+After Phase 7 (Phase 6 is complete):
 
-- Phase 7: task-aware `shepherd_watch`
+- Phase 8: stale-wait monitoring and configuration
 - Phase 8: stale-wait monitoring and configuration
 - Phase 9: task-aware status and TUI widget
 - Phase 10: final artifact/cleanup/compatibility integration and documentation
@@ -272,6 +293,7 @@ npm run child-surface:test
 npm run delegate:test
 npm run task-completion:test
 npm run task-failures:test
+npm run message-routing:test
 npm run launch:test
 ```
 
@@ -310,6 +332,7 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Confirm the feature branch is checked out.
 - [x] Run `npm test` before making further changes.
 - [x] Finish remaining Phase 5 tests.
-- [ ] Implement Phase 6 parent message routing.
+- [x] Implement Phase 6 parent message routing.
+- [ ] Implement Phase 7 task-aware `shepherd_watch`.
 - [ ] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.

@@ -429,77 +429,77 @@ This checklist tracks implementation of:
 
 ### Parent-side message tool
 
-- [ ] Register the parent-side `shepherd_message` tool.
-- [ ] Use a flat root object schema.
-- [ ] Require target and non-empty message.
-- [ ] Add optional task ID.
-- [ ] Add optional thread ID.
-- [ ] Add optional reply-to ID.
-- [ ] Add optional expects-reply flag.
-- [ ] Add optional delivery mode.
-- [ ] Return message ID and acceptance state.
-- [ ] Use standard Shepherd result formatting.
-- [ ] Add tool description and prompt guidance.
-- [ ] Add call preview rendering.
+- [x] Register the parent-side `shepherd_message` tool.
+- [x] Use a flat root object schema.
+- [x] Require target and non-empty message.
+- [x] Add optional task ID.
+- [x] Add optional thread ID.
+- [x] Add optional reply-to ID.
+- [x] Add optional expects-reply flag.
+- [x] Add optional delivery mode.
+- [x] Return message ID and acceptance state.
+- [x] Use standard Shepherd result formatting.
+- [x] Add tool description and prompt guidance.
+- [x] Add call preview rendering.
 
 ### Routing
 
-- [ ] Route parent-to-child messages through the mailbox.
-- [ ] Route child-to-parent messages into the parent session.
-- [ ] Route child-to-child messages through the parent broker.
-- [ ] Permit a child to target the Shepherd.
-- [ ] Permit a child to target validated peer agent IDs.
-- [ ] Reject targets outside the current parent session.
-- [ ] Preserve sender provenance.
-- [ ] Preserve message and task correlation metadata.
-- [ ] Ensure accepted means broker accepted, not recipient replied.
+- [x] Route parent-to-child messages through the mailbox.
+- [x] Route child-to-parent messages into the parent session.
+- [x] Route child-to-child messages through the parent broker.
+- [x] Permit a child to target the Shepherd.
+- [x] Permit a child to target validated peer agent IDs.
+- [x] Reject targets outside the current parent session.
+- [x] Preserve sender provenance.
+- [x] Preserve message and task correlation metadata.
+- [x] Ensure accepted means broker accepted, not recipient replied.
 
 ### Request/reply behavior
 
-- [ ] Create a pending request when `expectsReply` is true.
-- [ ] Associate the request with the sender task when a task ID is supplied.
-- [ ] Transition the task to `waiting` for a required reply.
-- [ ] Preserve the task's active ownership while waiting.
-- [ ] Accept replies with `replyTo`.
-- [ ] Clear the matching pending request on a valid reply.
-- [ ] Transition the task back to `running` after required reply delivery.
-- [ ] Reject duplicate replies or make them idempotent.
-- [ ] Add request deadlines.
-- [ ] Define request timeout behavior.
+- [x] Create a pending request when `expectsReply` is true.
+- [x] Associate the request with the sender task when a task ID is supplied.
+- [x] Transition the task to `waiting` for a required reply.
+- [x] Preserve the task's active ownership while waiting.
+- [x] Accept replies with `replyTo`.
+- [x] Clear the matching pending request on a valid reply.
+- [x] Transition the task back to `running` after required reply delivery.
+- [x] Reject duplicate replies or make them idempotent.
+- [x] Add request deadlines.
+- [x] Define request timeout behavior.
 
 ### Pi queue integration
 
-- [ ] Deliver child messages with `pi.sendUserMessage`.
-- [ ] Use `followUp` as the default.
-- [ ] Support explicit `steer`.
-- [ ] Ensure an idle child is triggered after reply delivery.
-- [ ] Ensure a busy child receives the message at the correct queue point.
-- [ ] Ensure message delivery does not create a second delegated task.
-- [ ] Queue parent notifications with custom Shepherd messages.
+- [x] Deliver child messages with `pi.sendUserMessage`.
+- [x] Use `followUp` as the default.
+- [x] Support explicit `steer`.
+- [x] Ensure an idle child is triggered after reply delivery.
+- [x] Ensure a busy child receives the message at the correct queue point.
+- [x] Ensure message delivery does not create a second delegated task.
+- [x] Queue parent notifications with custom Shepherd messages.
 
 ### Tests
 
-- [ ] Add `test/verify-message-routing.mjs`.
-- [ ] Test parent-to-child messages.
-- [ ] Test child-to-parent messages.
-- [ ] Test child-to-child messages.
-- [ ] Test messages to a busy recipient.
-- [ ] Test messages to an idle recipient.
-- [ ] Test `expectsReply` request creation.
-- [ ] Test valid replies.
-- [ ] Test invalid replies.
-- [ ] Test reply timeout.
-- [ ] Test no-reply messages leave task state unchanged.
-- [ ] Test message delivery failures.
-- [ ] Test message provenance.
+- [x] Add `test/verify-message-routing.mjs`.
+- [x] Test parent-to-child messages.
+- [x] Test child-to-parent messages.
+- [x] Test child-to-child messages.
+- [x] Test messages to a busy recipient.
+- [x] Test messages to an idle recipient.
+- [x] Test `expectsReply` request creation.
+- [x] Test valid replies.
+- [x] Test invalid replies.
+- [x] Test reply timeout.
+- [x] Test no-reply messages leave task state unchanged.
+- [x] Test message delivery failures.
+- [x] Test message provenance.
 
 ### Exit gate
 
-- [ ] Worker can ask planner a question while planner is busy.
-- [ ] Planner receives the question as a queued follow-up.
-- [ ] Worker task remains waiting rather than completed.
-- [ ] Planner can reply to worker.
-- [ ] Worker receives the reply and returns to running.
+- [x] Worker can ask planner a question while planner is busy.
+- [x] Planner receives the question as a queued follow-up.
+- [x] Worker task remains waiting rather than completed.
+- [x] Planner can reply to worker.
+- [x] Worker receives the reply and returns to running.
 
 ---
 

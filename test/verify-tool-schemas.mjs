@@ -24,6 +24,7 @@ const expectedNames = [
   'shepherd',
   'shepherd_spawn',
   'shepherd_delegate',
+  'shepherd_message',
   'shepherd_prompt',
   'shepherd_wait',
   'shepherd_watch',
@@ -34,7 +35,7 @@ const expectedNames = [
 assert.deepEqual(
   registered.map(tool => tool.name),
   expectedNames,
-  'registerShepherdTools must register the nine shepherd tools'
+  'registerShepherdTools must register the ten shepherd tools'
 );
 
 let failed = 0;
@@ -57,6 +58,14 @@ for (const tool of registered) {
         Object.keys(schema.properties).sort(),
         ['target', 'task', 'timeout'],
         'shepherd_delegate exposes only the public delegation arguments'
+      );
+    }
+    if (tool.name === 'shepherd_message') {
+      assert.deepEqual(schema.required, ['target', 'message'], 'shepherd_message requires target and message');
+      assert.deepEqual(
+        Object.keys(schema.properties).sort(),
+        ['delivery', 'expectsReply', 'message', 'replyTo', 'target', 'taskId', 'threadId'],
+        'shepherd_message exposes only the public message arguments'
       );
     }
     if (tool.name === 'shepherd_spawn') {

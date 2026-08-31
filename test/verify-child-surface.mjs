@@ -72,11 +72,18 @@ try {
     });
     assert.equal(messageResult.details.returnCode, 0);
     assert.match(messageResult.content[0].text, /call:\n    shepherd_message/);
-    const sentMessage = pollParentInbox(broker)[0];
+    const inbox = pollParentInbox(broker);
+    const sentMessage = inbox.find(m => m.kind === 'message');
+    assert.ok(sentMessage, 'question envelope is queued in the parent inbox');
     assert.equal(sentMessage.senderId, capability.agentId);
     assert.equal(sentMessage.targetId, 'shepherd');
     assert.equal(sentMessage.expectsReply, true);
     assert.equal(sentMessage.threadId, 'thread-child-surface');
+    const mirror = inbox.find(m => m.kind === 'runtime');
+    assert.ok(mirror, 'tracked request is mirrored to the parent for task correlation');
+    assert.equal(mirror.requestOpen, true);
+    assert.equal(mirror.replyTo, sentMessage.messageId);
+    assert.equal(mirror.targetId, 'shepherd');
     console.log('PASS child shepherd_message publishes an asynchronous correlated envelope');
 
     const doneResult = await doneTool.execute('done-call', {
@@ -130,7 +137,38 @@ try {
     assert.match(sentUserMessages[0].content, /Shepherd message from Shepherd/);
     assert.match(sentUserMessages[0].content, /Reply to: request-123/);
     assert.equal(sentUserMessages[0].options.deliverAs, 'steer');
+
+    // A failed local delivery is reported to the parent as a runtime
+    // diagnostic correlated with the undelivered message id.
+    const failing = [
+      { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+      {
+        kind: 'message',
+        targetId: capability.agentId,
+        delivery: 'followUp',
+        content: 'This one cannot be delivered.',
+      },
+    ];
+    const failingEnvelope = createEnvelope(failing[0], failing[1]);
+    publishFromParent(broker, failingEnvelope);
+    let deliverFailures = 0;
+    const realSend = pi.sendUserMessage.bind(pi);
+    pi.sendUserMessage = (content, options) => {
+      deliverFailures += 1;
+      throw new Error('renderer unavailable');
+    };
+    // The 250ms poll interval from the earlier session_start delivers the
+    // message through the now-failing sender.
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(deliverFailures, 1);
+    const diagnostics = pollParentInbox(broker);
+    const diagnostic = diagnostics.find(m => m.kind === 'runtime' && String(m.content).includes(failingEnvelope.messageId));
+    assert.ok(diagnostic, 'failed delivery produces a runtime diagnostic in the parent inbox');
+    assert.equal(diagnostic.error, 'renderer unavailable');
+    assert.equal(diagnostic.summary, undefined || diagnostic.summary, 'diagnostic carries the failure detail');
+    pi.sendUserMessage = realSend;
     await handlers.get('session_shutdown')({}, {});
+    console.log('PASS failed local message delivery is reported to the parent with the message id');
     console.log('PASS child polling queues incoming messages with requested delivery mode');
   });
 

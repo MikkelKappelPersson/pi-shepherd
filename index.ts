@@ -15,6 +15,7 @@ import {
   doAction,
   registerShepherdTools,
   setPromptWatcherSessionActive,
+  setShepherdMessageSessionActive,
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
@@ -352,6 +353,7 @@ function currentCwd(): string {
 export default function (pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
     setPromptWatcherSessionActive(true);
+    setShepherdMessageSessionActive(true);
     activeSessionCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
@@ -365,6 +367,7 @@ export default function (pi: ExtensionAPI) {
     // registrations, but leave prompts, child panes, result files, and notes
     // untouched for normal lifecycle retention.
     setPromptWatcherSessionActive(false);
+    setShepherdMessageSessionActive(false);
     shutdownPromptWatchers();
     // Drop the binding on teardown so a reload/new-session cycle without a
     // fresh identity never attributes fresh panes to a stale session.

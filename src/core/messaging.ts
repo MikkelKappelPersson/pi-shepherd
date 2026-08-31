@@ -28,6 +28,27 @@ export interface ShepherdMessageEnvelope {
   threadId?: string;
   replyTo?: string;
   expectsReply?: boolean;
+  /**
+   * Set on a child `runtime` envelope that mirrors an `expectsReply` question
+   * the child just published. The parent uses it to open a pending request on
+   * the task (running -> waiting). It is the child's explicit, correlated
+   * declaration that a tracked reply is now outstanding.
+   */
+  requestOpen?: boolean;
+  /**
+   * Companion to `requestOpen`: the opaque agent id the question was published
+   * to, so the parent can display who the task is waiting for and name the
+   * recipient in the reply-deadline outcome.
+   */
+  requestTargetId?: string;
+  /**
+   * When the parent broker relays a child-authored reply, this carries the
+   * original author's agent id. The authenticated `senderId` stays the parent
+   * (the broker republishes under its own identity), so provenance about who
+   * actually wrote the reply is carried as structural metadata that cannot be
+   * forged through the transport layer.
+   */
+  originSenderId?: string;
   deadlineAt?: number;
   delivery: ShepherdDelivery;
   content?: string;
@@ -193,13 +214,16 @@ export function validateEnvelope(value: unknown): ShepherdMessageEnvelope {
     (typeof envelope.deadlineAt !== 'number' || !Number.isFinite(envelope.deadlineAt))) {
     throw new MessagingError('invalid_envelope', 'deadlineAt must be a finite number when present.');
   }
-  for (const field of ['taskId', 'threadId', 'replyTo', 'content', 'summary', 'error']) {
+  for (const field of ['taskId', 'threadId', 'replyTo', 'content', 'summary', 'error', 'requestTargetId', 'originSenderId']) {
     if (envelope[field] !== undefined && typeof envelope[field] !== 'string') {
       throw new MessagingError('invalid_envelope', `${field} must be a string when present.`);
     }
   }
   if (envelope.expectsReply !== undefined && typeof envelope.expectsReply !== 'boolean') {
     throw new MessagingError('invalid_envelope', 'expectsReply must be a boolean when present.');
+  }
+  if (envelope.requestOpen !== undefined && typeof envelope.requestOpen !== 'boolean') {
+    throw new MessagingError('invalid_envelope', 'requestOpen must be a boolean when present.');
   }
   if (envelope.status !== undefined && !STATUSES.has(envelope.status as ShepherdMessageStatus)) {
     throw new MessagingError('invalid_envelope', `Unsupported message status "${envelope.status}".`);

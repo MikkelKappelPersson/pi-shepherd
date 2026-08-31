@@ -49,7 +49,7 @@ function run(worker) {
 const parent = run(false);
 const worker = run(true);
 
-assert.equal(parent.tools.length, 9, "parent registers the umbrella and eight lifecycle tools");
+assert.equal(parent.tools.length, 10, "parent registers the umbrella and nine lifecycle tools");
 assert.ok(parent.tools.includes("shepherd"), "parent registers the umbrella shepherd tool");
 assert.ok(parent.tools.includes("shepherd_delegate"), "parent registers tracked delegation");
 assert.ok(parent.commands.includes("shepherd"), "parent registers the /shepherd command");

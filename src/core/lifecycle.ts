@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { discoverAgents, resolveDelegatedModel } from './discovery.ts';
 import {
   createEnvelope,
@@ -8,7 +9,9 @@ import {
   unregisterChild,
   closeBrokerWhenChildrenGone,
   type ParentBroker,
+  type ShepherdDelivery,
   type ShepherdMessageEnvelope,
+  type PublishResult,
 } from './messaging.ts';
 import { loadSettings } from '../extension/config.ts';
 import {
@@ -43,6 +46,7 @@ import {
   formatAgentName,
   validateAgentLabel,
   sessionOwner,
+  LifecycleError,
   type CreateTaskOptions,
   type TaskHandle,
   type TaskResult,
@@ -376,6 +380,158 @@ function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | 
  * is deliberately separate from prompt watchers: idle and turn-settled states
  * are never considered successful task completion.
  */
+function extractAgentError(output: string): string | undefined {
+  const match = output.match(/(?:^|\n)\s*Error:\s*(.+)/i);
+  if (!match) return undefined;
+  const message = match[1].trim();
+  return /api key|authentication|authenticat|provider|model|failed to load/i.test(message)
+    ? message
+    : undefined;
+}
+
+async function readImmediateAgentError(paneId: string): Promise<string | undefined> {
+  return extractAgentError((await readPaneTail(paneId)).trim());
+}
+
+// ── Phase 6: asynchronous message routing ──────────────────────────────────
+// The parent Shepherd is the message hub: it owns request (expectsReply)
+// correlation and task waiting state. Children publish into the parent-owned
+// broker; parent→child publishes go straight to the target inbox, child→parent
+// events are consumed by processParentBrokerMessages() below.
+
+export interface ParentMessageInput {
+  target: string;
+  message: string;
+  taskId?: string;
+  threadId?: string;
+  replyTo?: string;
+  delivery?: 'followUp' | 'steer';
+  expectsReply?: boolean;
+}
+
+export interface ParentMessageResult {
+  messageId: string;
+  accepted: true;
+  delivery: 'queued' | 'duplicate';
+  requestId?: string;
+  targetId: string;
+  targetTaskState?: string;
+}
+
+/**
+ * Send a parent-originated message to an owned child. With `expectsReply` and
+ * a task id the task enters `waiting` until a matching reply arrives.
+ */
+export function sendParentMessage(input: ParentMessageInput): ParentMessageResult {
+  if (typeof input.message !== 'string' || !input.message.trim()) {
+    throw new LifecycleError('invalid_task', 'Message content must not be empty.');
+  }
+  const broker = currentParentBroker() ?? ensureParentBroker();
+  const agent = lifecycleRegistry.getAgent({ id: input.target });
+  if (agent.state === 'closed') {
+    throw new LifecycleError('closed_handle', `Agent "${input.target}" is closed.`);
+  }
+  const replyDeadline = input.expectsReply ? Date.now() + loadSettings(process.cwd()).timeout * 60_000 : undefined;
+  if (input.expectsReply && input.taskId) {
+    // Open the request before publishing so the task never waits on a
+    // question the broker refused to queue. The question envelope id becomes
+    // the correlation key for the reply.
+    if (lifecycleRegistry.getTask(input.taskId).agentId !== agent.handle.id) {
+      throw new LifecycleError(
+        'task_agent_mismatch',
+        `Task "${input.taskId}" is owned by another agent than the message target.`
+      );
+    }
+    const provisional = createEnvelope(
+      { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+      {
+        kind: 'message',
+        targetId: agent.handle.id,
+        messageId: `shepherd-message-${randomUUID()}`,
+        taskId: input.taskId,
+        threadId: input.threadId,
+        replyTo: input.replyTo,
+        expectsReply: true,
+        delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
+        content: input.message,
+        createdAt: Date.now(),
+      },
+    );
+    lifecycleRegistry.openPendingRequest(input.taskId, {
+      messageId: provisional.messageId,
+      targetAgentId: agent.handle.id,
+      deadlineAt: replyDeadline,
+      text: input.message,
+    });
+    try {
+      const envelope = provisional;
+      const accepted = publishFromParent(broker, envelope);
+      return {
+        messageId: envelope.messageId,
+        accepted: true,
+        delivery: accepted.delivery,
+        requestId: envelope.messageId,
+        targetId: agent.handle.id,
+        targetTaskState: 'waiting',
+      };
+    } catch (error) {
+      lifecycleRegistry.clearPendingReply(input.taskId);
+      throw error;
+    }
+  }
+  const envelope = createEnvelope(
+    { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+    {
+      kind: input.replyTo ? 'reply' : 'message',
+      targetId: agent.handle.id,
+      messageId: `shepherd-message-${randomUUID()}`,
+      taskId: input.taskId,
+      threadId: input.threadId,
+      replyTo: input.replyTo,
+      ...(replyDeadline !== undefined ? { deadlineAt: replyDeadline } : {}),
+      delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
+      content: input.message,
+    },
+  );
+  const accepted = publishFromParent(broker, envelope);
+  let targetTaskState: string | undefined;
+  if (input.taskId) {
+    targetTaskState = lifecycleRegistry.getTask(input.taskId).state;
+  }
+  return {
+    messageId: envelope.messageId,
+    accepted: true,
+    delivery: accepted.delivery,
+    targetId: agent.handle.id,
+    ...(targetTaskState ? { targetTaskState } : {}),
+  };
+}
+
+export type ParentMessageKind = 'message' | 'reply' | 'runtime';
+export type ParentMessageNotifier = (notification: { kind: ParentMessageKind; envelope: ShepherdMessageEnvelope }) => void;
+
+let parentMessageNotifier: ParentMessageNotifier | undefined;
+
+/** Bridge child-originated messages and runtime events into the parent session. */
+export function configureParentMessageNotifications(notifier: ParentMessageNotifier | undefined): void {
+  parentMessageNotifier = notifier;
+}
+
+function notifyParentMessage(kind: ParentMessageKind, envelope: ShepherdMessageEnvelope): void {
+  try {
+    parentMessageNotifier?.({ kind, envelope });
+  } catch {
+    // Delivery diagnostics must never break broker polling.
+  }
+}
+
+/**
+ * Drain the parent mailbox and observe external terminal failures. Task
+ * completions and failures settle into the registry; child messages and
+ * request/reply correlation are applied for task state and surfaced to the
+ * parent delivery bridge. This deliberately does NOT treat idle turns, agent
+ * end, or agent_settled states as successful task completion.
+ */
 export async function processParentBrokerMessages(): Promise<TaskResult[]> {
   const broker = currentParentBroker();
   if (!broker || parentBrokerTicking) return [];
@@ -383,7 +539,9 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
   const settled: TaskResult[] = [];
   try {
     for (const envelope of pollParentInbox(broker)) {
-      const result = applyTaskDoneEnvelope(envelope);
+      const result = envelope.kind === 'task_done'
+        ? applyTaskDoneEnvelope(envelope)
+        : applyMessageEnvelope(broker, envelope);
       if (result) settled.push(result);
     }
     const now = Date.now();
@@ -406,6 +564,18 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
           settled.push(result);
           continue;
         }
+        if (task.state === 'waiting' &&
+            task.pendingReplyDeadlineAt !== undefined &&
+            now >= task.pendingReplyDeadlineAt) {
+          const result = lifecycleRegistry.settleTask(task.taskId, {
+            status: 'blocked',
+            ok: false,
+            text: `Timed out waiting for a reply from ${task.pendingReplyTargetAgentId ?? 'the target agent'} (message ${task.pendingReplyMessageId ?? 'unknown'} never answered).`,
+            error: 'Tracked reply deadline reached.',
+          });
+          settled.push(result);
+          continue;
+        }
         const providerError = await readImmediateAgentError(agent.paneId);
         if (providerError) {
           const result = lifecycleRegistry.settleTask(task.taskId, {
@@ -423,17 +593,74 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
   return settled;
 }
 
-function extractAgentError(output: string): string | undefined {
-  const match = output.match(/(?:^|\n)\s*Error:\s*(.+)/i);
-  if (!match) return undefined;
-  const message = match[1].trim();
-  return /api key|authentication|authenticat|provider|model|failed to load/i.test(message)
-    ? message
-    : undefined;
-}
-
-async function readImmediateAgentError(paneId: string): Promise<string | undefined> {
-  return extractAgentError((await readPaneTail(paneId)).trim());
+/**
+ * Apply one child-originated message to request/task state. Returns a settled
+ * task result when the envelope is an explicit completion; everything else
+ * updates correlation state and surfaces to the parent delivery bridge.
+ */
+function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnvelope): TaskResult | undefined {
+  switch (envelope.kind) {
+    case 'runtime': {
+      if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
+        try {
+          const task = lifecycleRegistry.getTask(envelope.taskId);
+          if (['running', 'waiting'].includes(task.state) && task.pendingReplyMessageId !== envelope.replyTo) {
+            try {
+              lifecycleRegistry.openPendingRequest(envelope.taskId, {
+                messageId: envelope.replyTo,
+                targetAgentId: envelope.requestTargetId,
+                text: envelope.summary ?? envelope.content,
+              });
+            } catch {
+              // The task already has an outstanding tracked reply; keep the
+              // first one per the one-request policy.
+            }
+          }
+        } catch {
+          // Unknown task ids (e.g. session-local tasks from another process)
+          // are ignored; the mailbox ack already consumed the mirrored event.
+        }
+      }
+      return undefined;
+    }
+    case 'reply': {
+      if (envelope.replyTo && envelope.taskId) {
+        try {
+          const resolution = lifecycleRegistry.resolveReplyForTask(envelope.taskId, envelope.replyTo);
+          // Relay the answer to the task owner, but only when the answer came
+          // from a different participant: the parent already holds answers to
+          // its own questions, and echoing them back to the owner's inbox
+          // would create a self-addressed user message.
+          if (resolution.resolved && resolution.agentId !== envelope.senderId) {
+            const asker = lifecycleRegistry.getAgent({ id: resolution.agentId });
+            const relayed = createEnvelope(
+              { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+              {
+                kind: 'reply',
+                targetId: asker.handle.id,
+                messageId: `shepherd-message-${randomUUID()}`,
+                taskId: envelope.taskId,
+                threadId: envelope.threadId,
+                replyTo: envelope.replyTo,
+                originSenderId: envelope.senderId,
+                delivery: envelope.delivery,
+                content: envelope.content,
+              },
+            );
+            publishFromParent(broker, relayed);
+          }
+        } catch {
+          // Invalid replies (unknown task or mismatched replyTo) leave the
+          // request pending so the owner can still block/cancel it explicitly.
+        }
+      }
+      notifyParentMessage('reply', envelope);
+      return undefined;
+    }
+    default:
+      notifyParentMessage('message', envelope);
+      return undefined;
+  }
 }
 
 export async function promptAgent(

@@ -102,6 +102,20 @@ export interface TaskRecord {
   startedAt?: number;
   waitingSince?: number;
   deadlineAt?: number;
+  /**
+   * Correlation state for the task's single outstanding tracked reply.
+   *
+   * The Phase 6 initial policy allows exactly one outstanding request per task
+   * (the spec permits restricting a task to one outstanding request). This
+   * keeps reply correlation deterministic: the reply's `replyTo` must match
+   * `pendingReplyMessageId`. The request opens when the child (or parent,
+   * for a parent-originated question) sends an `expectsReply` message and is
+   * resolved on a matching reply, an explicit cancellation, close, or timeout.
+   */
+  pendingReplyMessageId?: string;
+  pendingReplyTargetAgentId?: string;
+  pendingReplyDeadlineAt?: number;
+  pendingReplyText?: string;
   pendingRequestIds: string[];
   staleNotifiedAt?: number;
   artifactSession?: ShepherdSession;
@@ -456,6 +470,10 @@ export class LifecycleRegistry {
       ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
       ...(record.waitingSince !== undefined ? { waitingSince: record.waitingSince } : {}),
       ...(record.deadlineAt !== undefined ? { deadlineAt: record.deadlineAt } : {}),
+      ...(record.pendingReplyMessageId !== undefined ? { pendingReplyMessageId: record.pendingReplyMessageId } : {}),
+      ...(record.pendingReplyTargetAgentId !== undefined ? { pendingReplyTargetAgentId: record.pendingReplyTargetAgentId } : {}),
+      ...(record.pendingReplyDeadlineAt !== undefined ? { pendingReplyDeadlineAt: record.pendingReplyDeadlineAt } : {}),
+      ...(record.pendingReplyText !== undefined ? { pendingReplyText: record.pendingReplyText } : {}),
       pendingRequestIds: [...record.pendingRequestIds],
       ...(record.staleNotifiedAt !== undefined ? { staleNotifiedAt: record.staleNotifiedAt } : {}),
       ...(record.artifactSession ? { artifactSession: record.artifactSession } : {}),
@@ -586,6 +604,101 @@ export class LifecycleRegistry {
     return this.resolvePendingRequest(input, requestId);
   }
 
+  /**
+   * Open the task's single outstanding tracked reply. Opens the pending set and
+   * moves the task to `waiting`. If a reply is already outstanding the task is
+   * kept waiting for the earlier one (the initial policy allows one outstanding
+   * request per task) and the existing reply id is returned so the caller can
+   * correlate.
+   */
+  openPendingRequest(
+    input: TaskHandleInput | unknown,
+    request: {
+      messageId: string;
+      targetAgentId?: string;
+      deadlineAt?: number;
+      text?: string;
+    }
+  ): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.settled) {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+    }
+    if (record.pendingReplyMessageId !== undefined) {
+      throw new LifecycleError(
+        'invalid_task',
+        `Task "${record.taskId}" already has an outstanding tracked reply (${record.pendingReplyMessageId}).`
+      );
+    }
+    if (record.state === 'created') {
+      this.setTaskRunning(input);
+    }
+    record.pendingReplyMessageId = request.messageId;
+    record.pendingReplyTargetAgentId = request.targetAgentId;
+    record.pendingReplyText = request.text;
+    if (request.deadlineAt !== undefined && Number.isFinite(request.deadlineAt)) {
+      record.pendingReplyDeadlineAt = request.deadlineAt;
+    }
+    this.addPendingRequest(input, request.messageId);
+    this.setTaskWaiting(input);
+    return this.taskSnapshot(record);
+  }
+
+  /**
+   * Resolve the task's outstanding tracked reply when the matching reply
+   * arrives. The reply's `replyTo` must equal the pending message id; anything
+   * else (wrong task, unknown message) leaves the request pending so the owner
+   * can still block/cancel it explicitly. Returns correlation metadata so the
+   * parent can relay the reply to the asker.
+   */
+  resolveReplyForTask(
+    input: TaskHandleInput | unknown,
+    replyTo: string
+  ): {
+    resolved: boolean;
+    taskId: string;
+    agentId: string;
+    pendingReplyMessageId?: string;
+    targetAgentId?: string;
+  } {
+    const record = this.taskRecord(input);
+    const taskId = record.taskId;
+    const agentId = record.agentId;
+    if (replyTo !== record.pendingReplyMessageId) {
+      return {
+        resolved: false,
+        taskId,
+        agentId,
+        pendingReplyMessageId: record.pendingReplyMessageId,
+        targetAgentId: record.pendingReplyTargetAgentId,
+      };
+    }
+    this.resolvePendingRequest(input, record.pendingReplyMessageId);
+    const repliedTo = record.pendingReplyMessageId;
+    const targetAgentId = record.pendingReplyTargetAgentId;
+    record.pendingReplyMessageId = undefined;
+    record.pendingReplyTargetAgentId = undefined;
+    record.pendingReplyDeadlineAt = undefined;
+    record.pendingReplyText = undefined;
+    return { resolved: true, taskId, agentId, pendingReplyMessageId: repliedTo, targetAgentId };
+  }
+
+  /**
+   * Clear a task's outstanding tracked reply without delivering it (close,
+   * explicit timeout, or an invalid reply). Returns when a request was cleared.
+   */
+  clearPendingReply(input: TaskHandleInput | unknown): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.pendingReplyMessageId !== undefined && !record.settled) {
+      this.resolvePendingRequest(input, record.pendingReplyMessageId);
+    }
+    record.pendingReplyMessageId = undefined;
+    record.pendingReplyTargetAgentId = undefined;
+    record.pendingReplyDeadlineAt = undefined;
+    record.pendingReplyText = undefined;
+    return this.taskSnapshot(record);
+  }
+
   markTaskStaleNotified(input: TaskHandleInput | unknown, at = Date.now()): TaskRecord {
     const record = this.taskRecord(input);
     if (record.state !== 'waiting') {
@@ -660,6 +773,10 @@ export class LifecycleRegistry {
     record.pendingRequestIds.clear();
     record.waitingSince = undefined;
     record.staleNotifiedAt = undefined;
+    record.pendingReplyMessageId = undefined;
+    record.pendingReplyTargetAgentId = undefined;
+    record.pendingReplyDeadlineAt = undefined;
+    record.pendingReplyText = undefined;
     try {
       record.onSettled?.({ ...result });
     } catch {

@@ -148,7 +148,10 @@ function brokerFromEnvironment(): { broker?: ChildBroker; error?: string } {
 }
 
 function incomingMessageText(message: ShepherdMessageEnvelope): string {
-	const sender = message.senderId === "shepherd" ? "Shepherd" : message.senderId;
+	// For parent-relayed replies the authenticated sender is the parent broker;
+	// originSenderId carries the true author so the recipient sees who wrote it.
+	const author = message.originSenderId ?? message.senderId;
+	const sender = author === "shepherd" ? "Shepherd" : author;
 	const title = message.kind === "task" ? "Shepherd delegated task" : "Shepherd message";
 	const metadata = [
 		`Message ID: ${message.messageId}`,
@@ -275,6 +278,40 @@ export default function (pi: ExtensionAPI) {
 					},
 				);
 				const accepted = publishFromChild(active, message);
+				if (accepted.delivery === 'queued' && args.expectsReply === true) {
+					// Mirror the tracked request into the parent inbox so the parent
+					// can open the request on the task (running -> waiting). The
+					// question itself was published to the target; the mirror only
+					// carries correlation state, never a second copy of the content
+					// for delivery.
+					const mirrored = createEnvelope(
+						{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+						{
+							kind: "runtime",
+							targetId: active.parentId,
+							taskId,
+							threadId: args.threadId,
+							replyTo: message.messageId,
+							requestOpen: true,
+							requestTargetId: ['shepherd', 'parent'].includes(args.target) ? active.parentId : args.target,
+							summary: args.message,
+							delivery: "followUp",
+						},
+					);
+					try {
+						publishFromChild(active, mirrored);
+					} catch {
+						// The question is already queued; a lost mirror only delays
+						// the task entering the waiting state and cannot corrupt it.
+						return childResult(
+							"shepherd_message",
+							args,
+							"Shepherd message accepted; reply tracking degraded (request mirror failed).",
+							{ accepted: true, messageId: message.messageId, delivery: accepted.delivery, requestTracking: "degraded" },
+							{ messageId: message.messageId, taskId: taskId ?? null, delivery: accepted.delivery },
+						);
+					}
+				}
 				return childResult(
 					"shepherd_message",
 					args,

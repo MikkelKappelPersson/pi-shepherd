@@ -20,11 +20,13 @@ import {
   AgentScopeSchema,
   SpawnParams,
   LifecycleDelegateParams,
+  LifecycleMessageParams,
   LifecyclePromptParams,
   WaitParams,
   WatchParams,
   LifecycleStatusParams,
   LifecycleCloseParams,
+  TaskIdSchema,
 } from '../core/types.ts';
 import {
   startAgent,
@@ -35,6 +37,8 @@ import {
   closeAgent,
   promptWatcherService,
   configurePromptWatcherNotifications,
+  sendParentMessage,
+  configureParentMessageNotifications,
 } from '../core/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './config.ts';
 import { lifecycleRegistry } from '../core/orchestration.ts';
@@ -108,6 +112,7 @@ const AnyShepherdUnion = Type.Union(
     AgentsParams,
     SpawnParams,
     LifecycleDelegateParams,
+    LifecycleMessageParams,
     LifecyclePromptParams,
     WaitParams,
     WatchParams,
@@ -302,6 +307,13 @@ export function setPromptWatcherSessionActive(active: boolean): void {
   watcherParentSessionActive = active;
 }
 
+let messageParentSessionActive = true;
+
+/** Enable/disable message delivery without changing the core service. */
+export function setShepherdMessageSessionActive(active: boolean): void {
+  messageParentSessionActive = active;
+}
+
 function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) => {
     const content = typeof message.content === 'string' ? message.content : '';
@@ -330,9 +342,12 @@ function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
   });
 }
 
-/** Narrow extension-owned bridge from core watcher completions to pi. */
+/** Narrow extension-owned bridge from core watcher completions to pi.
+ * Also wires child-originated messages (Phase 6) into the parent session.
+ */
 function configurePromptWatcherBridge(pi: ExtensionAPI): void {
   registerPromptCompletionRenderer(pi);
+  registerShepherdMessageRenderer(pi);
   configurePromptWatcherNotifications(notification => {
     if (!watcherParentSessionActive) return;
     const promptIds = notification.completions.map(completion => completion.promptId);
@@ -382,6 +397,74 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       // prompt registry and can still be retrieved by shepherd_wait.
     }
   });
+  configureParentMessageNotifications(notification => {
+    if (!messageParentSessionActive) return;
+    const { envelope } = notification;
+    if (envelope.kind === 'runtime') return; // task-state mirror only; never a user-facing message
+    const sender = displayAgentName(envelope.senderId);
+    const title = envelope.kind === 'reply' ? 'Shepherd reply' : 'Shepherd message';
+    const body = [
+      `${title} from ${sender}`,
+      `Message ID: ${envelope.messageId}`,
+      envelope.taskId ? `Task ID: ${envelope.taskId}` : undefined,
+      envelope.threadId ? `Thread ID: ${envelope.threadId}` : undefined,
+      envelope.replyTo ? `Reply to: ${envelope.replyTo}` : undefined,
+      '',
+      envelope.content ?? '',
+    ].filter(Boolean).join('\n');
+    const content = formatUserFacingText({
+      content: [{ type: 'text' as const, text: body }],
+      details: {
+        call: {
+          name: 'shepherd_message',
+          arguments: { target: envelope.senderId, message: envelope.content },
+        },
+        messageId: envelope.messageId,
+        from: envelope.senderId,
+        returnValue: { messageId: envelope.messageId, from: envelope.senderId, kind: envelope.kind },
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: envelope.kind === 'reply' ? 'shepherd.message.reply' : 'shepherd.message.incoming',
+          content,
+          display: true,
+          details: envelope,
+        },
+        { deliverAs: 'followUp', triggerTurn: false }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the envelope remains in the parent's
+      // processed storage and the task state is already reconciled.
+    }
+  });
+}
+
+function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
+  const render = (message: any, options: any, theme: any) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const isReply = firstLine.startsWith('reply:') || (message.customType === 'shepherd.message.reply');
+    const rendered = [
+      theme.fg('toolTitle', theme.bold(isReply ? 'shepherd_reply' : 'shepherd_message')) +
+        ` ${theme.fg('accent', firstLine)}`,
+      ...lines.map(line =>
+        ['call:', 'return:', 'details:'].includes(line)
+          ? theme.fg('accent', line)
+          : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  };
+  pi.registerMessageRenderer('shepherd.message.incoming', render);
+  pi.registerMessageRenderer('shepherd.message.reply', render);
 }
 
 type ShepherdContext = {
@@ -473,6 +556,35 @@ export async function doAction(
             agentId: task.agentId,
             state: 'running',
           },
+        }
+      );
+    }
+    case 'message': {
+      const a: any = args;
+      const result = sendParentMessage({
+        target: a.target,
+        message: a.message,
+        taskId: a.taskId ?? a.id,
+        threadId: a.threadId,
+        replyTo: a.replyTo,
+        expectsReply: a.expectsReply,
+        delivery: a.delivery,
+      });
+      return textResult(
+        `Message queued to ${displayAgentName(result.targetId)}` +
+          (result.targetTaskState ? ` (task ${result.targetTaskState})` : ''),
+        {
+          id: result.messageId,
+          messageId: result.messageId,
+          returnValue: {
+            messageId: result.messageId,
+            accepted: result.accepted,
+            delivery: result.delivery,
+            ...(result.requestId ? { requestId: result.requestId } : {}),
+            targetId: result.targetId,
+          },
+          ...(result.requestId ? { requestId: result.requestId } : {}),
+          ...(result.targetTaskState ? { targetTaskState: result.targetTaskState } : {}),
         }
       );
     }
@@ -719,7 +831,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
       'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_message, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
@@ -839,6 +951,50 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       executeShepherd(
         'delegate',
         { action: 'delegate', ...params } as ShepherdArgs,
+        ctx,
+        signal,
+        onUpdate
+      ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
+    renderResult: (result, options, theme, context) =>
+      renderUserFacingResult(result, options, theme, context),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_message',
+    label: 'Shepherd: message agent',
+    description:
+      'Send one asynchronous message to a spawned agent and return immediately. Pass the agent id printed by shepherd_spawn as the top-level target argument, not a Herdr pane id. The returned message id identifies this message for reply correlation. An accepted message means the broker queued it for delivery; it does not mean the recipient read it or replied. With expectsReply and a taskId the task enters waiting until a matching reply arrives.',
+    promptSnippet:
+      'send an asynchronous message to a spawned agent.',
+    promptGuidelines: [
+      'Use shepherd_message for questions to an agent while it is busy or idle; the recipient receives it as a queued follow-up. Do not use it to submit tracked work — that is shepherd_delegate.',
+      'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. A plain message never alters task state.',
+    ],
+    parameters: Type.Object({
+      target: Type.String({ description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.' }),
+      message: Type.String({ description: 'Non-empty message content.' }),
+      taskId: Type.Optional(TaskIdSchema),
+      threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),
+      replyTo: Type.Optional(Type.String({ description: 'Message id of the request being answered.' })),
+      expectsReply: Type.Optional(Type.Boolean({ description: 'Track this message as a request that expects a reply.' })),
+      delivery: Type.Optional(
+        Type.Union(
+          [Type.Literal('followUp'), Type.Literal('steer')],
+          { description: 'Delivery mode; followUp is the default, steer is for urgent input.' }
+        )
+      ),
+    }),
+    prepareArguments: input =>
+      prepareForSchema<Omit<Static<typeof LifecycleMessageParams>, 'action'>>(input),
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd(
+        'message',
+        { action: 'message', ...params } as ShepherdArgs,
         ctx,
         signal,
         onUpdate

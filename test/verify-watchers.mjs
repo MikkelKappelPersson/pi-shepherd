@@ -55,8 +55,11 @@ let registeredMessageRenderer;
 registerShepherdTools({
   registerTool() {},
   registerMessageRenderer(customType, renderer) {
-    assert.equal(customType, 'shepherd.prompt.completion');
-    registeredMessageRenderer = renderer;
+    assert.ok(
+      ['shepherd.prompt.completion', 'shepherd.message.incoming', 'shepherd.message.reply'].includes(customType),
+      'unexpected custom message renderer: ' + customType
+    );
+    if (customType === 'shepherd.prompt.completion') registeredMessageRenderer = renderer;
   },
   sendMessage(message, options) {
     sent.push({ message, options });
