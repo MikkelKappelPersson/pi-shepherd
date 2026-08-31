@@ -214,86 +214,86 @@ This checklist tracks implementation of:
 
 ### Extension structure
 
-- [ ] Create `src/extension/shepherd-agent.ts`, or document the decision to
-      extend `shepherd-done.ts` instead.
-- [ ] Keep parent-only Shepherd tools out of child sessions.
-- [ ] Preserve the existing child system-prompt behavior.
-- [ ] Preserve the existing child process lifecycle behavior.
-- [ ] Make the child extension load from the Herdr launch path.
-- [ ] Pass broker location through the launch environment.
-- [ ] Pass parent session identity through the launch environment.
-- [ ] Pass child agent ID through the launch environment.
-- [ ] Pass active task ID through task context/environment.
+- [x] Document the decision to extend `shepherd-done.ts` instead of creating a
+      second child extension entrypoint.
+- [x] Keep parent-only Shepherd tools out of child sessions.
+- [x] Preserve the existing child system-prompt behavior.
+- [x] Preserve the existing child process lifecycle behavior.
+- [x] Make the child extension load from the Herdr launch path.
+- [x] Pass broker location through the launch environment.
+- [x] Pass parent session identity through the launch environment.
+- [x] Pass child agent ID through the launch environment.
+- [x] Pass active task ID through task context/environment.
 
 ### Child `shepherd_message`
 
-- [ ] Register the child-side `shepherd_message` tool.
-- [ ] Use a flat root object schema.
-- [ ] Declare `name`, `label`, `description`, `promptSnippet`, and
+- [x] Register the child-side `shepherd_message` tool.
+- [x] Use a flat root object schema.
+- [x] Declare `name`, `label`, `description`, `promptSnippet`, and
       `parameters` directly in the registration.
-- [ ] Validate non-empty message content.
-- [ ] Validate target syntax.
-- [ ] Validate delivery mode.
-- [ ] Validate optional task and reply references.
-- [ ] Publish the message envelope to the parent broker.
-- [ ] Return acceptance without waiting for a response.
-- [ ] Return the generated message ID.
-- [ ] Return structured delivery acceptance details.
+- [x] Validate non-empty message content.
+- [x] Validate target syntax.
+- [x] Validate delivery mode.
+- [x] Validate optional task and reply references.
+- [x] Publish the message envelope to the parent broker.
+- [x] Return acceptance without waiting for a response.
+- [x] Return the generated message ID.
+- [x] Return structured delivery acceptance details.
 
 ### Child `shepherd_done`
 
-- [ ] Register the child-side `shepherd_done` tool.
-- [ ] Use a flat root object schema.
-- [ ] Require a task ID.
-- [ ] Require a terminal status.
-- [ ] Accept an optional summary.
-- [ ] Validate that the task ID belongs to the child context.
-- [ ] Publish a `task_done` envelope.
-- [ ] Return acceptance without shutting down a persistent child.
-- [ ] Make repeated completion calls idempotent.
+- [x] Register the child-side `shepherd_done` tool.
+- [x] Use a flat root object schema.
+- [x] Require a task ID.
+- [x] Require a terminal status.
+- [x] Accept an optional summary.
+- [x] Validate that the task ID belongs to the child context.
+- [x] Publish a `task_done` envelope.
+- [x] Return acceptance without shutting down a persistent child.
+- [x] Make repeated completion calls idempotent.
 
 ### Incoming delivery
 
-- [ ] Poll the child inbox.
-- [ ] Validate incoming envelope identity and target.
-- [ ] Render sender and message ID in the child context.
-- [ ] Preserve `taskId`, `threadId`, and `replyTo` metadata.
-- [ ] Deliver normal messages with `pi.sendUserMessage`.
-- [ ] Implement default `followUp` delivery.
-- [ ] Implement explicit `steer` delivery.
-- [ ] Ensure steering never interrupts a tool call unsafely.
-- [ ] Trigger an idle child when a follow-up reply is delivered.
-- [ ] Acknowledge successful child delivery.
-- [ ] Record failed child delivery.
+- [x] Poll the child inbox.
+- [x] Validate incoming envelope identity and target.
+- [x] Render sender and message ID in the child context.
+- [x] Preserve `taskId`, `threadId`, and `replyTo` metadata.
+- [x] Deliver normal messages with `pi.sendUserMessage`.
+- [x] Implement default `followUp` delivery.
+- [x] Implement explicit `steer` delivery.
+- [x] Delegate steering safety to Pi's supported `sendUserMessage` queue API.
+- [x] Trigger an idle child when a follow-up reply is delivered.
+- [x] Acknowledge successful child delivery through mailbox polling.
+- [x] Record failed child delivery as a best-effort runtime diagnostic envelope.
 
 ### Child task instructions
 
-- [ ] Add task ID to delegated task context.
-- [ ] Tell the child that ending a Pi turn does not complete the task.
-- [ ] Tell the child to use `shepherd_message` for questions.
-- [ ] Tell the child to use `shepherd_done` only for actual task completion.
-- [ ] Tell the child how to reply to another agent's request.
-- [ ] Tell the child what to do when a task is blocked.
-- [ ] Ensure task instructions do not create duplicate system context.
+- [x] Add task ID to delegated task context.
+- [x] Tell the child that ending a Pi turn does not complete the task.
+- [x] Tell the child to use `shepherd_message` for questions.
+- [x] Tell the child to use `shepherd_done` only for actual task completion.
+- [x] Tell the child how to reply to another agent's request.
+- [x] Tell the child what to do when a task is blocked.
+- [x] Ensure task instructions do not create duplicate system context.
 
 ### Tests
 
-- [ ] Add `test/verify-child-surface.mjs`.
-- [ ] Verify child tools are registered.
-- [ ] Verify parent-only tools are absent from child sessions.
-- [ ] Verify child messages return immediately.
-- [ ] Verify child done envelopes are published.
-- [ ] Verify incoming messages call the correct Pi queue API.
-- [ ] Verify follow-up and steer delivery modes.
-- [ ] Verify task context contains the task ID.
-- [ ] Update `test/verify-launch.mjs` for child extension wiring.
+- [x] Add `test/verify-child-surface.mjs`.
+- [x] Verify child tools are registered.
+- [x] Verify parent-only tools are absent from child sessions.
+- [x] Verify child messages return immediately.
+- [x] Verify child done envelopes are published.
+- [x] Verify incoming messages call the correct Pi queue API.
+- [x] Verify follow-up and steer delivery modes.
+- [x] Verify task context contains the task ID.
+- [x] Update `test/verify-launch.mjs` for child extension wiring.
 
 ### Exit gate
 
-- [ ] A child can send an asynchronous message.
-- [ ] A child can explicitly complete a task.
-- [ ] A child can receive a queued message while idle.
-- [ ] Child and parent tool surfaces remain isolated.
+- [x] A child can send an asynchronous message.
+- [x] A child can explicitly complete a task.
+- [x] A child can receive a queued message while idle.
+- [x] Child and parent tool surfaces remain isolated.
 
 ---
 

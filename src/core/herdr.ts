@@ -27,6 +27,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
 import { sessionOwner } from "./orchestration.ts";
+import type { ChildCapability } from "./messaging.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -529,6 +530,10 @@ export function writePiLaunchFiles(opts: {
 	persistent?: boolean;
 	model?: string;
 	tools?: string[];
+	/** Child-side mailbox capability, supplied once the parent broker exists. */
+	childBroker?: ChildCapability & { rootDir: string };
+	/** Active tracked task context, when this launch is for delegated work. */
+	taskId?: string;
 }): { dir: string; sessionFile: string; scriptFile: string } {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shepherd-"));
 	const safe = opts.name.replace(/[^\w.-]+/g, "_") || "agent";
@@ -552,7 +557,8 @@ export function writePiLaunchFiles(opts: {
 	}
 	if (opts.task !== undefined) {
 		const taskFile = path.join(dir, `task-${safe}.md`);
-		const task = `${opts.task}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. When finished, stop and make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
+		const taskContext = opts.taskId ? `\nTask ID: ${opts.taskId}` : "";
+		const task = `${opts.task}${taskContext}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. A delegated task may span multiple Pi turns: ending the current turn or becoming idle does not complete the task. Use shepherd_message when you need information from another participant. When replying to a request, set replyTo to the request's Message ID. If the task cannot proceed, call shepherd_done with status blocked and explain why. Call shepherd_done only when the whole task is complete or explicitly blocked/failed. When finished, make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
 		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: "0600" });
 		args.push(`'@${taskFile}'`);
 	}
@@ -566,6 +572,12 @@ export function writePiLaunchFiles(opts: {
 		opts.omitPiDocumentation
 			? "export PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1"
 			: "unset PI_SHEPHERD_OMIT_PI_DOCUMENTATION",
+		opts.childBroker
+			? `export PI_SHEPHERD_BROKER_DIR=${shellQuote(opts.childBroker.rootDir)}\nexport PI_SHEPHERD_BROKER_SESSION_ID=${shellQuote(opts.childBroker.sessionId)}\nexport PI_SHEPHERD_BROKER_ID=${shellQuote(opts.childBroker.brokerId)}\nexport PI_SHEPHERD_AGENT_ID=${shellQuote(opts.childBroker.agentId)}\nexport PI_SHEPHERD_BROKER_TOKEN=${shellQuote(opts.childBroker.token)}\nexport PI_SHEPHERD_AGENT_INBOX=${shellQuote(opts.childBroker.inboxPath)}`
+			: "unset PI_SHEPHERD_BROKER_DIR PI_SHEPHERD_BROKER_SESSION_ID PI_SHEPHERD_BROKER_ID PI_SHEPHERD_AGENT_ID PI_SHEPHERD_BROKER_TOKEN PI_SHEPHERD_AGENT_INBOX",
+		opts.taskId
+			? `export PI_SHEPHERD_TASK_ID=${shellQuote(opts.taskId)}`
+			: "unset PI_SHEPHERD_TASK_ID",
 
 		`export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
 		opts.stayOpen || opts.persistent ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
@@ -597,6 +609,10 @@ export function launchPiInPane(
 		omitContextFiles?: boolean;
 		model?: string;
 		tools?: string[];
+		/** Child-side mailbox capability, supplied once the parent broker exists. */
+		childBroker?: ChildCapability & { rootDir: string };
+		/** Active tracked task context, when this launch is for delegated work. */
+		taskId?: string;
 	},
 ): { dir: string; sessionFile: string; scriptFile: string } {
 	const files = writePiLaunchFiles(opts);

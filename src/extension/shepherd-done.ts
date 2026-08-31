@@ -1,26 +1,32 @@
 /**
  * Extension loaded into pi agents that pi-shepherd launches in Herdr tabs.
  *
- * Two responsibilities:
- *   1. Completion signal: on `agent_end`, if the latest assistant turn finished
- *      normally, write a completion sidecar (`<session>.exit`) and — for
- *      one-shot agents — shut the process down so the parent (the main pi
- *      instance) can pick up the result. A user Escape/abort leaves the pane
- *      open for inspection. The parent reads the actual full answer from the
- *      child's JSONL session file; the sidecar is only the trigger.
- *   2. Explicit exit: one-shot children exit after a normal turn.
+ * Responsibilities:
+ *   1. Preserve the existing completion sidecar behavior for legacy prompt
+ *      runs. The sidecar remains a process/turn observation until the parent
+ *      task lifecycle is migrated to explicit shepherd_done handling.
+ *   2. Provide child-side shepherd_message and shepherd_done tools.
+ *   3. Poll the parent-owned mailbox and queue incoming messages into this Pi
+ *      session using followUp or steer delivery.
  *
- * The parent sets `PI_SHEPHERD_SESSION` (the JSONL session file path) and
- * `PI_SHEPHERD_AUTO_EXIT=1` in the launch environment.
- *
- * When `PI_SHEPHERD_STAY_OPEN=1` is set, completion only writes the sidecar and
- * the pi process is NOT shut down — it stays open in the tab for the user to
- * keep driving. The parent picks up the result from the sidecar.
+ * The parent passes the mailbox capability through launch-time environment
+ * variables. Without those variables the child surface still loads, but its
+ * messaging tools return a structured broker-unavailable error.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { Type } from "typebox";
+import {
+	createChildBroker,
+	createEnvelope,
+	pollChildInbox,
+	publishFromChild,
+	type ChildBroker,
+	type ShepherdDelivery,
+	type ShepherdMessageEnvelope,
+} from "../core/messaging.ts";
 import { omitPiDocumentation, replacePiIdentity } from "./system-prompt.ts";
 
 function writeSidecar(payload: Record<string, unknown>): void {
@@ -53,8 +59,7 @@ function latestAssistantOutcome(messages: any[] | undefined): AssistantOutcome {
 		// further drive in the tab.
 		if (m.stopReason === "aborted") return { exit: false };
 		if (m.stopReason === "error") {
-			const raw =
-				typeof m.errorMessage === "string" ? m.errorMessage.trim() : "";
+			const raw = typeof m.errorMessage === "string" ? m.errorMessage.trim() : "";
 			return {
 				exit: true,
 				error: {
@@ -67,12 +72,105 @@ function latestAssistantOutcome(messages: any[] | undefined): AssistantOutcome {
 	return { exit: false };
 }
 
+const DeliverySchema = Type.Union(
+	[Type.Literal("followUp"), Type.Literal("steer")],
+	{ description: "Delivery mode; followUp waits for the current turn, steer is for urgent input." },
+);
+const StatusSchema = Type.Union(
+	[Type.Literal("completed"), Type.Literal("blocked"), Type.Literal("failed")],
+	{ description: "Terminal status for the delegated task." },
+);
+
+function stringifyArguments(args: unknown): string {
+	return JSON.stringify(args ?? {});
+}
+
+function childResult(
+	toolName: string,
+	args: unknown,
+	service: string,
+	returnValue: unknown,
+	details: Record<string, unknown> = {},
+	returnCode = 0,
+): AgentToolResult<Record<string, unknown>> {
+	const visibleDetails = Object.entries(details).map(([key, value]) => {
+		const rendered = typeof value === "string" ? value : JSON.stringify(value);
+		return `   ${key.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`)}: ${rendered ?? "null"}`;
+	});
+	const text = [
+		service,
+		"",
+		"call:",
+		`    ${toolName} ${stringifyArguments(args)}`,
+		"",
+		"return:",
+		`    ${JSON.stringify(returnValue)}`,
+		...(visibleDetails.length ? ["", "details:", ...visibleDetails] : []),
+	].join("\n");
+	return {
+		content: [{ type: "text", text }],
+		details: { returnValue, returnCode, ...details },
+	};
+}
+
+function unavailableToolResult(toolName: string, args: unknown, error: string) {
+	return childResult(
+		toolName,
+		args,
+		"Shepherd child messaging is unavailable.",
+		{ accepted: false, error },
+		{ code: "broker_unavailable", error },
+		1,
+	);
+}
+
+function brokerFromEnvironment(): { broker?: ChildBroker; error?: string } {
+	const rootDir = process.env.PI_SHEPHERD_BROKER_DIR;
+	const sessionId = process.env.PI_SHEPHERD_BROKER_SESSION_ID;
+	const brokerId = process.env.PI_SHEPHERD_BROKER_ID;
+	const agentId = process.env.PI_SHEPHERD_AGENT_ID;
+	const token = process.env.PI_SHEPHERD_BROKER_TOKEN;
+	const inboxPath = process.env.PI_SHEPHERD_AGENT_INBOX;
+	if (!rootDir || !sessionId || !brokerId || !agentId || !token || !inboxPath) {
+		return { error: "No Shepherd broker capability was provided for this child." };
+	}
+	try {
+		return {
+			broker: createChildBroker({ rootDir, sessionId, brokerId, agentId, token, inboxPath }),
+		};
+	} catch (error) {
+		return { error: String((error as any)?.message ?? error) };
+	}
+}
+
+function incomingMessageText(message: ShepherdMessageEnvelope): string {
+	const sender = message.senderId === "shepherd" ? "Shepherd" : message.senderId;
+	const title = message.kind === "task" ? "Shepherd delegated task" : "Shepherd message";
+	const metadata = [
+		`Message ID: ${message.messageId}`,
+		message.taskId ? `Task ID: ${message.taskId}` : undefined,
+		message.threadId ? `Thread ID: ${message.threadId}` : undefined,
+		message.replyTo ? `Reply to: ${message.replyTo}` : undefined,
+	].filter(Boolean).join("\n");
+	return `[${title} from ${sender}]\n${metadata}\n\n${message.content ?? message.summary ?? ""}`;
+}
+
+function deliveryMode(value: unknown): ShepherdDelivery {
+	return value === "steer" ? "steer" : "followUp";
+}
+
 export default function (pi: ExtensionAPI) {
 	const autoExit = process.env.PI_SHEPHERD_AUTO_EXIT === "1";
 	const stayOpen = process.env.PI_SHEPHERD_STAY_OPEN === "1";
 	const agentSystemPromptFile = process.env.PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE;
 	const shouldOmitPiDocumentation = process.env.PI_SHEPHERD_OMIT_PI_DOCUMENTATION === "1";
+	const configuredTaskId = process.env.PI_SHEPHERD_TASK_ID;
 	let agentSystemPrompt = "";
+	let broker: ChildBroker | undefined;
+	let brokerError: string | undefined;
+	let pollTimer: ReturnType<typeof setInterval> | undefined;
+	const completedTasks = new Map<string, ReturnType<typeof publishFromChild>>();
+
 	if (agentSystemPromptFile) {
 		try {
 			agentSystemPrompt = readFileSync(agentSystemPromptFile, "utf8").trim();
@@ -82,6 +180,56 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	const ensureBroker = (): ChildBroker | undefined => {
+		if (broker || brokerError) return broker;
+		const loaded = brokerFromEnvironment();
+		broker = loaded.broker;
+		brokerError = loaded.error;
+		return broker;
+	};
+
+	const sendDeliveryFailure = (message: ShepherdMessageEnvelope, error: unknown): void => {
+		const active = ensureBroker();
+		if (!active) return;
+		try {
+			const diagnostic = createEnvelope(
+				{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+				{
+					kind: "runtime",
+					targetId: active.parentId,
+					taskId: message.taskId,
+					threadId: message.threadId,
+					delivery: "followUp",
+					content: `Could not deliver Shepherd message ${message.messageId}: ${String((error as any)?.message ?? error)}`,
+					error: String((error as any)?.message ?? error),
+				},
+			);
+			publishFromChild(active, diagnostic);
+		} catch {
+			// Delivery diagnostics are best effort and must not crash the child.
+		}
+	};
+
+	const poll = (): void => {
+		const active = ensureBroker();
+		if (!active) return;
+		let messages: ShepherdMessageEnvelope[];
+		try {
+			messages = pollChildInbox(active);
+		} catch {
+			return;
+		}
+		for (const message of messages) {
+			try {
+				pi.sendUserMessage(incomingMessageText(message), {
+					deliverAs: deliveryMode(message.delivery),
+				});
+			} catch (error) {
+				sendDeliveryFailure(message, error);
+			}
+		}
+	};
+
 	if (agentSystemPrompt || shouldOmitPiDocumentation) {
 		pi.on("before_agent_start", (event: any) => {
 			let systemPrompt = event.systemPrompt;
@@ -90,6 +238,135 @@ export default function (pi: ExtensionAPI) {
 			return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
 		});
 	}
+
+	pi.registerTool({
+		name: "shepherd_message",
+		label: "Shepherd message",
+		description: "Send an asynchronous message to the Shepherd or another registered agent without waiting for a reply.",
+		promptSnippet: "send an asynchronous message to Shepherd or another agent",
+		parameters: Type.Object({
+			target: Type.String({ description: "Shepherd, parent, or an opaque registered Shepherd agent id." }),
+			message: Type.String({ description: "Non-empty message content." }),
+			taskId: Type.Optional(Type.String({ description: "Active delegated task id, when this message belongs to a task." })),
+			threadId: Type.Optional(Type.String({ description: "Conversation/thread correlation id." })),
+			replyTo: Type.Optional(Type.String({ description: "Message id of the request being answered." })),
+			expectsReply: Type.Optional(Type.Boolean({ description: "Track this message as a request that expects a reply." })),
+			delivery: Type.Optional(DeliverySchema),
+		}),
+		async execute(_toolCallId, args) {
+			const active = ensureBroker();
+			if (!active) return unavailableToolResult("shepherd_message", args, brokerError ?? "Broker unavailable.");
+			const taskId = args.taskId ?? configuredTaskId;
+			try {
+				const message = createEnvelope(
+					{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+					{
+						kind: args.replyTo ? "reply" : "message",
+						targetId: args.target,
+						taskId,
+						threadId: args.threadId,
+						replyTo: args.replyTo,
+						expectsReply: args.expectsReply,
+						delivery: deliveryMode(args.delivery),
+						content: args.message,
+					},
+				);
+				const accepted = publishFromChild(active, message);
+				return childResult(
+					"shepherd_message",
+					args,
+					"Shepherd message accepted for asynchronous delivery.",
+					accepted,
+					{ messageId: message.messageId, taskId: taskId ?? null, delivery: accepted.delivery },
+				);
+			} catch (error) {
+				return childResult(
+					"shepherd_message",
+					args,
+					"Shepherd message was rejected.",
+					{ accepted: false, error: String((error as any)?.message ?? error) },
+					{ code: (error as any)?.code ?? "message_rejected", error: String((error as any)?.message ?? error) },
+					1,
+				);
+			}
+		},
+	});
+
+	pi.registerTool({
+		name: "shepherd_done",
+		label: "Shepherd task done",
+		description: "Explicitly complete, block, or fail the current delegated Shepherd task.",
+		promptSnippet: "explicitly complete the delegated Shepherd task",
+		parameters: Type.Object({
+			taskId: Type.String({ description: "Opaque task id supplied in the delegated task context." }),
+			status: StatusSchema,
+			summary: Type.Optional(Type.String({ description: "Concise completion, blocked, or failure summary." })),
+		}),
+		async execute(_toolCallId, args) {
+			const active = ensureBroker();
+			if (!active) return unavailableToolResult("shepherd_done", args, brokerError ?? "Broker unavailable.");
+			if (configuredTaskId && args.taskId !== configuredTaskId) {
+				const error = `Task id does not match this child context (${configuredTaskId}).`;
+				return childResult("shepherd_done", args, "Shepherd task completion was rejected.", { accepted: false, error }, { code: "task_mismatch", error }, 1);
+			}
+			try {
+				const previous = completedTasks.get(args.taskId);
+				if (previous) {
+					return childResult(
+						"shepherd_done",
+						args,
+						"Shepherd task completion was already accepted.",
+						previous,
+						{ taskId: args.taskId, status: args.status, delivery: previous.delivery, duplicate: true },
+					);
+				}
+				const completion = createEnvelope(
+					{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+					{
+						kind: "task_done",
+						targetId: active.parentId,
+						taskId: args.taskId,
+						status: args.status,
+						summary: args.summary,
+						content: args.summary,
+						delivery: "followUp",
+					},
+				);
+				const accepted = publishFromChild(active, completion);
+				completedTasks.set(args.taskId, accepted);
+				return childResult(
+					"shepherd_done",
+					args,
+					"Shepherd task completion accepted.",
+					accepted,
+					{ taskId: args.taskId, status: args.status, delivery: accepted.delivery },
+				);
+			} catch (error) {
+				return childResult(
+					"shepherd_done",
+					args,
+					"Shepherd task completion was rejected.",
+					{ accepted: false, error: String((error as any)?.message ?? error) },
+					{ code: (error as any)?.code ?? "completion_rejected", error: String((error as any)?.message ?? error) },
+					1,
+				);
+			}
+		},
+	});
+
+	pi.on("session_start", () => {
+		if (pollTimer) return;
+		ensureBroker();
+		poll();
+		pollTimer = setInterval(poll, 250);
+		(pollTimer as any).unref?.();
+	});
+
+	pi.on("session_shutdown", () => {
+		if (pollTimer) clearInterval(pollTimer);
+		pollTimer = undefined;
+		broker = undefined;
+	});
 
 	pi.on("agent_end", (event: any, ctx: { shutdown: () => void }) => {
 		// Persistent shepherd agents stay alive, but must still publish a
