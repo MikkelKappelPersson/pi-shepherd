@@ -222,6 +222,14 @@ export class LifecycleRegistry {
     };
   }
 
+  /**
+   * Update the observed process/agent state without settling an open prompt.
+   *
+   * This separation is a guardrail for the tracked-task protocol: a child can
+   * become idle between turns while a delegated task is waiting for a reply.
+   * Future task records must settle only through explicit completion or an
+   * explicit failure, cancellation, or timeout path.
+   */
   setAgentState(handle: AgentHandleInput, state: AgentLifecycleState, error?: string): void {
     const record = this.getAgent(handle);
     record.state = state;

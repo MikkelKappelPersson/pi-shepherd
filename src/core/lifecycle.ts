@@ -273,6 +273,11 @@ export type PromptWatcherNotifier = (notification: WatcherNotification) => void 
  * Non-blocking prompt completion observer. The registry owns settlement and
  * watcher deduplication; this service only polls Herdr for prompts that have
  * no completion result yet and bridges completions to the parent extension.
+ *
+ * This is the legacy prompt path. Tracked delegated tasks must not reuse its
+ * idle/done inference: a child may be idle while its task is waiting for a
+ * peer reply. The task path will settle only from shepherd_done or an explicit
+ * failure, cancellation, or timeout event.
  */
 export class PromptWatcherService {
   private timer?: ReturnType<typeof setInterval>;

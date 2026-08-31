@@ -31,32 +31,34 @@ This checklist tracks implementation of:
 
 ### Repository baseline
 
-- [ ] Read and confirm the requirements in `spec.md`.
-- [ ] Read and confirm the sequencing and decisions in `plan.md`.
-- [ ] Run the existing `npm test` suite and record the baseline result.
-- [ ] Record the current public tool list and schemas.
-- [ ] Record the current parent/child extension registration behavior.
-- [ ] Confirm the current completion path uses `agent_end` and sidecar signals.
-- [ ] Confirm the current registry enforces one unresolved prompt per agent.
-- [ ] Confirm current fieldnote finalization is attached to prompt settlement.
+- [x] Read and confirm the requirements in `spec.md`.
+- [x] Read and confirm the sequencing and decisions in `plan.md`.
+- [x] Run the existing `npm test` suite and record the baseline result.
+- [x] Record the current public tool list and schemas.
+- [x] Record the current parent/child extension registration behavior.
+- [x] Confirm the current completion path uses `agent_end` and sidecar signals.
+- [x] Confirm the current registry enforces one unresolved prompt per agent.
+- [x] Confirm current fieldnote finalization is attached to prompt settlement.
+- [x] Capture the findings in `docs/specs/001-agent-messaging-and-task-lifecycle/baseline.md`.
 
 ### Test scaffolding
 
-- [ ] Add a reusable temporary-directory helper for mailbox tests.
-- [ ] Add deterministic clock/timer helpers for stale-wait tests.
-- [ ] Add a test helper for creating fake parent and child identities.
-- [ ] Add schema-test placeholders for `shepherd_delegate`.
-- [ ] Add schema-test placeholders for `shepherd_message`.
-- [ ] Add schema-test placeholders for `shepherd_done`.
-- [ ] Add schema-test placeholders for task-aware `shepherd_watch`.
-- [ ] Add parent/child surface test placeholders.
-- [ ] Add task-state test placeholders.
+- [x] Add a reusable temporary-directory helper for mailbox tests.
+- [x] Add deterministic clock/timer helpers for stale-wait tests.
+- [x] Add a test helper for creating fake parent and child identities.
+- [x] Add schema-test placeholders for `shepherd_delegate`.
+- [x] Add schema-test placeholders for `shepherd_message`.
+- [x] Add schema-test placeholders for `shepherd_done`.
+- [x] Add schema-test placeholders for task-aware `shepherd_watch`.
+- [x] Add parent/child surface test placeholders.
+- [x] Add the Phase 0 task-state boundary test in `test/verify-phase0.mjs`.
+- [x] Centralize the Phase 0 contracts in `test/helpers/feature-contracts.mjs` for later phase tests.
 
 ### Exit gate
 
-- [ ] Baseline `npm test` result is recorded.
-- [ ] New tests can create isolated parent/child identities without Herdr.
-- [ ] No runtime behavior has changed yet.
+- [x] Baseline `npm test` result is recorded.
+- [x] New tests can create isolated parent/child identities without Herdr.
+- [x] No runtime behavior has changed yet; only test scaffolding and guardrail documentation were added.
 
 ---
 
