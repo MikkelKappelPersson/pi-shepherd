@@ -3,7 +3,7 @@
 // Invariant: every model-facing tool parameter schema must have a root
 // "type": "object". Bare anyOf roots break grammar/schema-constrained
 // sampling backends, which emit `{}` arguments for every call
-// (see docs/plan-tool-surface-split.md §1).
+// (see docs/plans/tool-surface-split.md §1).
 //
 // This is the permanent guard for the flat-object schema invariant introduced
 // during phases 2–3. It probes the real registrations produced by

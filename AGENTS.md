@@ -1,7 +1,7 @@
 # pi-shepherd — maintenance instructions
 
 A no-fuss pi extension for explicit agent (sheep) lifecycle orchestration and herding
-pi agents inside Herdr. See `README.md` and `docs/dictionary` for terminology
+pi agents inside Herdr. See `README.md` and `docs/reference/dictionary` for terminology
 and user-facing usage. Layout: `index.ts` is the pi entry point, `src/core/` is
 the engine, and `src/extension/` is the pi surface (tools, commands, settings
 UI). Core semantics live in `doAction()`/`src/core/lifecycle.ts`; the

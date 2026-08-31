@@ -6,7 +6,7 @@
 //   - reject bad input with a usage hint,
 //   - round-trip: render(parse(x)) parses back to the same args
 //     (the renderer and parser share one OPTION_SPECS table).
-// (see docs/plan-tool-surface-split.md §4).
+// (see docs/plans/tool-surface-split.md §4).
 import { parseShepherdCli, formatShepherdCommand, statusHandleTarget, tokenizeCli } from '../src/extension/cli.ts';
 import { lifecycleRegistry } from '../src/core/orchestration.ts';
 

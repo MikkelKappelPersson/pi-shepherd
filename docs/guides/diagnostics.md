@@ -135,29 +135,28 @@ An agent can omit only Pi's documentation guidance with frontmatter such as:
 ---
 name: scout
 description: Fast codebase recon
-omitPiDocumentation: true
+omit-pi-documentation: true
 ---
 ```
 
 This does not remove project instructions, skills, tools, or the agent body.
 
-To inspect a child without Pi's automatic project context files, set the exact
-camelCase frontmatter property to a YAML boolean:
+To inspect a child without Pi’s automatic project context files, set the
+kebab-case frontmatter property to a YAML boolean:
 
 ```markdown
 ---
 name: tester
 description: Runs and evaluates GUI tests
-omitContextFiles: true
+omit-context-files: true
 ---
 ```
 
 This makes both a normal Shepherd launch and this diagnostic pass
 `--no-context-files`, disabling automatic `AGENTS.md` and `CLAUDE.md` loading
 for the child Pi session. The agent Markdown body, task/user prompt, Shepherd
-fieldnotes context (when fieldnotes are enabled), configured tools, and model are unchanged. The property
-is `false` by default; `omitContextFiles: false` leaves normal loading enabled,
-and quoted values such as `"true"` are ignored.
+fieldnotes context (when fieldnotes are enabled), configured tools, and model are unchanged. The property is `false` by default; `omit-context-files: false` leaves normal
+loading enabled, and quoted values such as `"true"` are ignored.
 
 The extractor is the easiest way to verify the effective result rather than
 inferring it from the agent file alone.
