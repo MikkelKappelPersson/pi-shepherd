@@ -41,7 +41,7 @@ export const LifecycleDelegateParams = Type.Object({
 
 export const LifecyclePromptParams = Type.Object({
   action: Type.Literal('prompt', {
-    description: 'Submit one message to an agent and return a prompt id without waiting.',
+    description: 'Deprecated compatibility path: submits one message to an agent and returns a prompt id without waiting. For tracked work, prefer shepherd_delegate (task) + shepherd_watch; shepherd_prompt ties completion to one child turn, so it cannot carry work that must survive peer replies.',
   }),
   id: AgentIdSchema,
   message: Type.String({ description: 'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.' }),
@@ -70,22 +70,27 @@ export const WatchParams = Type.Object({
 });
 export const WaitParams = Type.Object({
   action: Type.Literal('wait', {
-    description: 'Wait for one or more prompt ids; agents remain alive.',
+    description:
+      'Compatibility wait: block until tasks (preferred, ids from shepherd_delegate) or legacy prompts (ids from shepherd_prompt) settle. Agents remain alive.',
   }),
   id: Type.Union(
     [
+      TaskIdSchema,
       PromptIdSchema,
-      Type.Array(PromptIdSchema, {
-        minItems: 1,
-        description: 'Array of opaque prompt ids for parallel waiting.',
-      }),
+      Type.Array(
+        Type.Union([TaskIdSchema, PromptIdSchema]),
+        {
+          minItems: 1,
+          description: 'Array of opaque task (preferred) or legacy prompt ids for parallel waiting.',
+        }
+      ),
     ],
     {
       description:
-        'One opaque prompt id returned by shepherd_prompt, or an array of prompt ids for parallel work. Do not pass an agent id or pane id.',
+        'One or more opaque ids: task ids from shepherd_delegate are preferred; legacy prompt ids from shepherd_prompt still work. Do not pass an agent id or pane id, and do not mix task and prompt ids in one call.',
     }
   ),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.' })),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Maximum time to keep waiting, in minutes (default: 20). Bounds the wait only - the tasks keep running afterwards. Suggested: 1, 2, 5, 10, 20, 30, 60.' })),
 });
 export const LifecycleMessageParams = Type.Object({
   action: Type.Literal('message', {

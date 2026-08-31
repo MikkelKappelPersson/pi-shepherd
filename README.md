@@ -40,12 +40,16 @@ pi-shepherd exposes these tools to the Shepherd. You can use them explicitly whe
 | --- | --- |
 | `shepherd` | List definitions (`agents`), list active agents (`herd`), or remove stale pane registrations (`prune`) |
 | `shepherd_spawn` | Create an idle persistent agent |
-| `shepherd_prompt` | Submit a task; returns immediately with a prompt ID |
-| `shepherd_wait` | Wait for one or more prompt IDs |
-| `shepherd_watch` | Receive completion without blocking the current turn |
-| `shepherd_status` | Inspect an agent without focusing its pane |
-| `shepherd_close` | Close an owned agent and cancel unresolved prompts |
+| `shepherd_delegate` | Start a tracked task; returns immediately with a task ID |
+| `shepherd_message` | Send an asynchronous message (parent or peer); `expectsReply` opens a tracked reply request |
+| `shepherd_watch` | Receive task completion without blocking the current turn (task IDs preferred, legacy prompt IDs still work) |
+| `shepherd_wait` | Compatibility wait for task IDs (preferred) or legacy prompt IDs; timeout bounds the wait only |
+| `shepherd_status` | Inspect an agent without focusing its pane; reports process and task state independently |
+| `shepherd_close` | Close an owned agent, cancel its active task, and clear pending requests |
 | `shepherd_read` | Read recent terminal output for diagnostics |
+| `shepherd_prompt` | **Deprecated** one-turn compatibility path; prefer `shepherd_delegate` for tracked work |
+
+Child agents additionally see `shepherd_message` (talk to the parent or a peer) and `shepherd_done` (the only normal successful completion of their tracked task).
 
 ## Your first delegation
 
@@ -77,15 +81,40 @@ Use parallel delegation when tasks are independent. Ask the Shepherd to delegate
 
 The Shepherd runs the independent tasks concurrently and combines their results. This is useful for comparing approaches, investigating separate parts of a codebase, or getting multiple reviews of the same change.
 
-### Continue working while an agent runs
+### Delegate, then watch
 
-Use `shepherd_watch` when you want to continue the current turn instead of waiting synchronously:
+The tracked-task workflow is: spawn, delegate, watch, close. `shepherd_delegate` starts the work and returns immediately with a **task ID**; nothing is settled until the child calls `shepherd_done` (or the task fails, is cancelled, or times out).
 
 ```text
-shepherd_watch({ id: prompt.id })
+shepherd_spawn({ agent: "worker", label: "auth" })
+shepherd_delegate({ target: "<agent ID>", task: "Implement the auth middleware from the plan." })
+shepherd_watch({ id: "<task ID>" })
 ```
 
-The call returns immediately. When the prompt finishes, Shepherd sends a follow-up containing the result. Watchers finish automatically after all their prompts settle; they do not close agents.
+When the task settles, the watcher delivers a follow-up containing the result. Watchers finish automatically after all their tasks settle; they do not close agents. Prefer `shepherd_watch` for new orchestration; `shepherd_wait` remains as a compatibility adapter and blocks the current turn.
+
+### Messaging between agents
+
+Agents in the same project can message each other through the parent broker. The child's `shepherd_message` tool can target `parent` or an owned agent ID. A peer question that requires an answer is sent with `expectsReply: true`:
+
+```text
+shepherd_message({
+  target: "<planner agent ID>",
+  message: "Which retry backoff should the middleware use?",
+  taskId: "<own task ID>",
+  expectsReply: true
+})
+```
+
+While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the child's next turn; `steer` injects it urgently into an active turn.
+
+### Continue working while an agent runs
+
+`shepherd_watch` (above) is the non-blocking form. For the legacy prompt path, `shepherd_wait({ id: prompt.id })` still blocks until the prompt settles, but its timeout ends the wait only — the agent keeps working.
+
+### Compatibility
+
+`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_wait` is a **compatibility adapter** that now accepts task IDs (`shepherd_delegate`) in addition to legacy prompt IDs; a single call cannot mix the two, and its timeout only ends the wait — the work keeps running and can be watched with `shepherd_watch` afterwards. Nothing in the tracked-task protocol requires `shepherd_wait`; `shepherd_watch` is the preferred asynchronous alternative.
 
 ## Agent definitions
 
@@ -158,12 +187,12 @@ The working directory and model default to the Shepherd session. `cwd` and `mode
 Lifecycle tools use short, opaque, session-scoped IDs:
 
 ```text
-shepherd_spawn -> agent ID
-shepherd_prompt -> prompt ID
-shepherd_wait -> result
+shepherd_spawn    -> agent ID      (for delegate, message, status, close)
+shepherd_delegate -> task ID       (for watch, wait, message taskId, shepherd_done)
+shepherd_message  -> message ID    (answer it with replyTo)
 ```
 
-Use the returned agent ID for `status` and `close`, and the returned prompt ID for `wait` and `watch`. Do not substitute a Herdr pane ID for a lifecycle ID. Pane IDs are only diagnostic targets for `shepherd_read`.
+Task IDs identify the unit of work; message IDs identify individual envelopes and only matter when correlating a reply (the answering agent echoes the request's message ID as `replyTo`). Do not substitute a Herdr pane ID for any of these. Pane IDs are only diagnostic targets for `shepherd_read`.
 
 ## Command reference
 

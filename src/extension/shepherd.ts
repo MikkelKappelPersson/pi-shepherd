@@ -27,6 +27,7 @@ import {
   LifecycleStatusParams,
   LifecycleCloseParams,
   TaskIdSchema,
+  PromptIdSchema,
 } from '../core/types.ts';
 import {
   startAgent,
@@ -799,7 +800,68 @@ export async function doAction(
       const defaultTimeout = loadSettings(ctx.cwd).timeout;
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
-      const result = await waitPrompts(a.id ?? a.handle, { timeout: timeoutMs });
+      const ids: string[] = Array.isArray(a.id ?? a.handle) ? (a.id ?? a.handle) : [a.id ?? a.handle];
+      if (ids.length === 0) {
+        throw new LifecycleError('invalid_handle', 'Expected one or more task (or legacy prompt) ids to wait for.');
+      }
+      // Task ids are the preferred compatibility target; anything else must be
+      // a known legacy prompt id. Agent ids and Herdr pane ids are rejected the
+      // same way shepherd_watch rejects them.
+      const taskIds = ids.filter(id => lifecycleRegistry.isTaskId(id));
+      const promptIds: string[] = [];
+      for (const id of ids) {
+        if (taskIds.includes(id)) continue;
+        try {
+          lifecycleRegistry.getPrompt(id);
+        } catch {
+          throw new LifecycleError(
+            'invalid_handle',
+            `Unknown wait target "${id}". Pass a task id from shepherd_delegate or a legacy prompt id from shepherd_prompt; agent ids and Herdr pane ids are not valid wait targets.`
+          );
+        }
+        promptIds.push(id);
+      }
+      if (taskIds.length > 0 && promptIds.length > 0) {
+        throw new LifecycleError(
+          'invalid_handle',
+          'A single shepherd_wait call cannot mix task ids and legacy prompt ids; wait for tasks in one call and prompts in another.'
+        );
+      }
+      if (taskIds.length > 0) {
+        try {
+          const results = await lifecycleRegistry.waitForTasks(ids, timeoutMs);
+          const returnCode = results.find(r => r.returnCode !== 0)?.returnCode ?? 0;
+          const names = results.map(item => displayAgentName(item.agentId));
+          const summary = `waited for ${names.join(', ')}`;
+          return textResult(summary, {
+            returnCode,
+            result: results,
+            returnValue: results,
+            tasks: results.map(r => ({
+              taskId: r.taskId,
+              agentId: r.agentId,
+              status: r.status,
+              ok: r.ok,
+              returnCode: r.returnCode,
+              ...(r.text !== undefined ? { text: r.text } : {}),
+              ...(r.error !== undefined ? { error: r.error } : {}),
+            })),
+          });
+        } catch (error) {
+          if (error instanceof LifecycleError && error.code === 'timeout') {
+            return textResult(error.message, {
+              returnCode: 124,
+              timedOut: true,
+              result: [],
+              returnValue: [],
+              error: error.message,
+            });
+          }
+          throw error;
+        }
+      }
+      // Legacy prompt path: unchanged behavior.
+      const result = await waitPrompts(ids, { timeout: timeoutMs });
       const results = Array.isArray(result) ? result : [result];
       const returnCode = results.find(r => typeof r.returnCode === 'number' && r.returnCode !== 0)?.returnCode ?? 0;
       const names = results.map(item => displayAgentName(item.agentId));
@@ -1251,18 +1313,18 @@ export function registerShepherdTools(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'shepherd_prompt',
-    label: 'Shepherd: prompt agent',
+    label: 'Shepherd: prompt agent (deprecated)',
     description:
-      'Submit one message to a spawned agent and return immediately. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_wait.',
+      'Deprecated compatibility path: submits one message to a spawned agent and returns a prompt id without waiting, tying completion to a single child turn. For tracked work that must survive peer replies, prefer shepherd_delegate (a task) + shepherd_watch; use shepherd_message for follow-ups. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_wait.',
     promptSnippet:
-      'prompt a spawned agent with a task or question.',
+      'Deprecated: prompt a spawned agent with a one-turn message (prefer shepherd_delegate for tracked work).',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
       }),
       message: Type.String({
         description:
-          'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.',
+          'One-turn message to submit to the spawned agent. For multi-step or reply-dependent work use shepherd_delegate instead. Submission returns immediately; use shepherd_wait for the result.',
       }),
       timeout: Type.Optional(
         Type.Integer({
@@ -1293,43 +1355,40 @@ export function registerShepherdTools(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'shepherd_wait',
-    label: 'Shepherd: wait for prompt',
+    label: 'Shepherd: wait for task or prompt',
     description:
-      'Wait for one or more prompts to settle. Pass the prompt id printed by shepherd_prompt, or an array of prompt ids for parallel work. Results stay in array input order; waiting does not close agents.',
+      'Compatibility wait: block until the given task ids (from shepherd_delegate, preferred) or legacy prompt ids (from shepherd_prompt) settle. Results stay in array input order; waiting does not close agents, and a timeout only ends the wait, not the work. Prefer shepherd_watch for new orchestration.',
     promptSnippet:
-      'Wait for agent(s) to complete their work and return results.',
+      'Block until task(s) or legacy prompt(s) settle and return their results.',
     promptGuidelines: [
-      'When using shepherd_wait, waiting does not close an agent. Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.',
-      'When using shepherd_wait, for sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call shepherd_wait once with an array of prompt ids.'
+      'When using shepherd_wait, passing task ids from shepherd_delegate is preferred; legacy prompt ids from shepherd_prompt still work. Do not mix the two in one call.',
+      'When using shepherd_wait, waiting does not close an agent and does not settle anything by itself; timeout bounds the wait only, and tasks keep running afterwards (watch them with shepherd_watch).',
+      'Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.'
     ],
     parameters: Type.Object({
       id: Type.Union(
         [
-          Type.String({
-            description:
-              'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
-          }),
+          TaskIdSchema,
+          PromptIdSchema,
           Type.Array(
-            Type.String({
-              description:
-                'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
-            }),
+            Type.Union([TaskIdSchema, PromptIdSchema]),
             {
               minItems: 1,
-              description: 'Array of opaque prompt ids for parallel waiting.',
+              description:
+                'Array of opaque task (preferred) or legacy prompt ids for parallel waiting.',
             }
           ),
         ],
         {
           description:
-            'One opaque prompt id returned by shepherd_prompt, or an array of prompt ids for parallel work. Do not pass an agent id or pane id.',
+            'One or more opaque ids: task ids from shepherd_delegate are preferred; legacy prompt ids from shepherd_prompt still work. Do not pass an agent id or pane id, and do not mix task and prompt ids in one call.',
         }
       ),
       timeout: Type.Optional(
         Type.Integer({
           default: 20,
           description:
-            'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.',
+            'Maximum time to keep waiting, in minutes (default: 20). Bounds the wait only - the work keeps running afterwards. Suggested: 1, 2, 5, 10, 20, 30, 60.',
         })
       ),
     }),

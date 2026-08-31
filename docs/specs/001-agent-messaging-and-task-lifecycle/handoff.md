@@ -313,6 +313,32 @@ across three snapshot phases.
 
 See `phase9-notes.md` in this directory for the design decisions.
 
+"
+### Phase 10 — Compatibility decisions
+
+Decisions (spec "Compatibility" section):
+
+- `shepherd_prompt`: **retained as a deprecated compatibility path**, not
+  removed. Rationale: removing it would break every transcript and prompt
+  template that still references it during migration, and its one-prompt-per-
+  turn semantics remain correct for fire-and-forget one-turn messages. The tool
+  label, description, promptSnippet, and parameter descriptions now say it is
+  deprecated and name the migration target (`shepherd_delegate` +
+  `shepherd_watch`), so the model migrates instead of defaulting to it. Its
+  completion semantics remain one-child-turn-completion; that is documented,
+  not silently changed, so it cannot be mistaken for task tracking.
+- `shepherd_wait`: **retained as a compatibility adapter, now task-aware.**
+  Accepts task ids (preferred, from `shepherd_delegate`) and legacy prompt
+  ids (from `shepherd_prompt`); a single call cannot mix the two. Task waits
+  resolve via the task-watcher registry hook (no polling), in input order, and
+  a wait timeout rejects with `timeout` (code `timeout`, returnCode 124)
+  WITHOUT touching the tasks — they keep running and can be watched later with
+  `shepherd_watch`. Nothing in the new protocol depends on the parent calling
+  `shepherd_wait` to make progress; descriptions say `shepherd_watch` is the
+  preferred async alternative. The legacy prompt path is unchanged.
+- `shepherd_watch`, `shepherd_delegate`, `shepherd_message`, `shepherd_done`:
+  unchanged (already documented in phases 6–8).
+
 ## Important current architecture
 
 ### Parent task completion
@@ -371,14 +397,13 @@ are responsible for making handler operations idempotent.
 
 ## Remaining work
 
-Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, 8,
-and 9 are complete. The main remaining work is:
+Consult `tasks.md` for the authoritative checkbox state. Phases 5, 6, 7, 8, 9,
+and 10 are complete. The main remaining work is:
 
 ### Later phases
 
-After Phase 9 (Phases 6, 7, 8, and 9 are complete):
+After Phase 10 (Phases 6, 7, 8, 9, and 10 are complete):
 
-- Phase 10: final artifact/cleanup/compatibility integration and documentation
 - Phase 11: complete live Herdr verification
 
 README and active user-facing documentation have not yet been updated for the
@@ -399,6 +424,7 @@ npm run task-failures:test
 npm run message-routing:test
 npm run task-watchers:test
 npm run stale-wait:test
+npm run compat:test
 npm run status:test
 npm run status-widget:test
 npm run launch:test
@@ -443,5 +469,7 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Implement Phase 7 task-aware `shepherd_watch`.
 - [x] Implement Phase 8 stale-wait monitoring + `staleWaitThreshold` setting.
 - [x] Implement Phase 9 task-aware status and TUI projection.
+- [x] Make the Phase 10 compatibility decisions (shepherd_prompt deprecated;
+      shepherd_wait task-aware) and update active documentation.
 - [x] Keep explicit `shepherd_done` completion authoritative.
 - [ ] Update this handoff if architecture or compatibility decisions change.

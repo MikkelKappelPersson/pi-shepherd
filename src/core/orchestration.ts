@@ -236,7 +236,8 @@ export class LifecycleError extends Error {
     | 'task_agent_mismatch'
     | 'invalid_handle'
     | 'invalid_task'
-    | 'invalid_transition';
+    | 'invalid_transition'
+    | 'timeout';
   constructor(code: LifecycleError['code'], message: string) {
     super(message);
     this.name = 'LifecycleError';
@@ -531,6 +532,55 @@ export class LifecycleRegistry {
       (record.timeoutId as any).unref?.();
     }
     return { ...task };
+  }
+
+  /**
+   * Block until every given task has settled, resolved in input order.
+   * Completion is delivered exactly once per task by the task-watcher registry
+   * hook, never by polling; a timeout rejects with a descriptive error
+   * without touching the tasks themselves (their own deadlines remain
+   * authoritative).
+   */
+  waitForTasks(handles: TaskHandleInput | TaskHandleInput[], timeoutMs = 1_200_000): Promise<TaskResult[]> {
+    const values = Array.isArray(handles) ? handles : [handles];
+    if (values.length === 0) throw new LifecycleError('invalid_handle', 'Expected one or more opaque task ids to wait for.');
+    const taskIds = values.map(value => this.taskRecord(value).taskId);
+    if (new Set(taskIds).size !== taskIds.length) {
+      throw new LifecycleError('invalid_handle', 'A wait cannot contain duplicate task ids.');
+    }
+    return new Promise<TaskResult[]>((resolve, reject) => {
+      const results = new Set<TaskResult>();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (): void => {
+        if (timer) clearTimeout(timer);
+        resolve(taskIds.map(taskId => [...results.values()].find(r => r.taskId === taskId)!));
+      };
+      // watchTasks delivers already-settled tasks synchronously (in input
+      // order) through the Set callback, and registers the watch for the rest.
+      const registration = this.watchTasks(taskIds, [completion => {
+        results.add(completion);
+        if (results.size >= taskIds.length) settle();
+      }]);
+      if (results.size >= taskIds.length) {
+        settle();
+        return;
+      }
+      const minutes = Math.round(timeoutMs / 60000);
+      const seconds = Math.round(timeoutMs / 1000);
+      const span = minutes >= 1
+        ? `${minutes} minute${minutes === 1 ? '' : 's'}`
+        : `${seconds} second${seconds === 1 ? '' : 's'}`;
+      timer = setTimeout(() => {
+        this.removeWatcher(registration.watcherId);
+        reject(
+          new LifecycleError(
+            'timeout',
+            `Timed out after ${span} waiting for ${registration.pending.length} unsettled task${registration.pending.length === 1 ? '' : 's'}. The tasks keep running; watch them later with shepherd_watch.`,
+          ),
+        );
+      }, timeoutMs);
+      (timer as any).unref?.();
+    });
   }
 
   private taskRecord(input: TaskHandleInput | unknown): TaskRecordInternal {
@@ -898,19 +948,25 @@ export class LifecycleRegistry {
     const watcherIds = [...(this.taskWatchers.get(record.taskId) ?? [])];
     this.taskWatchers.delete(record.taskId);
     const agentHandle = this.agents.get(record.agentId)?.handle;
+    const notifyTaskWatcher = (watcher: WatcherRegistration, result: TaskResult, agentHandle: AgentHandle | undefined): void => {
+      const cb = watcher.callback as TaskWatcherCallback | TaskWatcherCallback[] | undefined;
+      const delivery = {
+        ...result,
+        ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+      };
+      try {
+        if (Array.isArray(cb)) { for (const one of cb) one(delivery); }
+        else cb?.(delivery);
+      } catch {
+        /* notification delivery must not break lifecycle settlement */
+      }
+    };
     for (const watcherId of watcherIds) {
       const watcher = this.watchers.get(watcherId);
       if (!watcher || watcher.delivered.has(record.taskId)) continue;
       watcher.delivered.add(record.taskId);
       watcher.pending.delete(record.taskId);
-      try {
-        (watcher.callback as TaskWatcherCallback)?.({
-          ...result,
-          ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
-        });
-      } catch {
-        /* notification delivery must not break lifecycle settlement */
-      }
+      notifyTaskWatcher(watcher, result, agentHandle);
       if (watcher.pending.size === 0) this.watchers.delete(watcherId);
     }
     return { ...result };
@@ -1078,10 +1134,35 @@ export class LifecycleRegistry {
     const watcherId = this.id('watch');
     const pending = new Set<string>();
     const completed: TaskResult[] = [];
+    const invoker =
+      callback === undefined
+        ? () => undefined
+        : Array.isArray(callback)
+          ? cb => { for (const one of callback) one(cb); }
+          : (cb: TaskWatcherCompletion) => { callback(cb); };
+    const agentHandleOf = (agentId: string) => this.agents.get(agentId)?.handle;
+    const notify = (record: TaskRecordInternal, settledNow: boolean): void => {
+      const result = record.result!;
+      const completedAt = result.completedAt;
+      try {
+        invoker({
+          ...result,
+          ...(agentHandleOf(record.agentId) ? { agent: agentHandleOf(record.agentId)!.agent, label: agentHandleOf(record.agentId)!.label } : {}),
+        });
+      } catch {
+        /* notification delivery must not break lifecycle settlement */
+      }
+      if (settledNow) completed.push({ ...record.result });
+      else pending.add(record.taskId);
+    };
     for (const taskId of taskIds) {
       const record = this.tasks.get(taskId)!;
-      if (record.settled && record.result) completed.push({ ...record.result });
-      else pending.add(taskId);
+      if (record.settled && record.result) {
+        // Synchronous, in-order delivery for tasks that are already done.
+        notify(record, true);
+      } else {
+        pending.add(taskId);
+      }
     }
     if (pending.size > 0) {
       this.watchers.set(watcherId, {
@@ -1098,18 +1179,24 @@ export class LifecycleRegistry {
         watchers.add(watcherId);
       }
     }
-    return { watcherId, taskIds, pending: [...pending], completed };
+    return { watcherId, taskIds: [...taskIds], pending: [...pending], completed };
   }
 
   /** Remove all watchers during parent session teardown. */
   clearWatchers(): void {
-    for (const [watcherId, watcher] of this.watchers) this.removeWatcher(watcherId, watcher);
+    for (const [watcherId, watcher] of this.watchers) this.removeWatcherInternal(watcherId, watcher);
     this.watchers.clear();
     this.promptWatchers.clear();
     this.taskWatchers.clear();
   }
 
-  private removeWatcher(watcherId: string, watcher: { kind: 'prompt' | 'task'; pending: Set<string> }): void {
+  /** Detach one watcher so its remaining tasks no longer notify it. */
+  removeWatcher(watcherId: string): void {
+    const watcher = this.watchers.get(watcherId);
+    if (watcher) this.removeWatcherInternal(watcherId, watcher);
+  }
+
+  private removeWatcherInternal(watcherId: string, watcher: { kind: 'prompt' | 'task'; pending: Set<string> }): void {
     const index = watcher.kind === 'task' ? this.taskWatchers : this.promptWatchers;
     for (const id of watcher.pending) {
       const watchers = index.get(id);

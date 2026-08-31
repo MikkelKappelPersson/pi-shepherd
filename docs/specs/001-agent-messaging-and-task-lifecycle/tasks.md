@@ -687,70 +687,70 @@ This checklist tracks implementation of:
 
 ### Artifacts
 
-- [ ] Allocate artifacts for delegated tasks only.
-- [ ] Do not allocate artifacts for ordinary messages.
-- [ ] Keep task artifacts open while waiting.
-- [ ] Finalize artifacts on task completion.
-- [ ] Finalize artifacts on blocked state.
-- [ ] Finalize artifacts on failure.
-- [ ] Finalize artifacts on cancellation.
-- [ ] Finalize artifacts on timeout.
-- [ ] Preserve final summaries and errors.
-- [ ] Avoid duplicate finalization from duplicate events.
-- [ ] Add useful request/message references without creating one note per chat.
+- [x] Allocate artifacts for delegated tasks only.
+- [x] Do not allocate artifacts for ordinary messages.
+- [x] Keep task artifacts open while waiting.
+- [x] Finalize artifacts on task completion.
+- [x] Finalize artifacts on blocked state.
+- [x] Finalize artifacts on failure.
+- [x] Finalize artifacts on cancellation.
+- [x] Finalize artifacts on timeout.
+- [x] Preserve final summaries and errors.
+- [x] Avoid duplicate finalization from duplicate events.
+- [x] Add useful request/message references without creating one note per chat.
 
 ### Cleanup and shutdown
 
-- [ ] Stop parent mailbox polling on parent shutdown.
-- [ ] Stop child mailbox polling on child shutdown.
-- [ ] Preserve already-persisted task outcomes.
-- [ ] Cancel or fail tasks whose child disappears.
-- [ ] Cancel unresolved requests when an agent closes.
-- [ ] Close the broker only after child panes are confirmed gone.
-- [ ] Preserve existing temporary launch-directory cleanup rules.
-- [ ] Verify no foreign pane can be closed.
-- [ ] Verify no foreign session can consume the mailbox.
+- [x] Stop parent mailbox polling on parent shutdown.
+- [x] Stop child mailbox polling on child shutdown.
+- [x] Preserve already-persisted task outcomes.
+- [x] Cancel or fail tasks whose child disappears.
+- [x] Cancel unresolved requests when an agent closes.
+- [x] Close the broker only after child panes are confirmed gone.
+- [x] Preserve existing temporary launch-directory cleanup rules.
+- [x] Verify no foreign pane can be closed.
+- [x] Verify no foreign session can consume the mailbox.
 
 ### Compatibility
 
-- [ ] Decide whether `shepherd_prompt` remains as an alias.
-- [ ] Implement the chosen `shepherd_prompt` migration behavior.
-- [ ] Decide whether `shepherd_wait` remains as a compatibility adapter.
-- [ ] Implement the chosen `shepherd_wait` behavior.
-- [ ] Ensure old prompt completion semantics are not silently active.
-- [ ] Add compatibility tests for old calls where retained.
-- [ ] Add migration guidance to documentation.
-- [ ] Remove stale prompt-only assumptions from active descriptions.
+- [x] Decide whether `shepherd_prompt` remains as an alias.
+- [x] Implement the chosen `shepherd_prompt` migration behavior.
+- [x] Decide whether `shepherd_wait` remains as a compatibility adapter.
+- [x] Implement the chosen `shepherd_wait` behavior.
+- [x] Ensure old prompt completion semantics are not silently active.
+- [x] Add compatibility tests for old calls where retained.
+- [x] Add migration guidance to documentation.
+- [x] Remove stale prompt-only assumptions from active descriptions.
 
 ### Documentation
 
-- [ ] Update `README.md` with the new task/message workflow.
-- [ ] Add a README example showing `shepherd_delegate` followed by
+- [x] Update `README.md` with the new task/message workflow.
+- [x] Add a README example showing `shepherd_delegate` followed by
       `shepherd_watch`.
-- [ ] Add a README example showing child-to-child `shepherd_message` usage.
-- [ ] Document that an idle child may still own a waiting task.
-- [ ] Document explicit `shepherd_done` completion.
-- [ ] Update `docs/guides/tool-reference.md`.
-- [ ] Update `docs/reference/dictionary`.
-- [ ] Update `docs/plans/architecture.md`.
-- [ ] Document task IDs versus message IDs.
-- [ ] Document `shepherd_delegate`.
-- [ ] Document `shepherd_message`.
-- [ ] Document `shepherd_done`.
-- [ ] Document `shepherd_watch`.
-- [ ] Document waiting tasks with idle child processes.
-- [ ] Document `followUp` versus `steer`.
-- [ ] Document stale-wait notifications.
-- [ ] Document compatibility status of `shepherd_prompt`.
-- [ ] Document compatibility status of `shepherd_wait`.
-- [ ] Document child messaging behavior and reply correlation.
+- [x] Add a README example showing child-to-child `shepherd_message` usage.
+- [x] Document that an idle child may still own a waiting task.
+- [x] Document explicit `shepherd_done` completion.
+- [x] Update `docs/guides/tool-reference.md`.
+- [x] Update `docs/reference/dictionary`.
+- [x] Update `docs/plans/architecture.md`.
+- [x] Document task IDs versus message IDs.
+- [x] Document `shepherd_delegate`.
+- [x] Document `shepherd_message`.
+- [x] Document `shepherd_done`.
+- [x] Document `shepherd_watch`.
+- [x] Document waiting tasks with idle child processes.
+- [x] Document `followUp` versus `steer`.
+- [x] Document stale-wait notifications.
+- [x] Document compatibility status of `shepherd_prompt`.
+- [x] Document compatibility status of `shepherd_wait`.
+- [x] Document child messaging behavior and reply correlation.
 
 ### Exit gate
 
-- [ ] Artifacts follow task lifecycle correctly.
-- [ ] Shutdown and cleanup are safe.
-- [ ] Compatibility behavior is explicit.
-- [ ] Active documentation is updated.
+- [x] Artifacts follow task lifecycle correctly.
+- [x] Shutdown and cleanup are safe.
+- [x] Compatibility behavior is explicit.
+- [x] Active documentation is updated.
 
 ---
 
