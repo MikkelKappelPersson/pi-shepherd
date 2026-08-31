@@ -1,6 +1,6 @@
 ---
 name: omit-context-true
 description: boolean true context omission setting
-omitContextFiles: true
+omit-context-files: true
 ---
 True context omission prompt.

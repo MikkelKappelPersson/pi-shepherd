@@ -33,7 +33,7 @@ try {
   );
   fs.writeFileSync(
     path.join(agentsDir, "context-disabled.md"),
-    "---\nname: context-disabled\ndescription: Omits project context\nomitContextFiles: true\n---\nUNIQUE_AGENT_BODY_DISABLED_5e6f7a8b\n",
+    "---\nname: context-disabled\ndescription: Omits project context\nomit-context-files: true\n---\nUNIQUE_AGENT_BODY_DISABLED_5e6f7a8b\n",
   );
 
   function extract(agent) {

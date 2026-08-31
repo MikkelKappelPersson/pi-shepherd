@@ -1,7 +1,7 @@
 ---
 name: omit-pi-docs
 description: Omits Pi documentation guidance
-omitPiDocumentation: true
+omit-pi-documentation: true
 ---
 
 Use this agent for focused work.

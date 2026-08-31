@@ -34,11 +34,8 @@ export interface AgentConfig {
 	systemPrompt: string;
 	source: "user" | "project" | "bundled";
 	filePath: string;
-	// Pass-through frontmatter (carried as-is when present)
-	userInvocable?: unknown;
-	disableModelInvocation?: unknown;
-	agents?: unknown;
-	handoffs?: unknown;
+	/** Whether the agent is intended to be directly invoked by a user. */
+	userInvocable: boolean;
 }
 
 export interface AgentDiscoveryResult {
@@ -167,29 +164,26 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
 			systemPrompt: body,
 			source,
 			filePath,
+			// Only a YAML boolean is accepted; absent or malformed values default true.
+			userInvocable:
+				typeof frontmatter["user-invocable"] === "boolean"
+					? frontmatter["user-invocable"]
+					: true,
 			// Only the YAML boolean is accepted; malformed values are ignored.
 			omitSystemPrompt:
 				typeof frontmatter["omit-system-prompt"] === "boolean"
 					? frontmatter["omit-system-prompt"]
 					: undefined,
-			// This option intentionally defaults to false when absent. Accept the
-			// documented camelCase spelling and the conventional kebab-case alias.
+			// Only the YAML boolean is accepted; malformed values are ignored.
 			omitPiDocumentation:
-				typeof frontmatter.omitPiDocumentation === "boolean"
-					? frontmatter.omitPiDocumentation
-					: typeof frontmatter["omit-pi-documentation"] === "boolean"
-						? frontmatter["omit-pi-documentation"]
-						: false,
-			// Only a YAML boolean is accepted; quoted strings default to false.
-			omitContextFiles:
-				typeof frontmatter.omitContextFiles === "boolean"
-					? frontmatter.omitContextFiles
+				typeof frontmatter["omit-pi-documentation"] === "boolean"
+					? frontmatter["omit-pi-documentation"]
 					: false,
-			// Pass-through fields, carried as-is when present.
-			userInvocable: frontmatter["user-invocable"],
-			disableModelInvocation: frontmatter["disable-model-invocation"],
-			agents: frontmatter.agents,
-			handoffs: frontmatter.handoffs,
+			// Only the YAML boolean is accepted; quoted strings default to false.
+			omitContextFiles:
+				typeof frontmatter["omit-context-files"] === "boolean"
+					? frontmatter["omit-context-files"]
+					: false,
 		});
 	}
 

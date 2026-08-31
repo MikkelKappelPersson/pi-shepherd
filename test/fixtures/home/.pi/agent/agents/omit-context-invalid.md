@@ -1,6 +1,6 @@
 ---
 name: omit-context-invalid
 description: quoted context omission setting
-omitContextFiles: "true"
+omit-context-files: "true"
 ---
 Invalid context omission prompt.
