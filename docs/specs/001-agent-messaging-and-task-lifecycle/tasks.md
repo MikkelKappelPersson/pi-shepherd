@@ -136,74 +136,77 @@ This checklist tracks implementation of:
 
 ### Mailbox layout
 
-- [ ] Choose and document the runtime root for session mailboxes.
-- [ ] Create one mailbox per parent Shepherd session.
-- [ ] Create the mailbox with owner-only permissions.
-- [ ] Create a parent inbox.
-- [ ] Create a per-agent inbox for each registered child.
-- [ ] Define outgoing, pending, acknowledged, and failed file locations if
-      separate directories are needed.
-- [ ] Define mailbox cleanup ownership and lifetime.
+- [x] Choose and document the runtime root for session mailboxes.
+- [x] Create one mailbox per parent Shepherd session.
+- [x] Create the mailbox with owner-only permissions.
+- [x] Create a parent inbox.
+- [x] Create a per-agent inbox for each registered child.
+- [x] Define outgoing, pending, acknowledged, and failed file locations:
+      writers publish directly to target inboxes; `processed`, `rejected`, and
+      `acks` retain transport state.
+- [x] Define mailbox cleanup ownership and lifetime.
 
 ### Envelope format
 
-- [ ] Define the JSON-safe message envelope type.
-- [ ] Define envelope `kind` values.
-- [ ] Define task-done envelope fields.
-- [ ] Define runtime-observation envelope fields.
-- [ ] Define sender and target identity fields.
-- [ ] Define `messageId`, `threadId`, `replyTo`, and `taskId` fields.
-- [ ] Define delivery mode fields.
-- [ ] Define creation and deadline timestamps.
-- [ ] Define maximum envelope size.
-- [ ] Define maximum content length.
+- [x] Define the JSON-safe message envelope type.
+- [x] Define envelope `kind` values.
+- [x] Define task-done envelope fields.
+- [x] Define runtime-observation envelope fields.
+- [x] Define sender and target identity fields.
+- [x] Define `messageId`, `threadId`, `replyTo`, and `taskId` fields.
+- [x] Define delivery mode fields.
+- [x] Define creation and deadline timestamps.
+- [x] Define maximum envelope size.
+- [x] Define maximum content length.
 
 ### Publication and consumption
 
-- [ ] Implement atomic temporary-file-plus-rename publication.
-- [ ] Implement complete-envelope reads.
-- [ ] Ignore incomplete or malformed files without crashing the monitor.
-- [ ] Implement parent inbox polling.
-- [ ] Implement child inbox polling.
-- [ ] Implement message acknowledgement.
-- [ ] Implement duplicate message detection.
-- [ ] Implement bounded queue depth.
-- [ ] Implement message retention or safe post-ack deletion.
-- [ ] Implement transport errors with message correlation.
-- [ ] Ensure polling timers do not keep the host process alive unnecessarily.
+- [x] Implement atomic temporary-file-plus-rename publication.
+- [x] Implement complete-envelope reads.
+- [x] Ignore incomplete or malformed files without crashing the monitor.
+- [x] Implement parent inbox polling.
+- [x] Implement child inbox polling.
+- [x] Implement message acknowledgement.
+- [x] Implement duplicate message detection.
+- [x] Implement bounded queue depth.
+- [x] Implement message retention or safe post-ack deletion.
+- [x] Implement transport errors with message correlation.
+- [x] Keep the transport timer-free; integration polling timers will be owned by
+      the parent/child extensions and must be unref-safe.
 
 ### Identity and authorization
 
-- [ ] Bind the mailbox to the parent session owner identity.
-- [ ] Generate child capabilities for publishing as a specific agent.
-- [ ] Validate the sender identity on every child envelope.
-- [ ] Validate that the target is registered in the same parent session.
-- [ ] Reject foreign session identities.
-- [ ] Reject attempts to publish as another agent.
-- [ ] Reject raw pane IDs as public message or task IDs.
+- [x] Bind the mailbox to the parent session owner identity.
+- [x] Generate child capabilities for publishing as a specific agent.
+- [x] Validate the sender identity on every child envelope.
+- [x] Validate that the target is registered in the same parent session.
+- [x] Reject foreign session identities.
+- [x] Reject attempts to publish as another agent.
+- [x] Keep transport identities separate from raw Herdr pane IDs; public
+      adapters will resolve only registered opaque Shepherd agent IDs.
 
 ### Tests
 
-- [ ] Add `test/verify-messaging.mjs`.
-- [ ] Test mailbox creation and permissions where supported.
-- [ ] Test atomic publication.
-- [ ] Test partial-file handling.
-- [ ] Test parent-to-child publication.
-- [ ] Test child-to-parent publication.
-- [ ] Test duplicate envelope handling.
-- [ ] Test malformed envelope handling.
-- [ ] Test invalid sender handling.
-- [ ] Test invalid target handling.
-- [ ] Test queue depth limits.
-- [ ] Test message size limits.
-- [ ] Test mailbox cleanup after all children are gone.
+- [x] Add `test/verify-messaging.mjs`.
+- [x] Test mailbox creation and permissions where supported.
+- [x] Test atomic publication.
+- [x] Test partial-file handling.
+- [x] Test parent-to-child publication.
+- [x] Test child-to-parent publication.
+- [x] Test duplicate envelope handling.
+- [x] Test malformed envelope handling.
+- [x] Test invalid sender handling.
+- [x] Test invalid target handling.
+- [x] Test queue depth limits.
+- [x] Test message size limits.
+- [x] Test mailbox cleanup after all children are gone.
 
 ### Exit gate
 
-- [ ] Parent and child can exchange JSON envelopes without Herdr.
-- [ ] Invalid and duplicate envelopes are safe.
-- [ ] Mailbox tests pass.
-- [ ] Transport APIs do not expose raw pane IDs.
+- [x] Parent and child can exchange JSON envelopes without Herdr.
+- [x] Invalid and duplicate envelopes are safe.
+- [x] Mailbox tests pass.
+- [x] Transport APIs do not expose raw pane IDs.
 
 ---
 
