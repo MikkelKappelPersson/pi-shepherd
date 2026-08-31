@@ -66,66 +66,69 @@ This checklist tracks implementation of:
 
 ### Task identifiers and types
 
-- [ ] Define an opaque task ID format scoped to the parent Shepherd session.
-- [ ] Add task ID validation and canonicalization.
-- [ ] Add `TaskRecord` internal type.
-- [ ] Add `TaskResult` internal type.
-- [ ] Add task state union:
+- [x] Define an opaque task ID format scoped to the parent Shepherd session.
+- [x] Add task ID validation and canonicalization.
+- [x] Add `TaskRecord` internal type.
+- [x] Add `TaskResult` internal type.
+- [x] Add task state union:
       `created`, `running`, `waiting`, `completed`, `blocked`, `failed`,
       `cancelled`, `timed_out`.
-- [ ] Add pending request tracking to task records.
-- [ ] Add `waitingSince` tracking.
-- [ ] Add task deadline tracking.
-- [ ] Add stale-notification tracking.
-- [ ] Add task-to-artifact association fields.
+- [x] Add pending request tracking to task records.
+- [x] Add `waitingSince` tracking.
+- [x] Add task deadline tracking.
+- [x] Add stale-notification tracking.
+- [x] Add task-to-artifact association fields.
 
 ### Task registry operations
 
-- [ ] Implement task creation.
-- [ ] Implement task lookup by opaque task ID.
-- [ ] Implement task canonicalization.
-- [ ] Implement transition to `running`.
-- [ ] Implement transition to `waiting`.
-- [ ] Implement transition from `waiting` to `running`.
-- [ ] Implement terminal task settlement.
-- [ ] Implement task cancellation.
-- [ ] Implement task timeout settlement.
-- [ ] Implement task listing for status projection.
-- [ ] Make terminal settlement idempotent.
-- [ ] Reject invalid task IDs with the standard lifecycle error shape.
-- [ ] Reject completion of a task owned by another agent.
-- [ ] Reject mutation of a terminal task.
-- [ ] Ensure waiting does not clear active task ownership.
-- [ ] Ensure task settlement clears pending request associations.
+- [x] Implement task creation.
+- [x] Implement task lookup by opaque task ID.
+- [x] Implement task canonicalization.
+- [x] Implement transition to `running`.
+- [x] Implement transition to `waiting`.
+- [x] Implement transition from `waiting` to `running`.
+- [x] Implement terminal task settlement.
+- [x] Implement task cancellation.
+- [x] Implement task timeout settlement.
+- [x] Implement task listing for status projection.
+- [x] Make terminal settlement idempotent.
+- [x] Reject invalid task IDs with the standard lifecycle error shape.
+- [x] Reject completion of a task owned by another agent.
+- [x] Reject mutation of a terminal task.
+- [x] Ensure waiting does not clear active task ownership.
+- [x] Ensure task settlement clears pending request associations.
 
 ### Separation from current prompts
 
-- [ ] Decide the exact compatibility mapping between prompt IDs and task IDs.
+- [x] Decide the exact compatibility mapping between prompt IDs and task IDs:
+      Phase 1 keeps prompt IDs and task IDs separate; compatibility mapping is
+      deferred until the delegation adapter is implemented.
 - [ ] Add an explicit prompt-to-task mapping if compatibility is retained.
 - [ ] Ensure ordinary messages do not create task records.
 - [ ] Ensure ordinary messages do not consume the active task slot.
-- [ ] Keep existing prompt tests passing during the transition.
+- [x] Keep existing prompt tests passing during the transition.
 
 ### Tests
 
-- [ ] Add `test/verify-task-registry.mjs`.
-- [ ] Test opaque task ID validation.
-- [ ] Test valid state transitions.
-- [ ] Test invalid state transitions.
-- [ ] Test one active task per agent.
-- [ ] Test multiple ordinary messages while one task is active.
-- [ ] Test idle process plus waiting task remains non-terminal.
-- [ ] Test idempotent completion.
-- [ ] Test idempotent cancellation.
-- [ ] Test idempotent timeout.
-- [ ] Test pending request association and clearing.
+- [x] Add `test/verify-task-registry.mjs`.
+- [x] Test opaque task ID validation.
+- [x] Test valid state transitions.
+- [x] Test invalid state transitions.
+- [x] Test one active task per agent.
+- [ ] Test multiple ordinary messages while one task is active; messaging is
+      introduced in Phase 6.
+- [x] Test idle process plus waiting task remains non-terminal.
+- [x] Test idempotent completion.
+- [x] Test idempotent cancellation.
+- [x] Test idempotent timeout.
+- [x] Test pending request association and clearing.
 
 ### Exit gate
 
-- [ ] Task state is independent of Pi/Herdr process state.
-- [ ] A task remains open when its owner is idle and waiting.
-- [ ] Registry tests pass.
-- [ ] Existing tests still pass.
+- [x] Task state is independent of Pi/Herdr process state.
+- [x] A task remains open when its owner is idle and waiting.
+- [x] Registry tests pass.
+- [x] Existing tests still pass.
 
 ---
 

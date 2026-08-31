@@ -57,6 +57,72 @@ export interface PromptHandle {
 /** Public lifecycle calls use the opaque id; internal callers may still hold the full handle. */
 export type PromptHandleInput = PromptHandle | string;
 
+export type TaskState =
+  | 'created'
+  | 'running'
+  | 'waiting'
+  | 'completed'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'timed_out';
+
+export type TaskResultStatus = 'completed' | 'blocked' | 'failed' | 'cancelled' | 'timed_out';
+
+export interface TaskHandle {
+  id: string;
+  agentId: string;
+  createdAt: number;
+}
+
+/** Public lifecycle calls use the opaque task id; internal callers may hold the handle. */
+export type TaskHandleInput = TaskHandle | string;
+
+export interface TaskResult {
+  taskId: string;
+  agentId: string;
+  status: TaskResultStatus;
+  ok: boolean;
+  /** Stable process-style outcome: 0 success, 1 failure, 2 blocked, 124 timeout, 130 cancelled. */
+  returnCode: number;
+  text?: string;
+  error?: string;
+  completedAt: number;
+  artifact?: ArtifactReservation;
+  artifactSession?: ShepherdSession;
+}
+
+export interface TaskRecord {
+  taskId: string;
+  agentId: string;
+  description: string;
+  state: TaskState;
+  createdAt: number;
+  startedAt?: number;
+  waitingSince?: number;
+  deadlineAt?: number;
+  pendingRequestIds: string[];
+  staleNotifiedAt?: number;
+  artifactSession?: ShepherdSession;
+  artifact?: ArtifactReservation;
+  result?: TaskResult;
+}
+
+export interface TaskSettlement {
+  status: TaskResultStatus;
+  ok?: boolean;
+  returnCode?: number;
+  text?: string;
+  error?: string;
+  completedAt?: number;
+}
+
+export interface CreateTaskOptions {
+  timeoutMs?: number;
+  deadlineAt?: number;
+  artifactSession?: ShepherdSession;
+}
+
 export interface AgentStatus {
   handle: AgentHandle;
   state: AgentLifecycleState;
@@ -100,7 +166,16 @@ export interface WatcherNotification {
 export type PromptWatcherCallback = (completion: WatcherCompletion) => void;
 
 export class LifecycleError extends Error {
-  readonly code: 'unknown_handle' | 'closed_handle' | 'active_prompt' | 'invalid_handle';
+  readonly code:
+    | 'unknown_handle'
+    | 'closed_handle'
+    | 'active_prompt'
+    | 'active_task'
+    | 'unknown_task'
+    | 'task_agent_mismatch'
+    | 'invalid_handle'
+    | 'invalid_task'
+    | 'invalid_transition';
   constructor(code: LifecycleError['code'], message: string) {
     super(message);
     this.name = 'LifecycleError';
@@ -118,7 +193,14 @@ interface AgentRecord {
   artifactSession?: ShepherdSession;
   state: AgentLifecycleState;
   activePromptId?: string;
+  /** One active tracked task is reserved independently of prompt records. */
+  activeTaskId?: string;
   error?: string;
+}
+
+interface TaskRecordInternal extends Omit<TaskRecord, 'pendingRequestIds'> {
+  pendingRequestIds: Set<string>;
+  settled: boolean;
 }
 
 interface PromptRecord {
@@ -161,10 +243,25 @@ function handleId(input: unknown, kind: 'AgentHandle' | 'PromptHandle'): string 
   return typeof input === 'string' ? input : (input as { id: string }).id;
 }
 
+function taskHandleId(input: unknown): string {
+  if (
+    (typeof input !== 'string' &&
+      (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as { id?: unknown }).id !== 'string')) ||
+    (typeof input === 'string' && input.trim().length === 0)
+  ) {
+    throw new LifecycleError(
+      'invalid_handle',
+      'Expected the opaque TaskHandle id as a string. Do not pass a quoted JSON object, array, agent id, or Herdr pane id. Correct syntax: { id: "shepherd-task-..." }. '
+    );
+  }
+  return typeof input === 'string' ? input : (input as { id: string }).id;
+}
+
 export class LifecycleRegistry {
   private readonly sessionId = randomUUID().slice(0, 8);
   private readonly agents = new Map<string, AgentRecord>();
   private readonly prompts = new Map<string, PromptRecord>();
+  private readonly tasks = new Map<string, TaskRecordInternal>();
   private readonly watchers = new Map<string, {
     promptIds: string[];
     pending: Set<string>;
@@ -173,7 +270,7 @@ export class LifecycleRegistry {
   }>();
   private readonly promptWatchers = new Map<string, Set<string>>();
 
-  private id(kind: 'agent' | 'prompt' | 'watch'): string {
+  private id(kind: 'agent' | 'prompt' | 'task' | 'watch'): string {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
   }
 
@@ -234,6 +331,307 @@ export class LifecycleRegistry {
     const record = this.getAgent(handle);
     record.state = state;
     record.error = error;
+  }
+
+  /**
+   * Reserve a tracked task slot without assuming that the child has started
+   * running yet. The caller can publish the task and then call
+   * setTaskRunning(); reserving first closes the concurrent-delegation race.
+   */
+  createTask(
+    handle: AgentHandleInput,
+    description: string,
+    options: CreateTaskOptions = {}
+  ): TaskHandle {
+    const agent = this.getAgent(handle);
+    const agentId = agent.handle.id;
+    if (agent.state === 'closed') {
+      throw new LifecycleError('closed_handle', `Agent "${agentId}" is closed.`);
+    }
+    if (agent.activeTaskId) {
+      throw new LifecycleError(
+        'active_task',
+        `Agent "${agentId}" already has an active tracked task (${agent.activeTaskId}).`
+      );
+    }
+    if (typeof description !== 'string' || !description.trim()) {
+      throw new LifecycleError('invalid_task', 'Task description must not be empty.');
+    }
+    if (description.length > 100_000) {
+      throw new LifecycleError('invalid_task', 'Task description must be at most 100000 characters.');
+    }
+    if (options.timeoutMs !== undefined &&
+      (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
+      throw new LifecycleError('invalid_task', 'Task timeout must be a non-negative finite number.');
+    }
+    if (options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt)) {
+      throw new LifecycleError('invalid_task', 'Task deadline must be a finite timestamp.');
+    }
+    if (options.timeoutMs !== undefined && options.deadlineAt !== undefined) {
+      throw new LifecycleError('invalid_task', 'Specify either timeoutMs or deadlineAt, not both.');
+    }
+    const createdAt = Date.now();
+    const task: TaskHandle = { id: this.id('task'), agentId, createdAt };
+    const deadlineAt = options.deadlineAt ??
+      (options.timeoutMs !== undefined ? createdAt + options.timeoutMs : undefined);
+    this.tasks.set(task.id, {
+      taskId: task.id,
+      agentId,
+      description: description.trim(),
+      state: 'created',
+      createdAt,
+      deadlineAt,
+      pendingRequestIds: new Set(),
+      artifactSession: options.artifactSession,
+      settled: false,
+    });
+    agent.activeTaskId = task.id;
+    return { ...task };
+  }
+
+  private taskRecord(input: TaskHandleInput | unknown): TaskRecordInternal {
+    const id = taskHandleId(input);
+    const record = this.tasks.get(id);
+    if (!record) {
+      throw new LifecycleError(
+        'unknown_task',
+        `Unknown task id "${id}". Task ids are scoped to this parent session; use the id returned by shepherd_delegate, not an agent id or Herdr pane id.`
+      );
+    }
+    return record;
+  }
+
+  private taskSnapshot(record: TaskRecordInternal): TaskRecord {
+    return {
+      taskId: record.taskId,
+      agentId: record.agentId,
+      description: record.description,
+      state: record.state,
+      createdAt: record.createdAt,
+      ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
+      ...(record.waitingSince !== undefined ? { waitingSince: record.waitingSince } : {}),
+      ...(record.deadlineAt !== undefined ? { deadlineAt: record.deadlineAt } : {}),
+      pendingRequestIds: [...record.pendingRequestIds],
+      ...(record.staleNotifiedAt !== undefined ? { staleNotifiedAt: record.staleNotifiedAt } : {}),
+      ...(record.artifactSession ? { artifactSession: record.artifactSession } : {}),
+      ...(record.artifact ? { artifact: record.artifact } : {}),
+      ...(record.result ? { result: { ...record.result } } : {}),
+    };
+  }
+
+  canonicalTaskHandle(input: TaskHandleInput | unknown): TaskHandle {
+    const record = this.taskRecord(input);
+    return { id: record.taskId, agentId: record.agentId, createdAt: record.createdAt };
+  }
+
+  getTask(input: TaskHandleInput | unknown): TaskRecord {
+    return this.taskSnapshot(this.taskRecord(input));
+  }
+
+  taskResult(input: TaskHandleInput | unknown): TaskResult | undefined {
+    const result = this.taskRecord(input).result;
+    return result ? { ...result } : undefined;
+  }
+
+  /**
+   * Verify the child identity before accepting a task lifecycle event. The
+   * mailbox will perform the same check at its transport boundary; keeping
+   * this assertion in the registry prevents internal callers from bypassing
+   * ownership accidentally.
+   */
+  assertTaskOwner(
+    taskInput: TaskHandleInput | unknown,
+    agentInput: AgentHandleInput | unknown
+  ): TaskRecord {
+    const task = this.taskRecord(taskInput);
+    const agent = this.getAgent(agentInput);
+    if (task.agentId !== agent.handle.id) {
+      throw new LifecycleError(
+        'task_agent_mismatch',
+        `Agent "${agent.handle.id}" does not own task "${task.taskId}".`
+      );
+    }
+    return this.taskSnapshot(task);
+  }
+
+  settleTaskForAgent(
+    taskInput: TaskHandleInput | unknown,
+    agentInput: AgentHandleInput | unknown,
+    settlement: TaskSettlement
+  ): TaskResult {
+    this.assertTaskOwner(taskInput, agentInput);
+    return this.settleTask(taskInput, settlement);
+  }
+
+  allTasks(): TaskRecord[] {
+    return [...this.tasks.values()].map(record => this.taskSnapshot(record));
+  }
+
+  activeTaskForAgent(handle: AgentHandleInput): TaskRecord | undefined {
+    const agent = this.getAgent(handle);
+    return agent.activeTaskId ? this.taskSnapshot(this.taskRecord(agent.activeTaskId)) : undefined;
+  }
+
+  setTaskRunning(input: TaskHandleInput | unknown): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.settled) {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+    }
+    if (record.state !== 'created' && record.state !== 'waiting' && record.state !== 'running') {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" cannot become running from ${record.state}.`);
+    }
+    if (record.state === 'waiting' && record.pendingRequestIds.size > 0) {
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" cannot resume while requests are pending.`
+      );
+    }
+    record.state = 'running';
+    record.startedAt ??= Date.now();
+    record.waitingSince = undefined;
+    record.staleNotifiedAt = undefined;
+    return this.taskSnapshot(record);
+  }
+
+  setTaskWaiting(input: TaskHandleInput | unknown): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.settled) {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+    }
+    if (record.state !== 'running' && record.state !== 'waiting') {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" cannot become waiting from ${record.state}.`);
+    }
+    if (record.pendingRequestIds.size === 0) {
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" cannot become waiting without a pending request.`
+      );
+    }
+    record.state = 'waiting';
+    record.waitingSince ??= Date.now();
+    return this.taskSnapshot(record);
+  }
+
+  addPendingRequest(input: TaskHandleInput | unknown, requestId: string): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.settled) {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+    }
+    if (typeof requestId !== 'string' || !requestId.trim()) {
+      throw new LifecycleError('invalid_task', 'Pending request id must not be empty.');
+    }
+    record.pendingRequestIds.add(requestId);
+    return this.taskSnapshot(record);
+  }
+
+  resolvePendingRequest(input: TaskHandleInput | unknown, requestId: string): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.settled) return this.taskSnapshot(record);
+    record.pendingRequestIds.delete(requestId);
+    if (record.state === 'waiting' && record.pendingRequestIds.size === 0) {
+      record.state = 'running';
+      record.waitingSince = undefined;
+      record.staleNotifiedAt = undefined;
+      record.startedAt ??= Date.now();
+    }
+    return this.taskSnapshot(record);
+  }
+
+  cancelPendingRequest(input: TaskHandleInput | unknown, requestId: string): TaskRecord {
+    return this.resolvePendingRequest(input, requestId);
+  }
+
+  markTaskStaleNotified(input: TaskHandleInput | unknown, at = Date.now()): TaskRecord {
+    const record = this.taskRecord(input);
+    if (record.state !== 'waiting') {
+      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is not waiting.`);
+    }
+    if (!Number.isFinite(at)) throw new LifecycleError('invalid_task', 'Stale notification time must be finite.');
+    record.staleNotifiedAt = at;
+    return this.taskSnapshot(record);
+  }
+
+  clearTaskStaleNotification(input: TaskHandleInput | unknown): TaskRecord {
+    const record = this.taskRecord(input);
+    record.staleNotifiedAt = undefined;
+    return this.taskSnapshot(record);
+  }
+
+  attachTaskArtifact(
+    input: TaskHandleInput | unknown,
+    session: ShepherdSession,
+    artifact: ArtifactReservation
+  ): void {
+    const record = this.taskRecord(input);
+    record.artifactSession = session;
+    record.artifact = artifact;
+  }
+
+  taskArtifact(input: TaskHandleInput | unknown): {
+    session?: ShepherdSession;
+    artifact?: ArtifactReservation;
+  } {
+    const record = this.taskRecord(input);
+    return { session: record.artifactSession, artifact: record.artifact };
+  }
+
+  settleTask(input: TaskHandleInput | unknown, settlement: TaskSettlement): TaskResult {
+    const record = this.taskRecord(input);
+    if (record.settled) return { ...record.result! };
+    if (!['completed', 'blocked', 'failed', 'cancelled', 'timed_out'].includes(settlement.status)) {
+      throw new LifecycleError('invalid_task', `Unknown task result status "${settlement.status}".`);
+    }
+    const completedAt = settlement.completedAt ?? Date.now();
+    if (!Number.isFinite(completedAt)) {
+      throw new LifecycleError('invalid_task', 'Task completion time must be finite.');
+    }
+    const ok = settlement.status === 'completed' && settlement.ok !== false;
+    const defaultReturnCode =
+      settlement.status === 'cancelled' ? 130 :
+      settlement.status === 'timed_out' ? 124 :
+      settlement.status === 'blocked' ? 2 :
+      ok ? 0 : 1;
+    const result: TaskResult = {
+      taskId: record.taskId,
+      agentId: record.agentId,
+      status: settlement.status,
+      ok,
+      returnCode: settlement.returnCode ?? defaultReturnCode,
+      ...(settlement.text !== undefined ? { text: settlement.text } : {}),
+      ...(settlement.error !== undefined ? { error: settlement.error } : {}),
+      completedAt,
+      ...(record.artifact ? { artifact: record.artifact } : {}),
+      ...(record.artifactSession ? { artifactSession: record.artifactSession } : {}),
+    };
+    record.result = result;
+    record.state = settlement.status;
+    record.settled = true;
+    record.pendingRequestIds.clear();
+    record.waitingSince = undefined;
+    record.staleNotifiedAt = undefined;
+    const agent = this.agents.get(record.agentId);
+    if (agent?.activeTaskId === record.taskId) {
+      agent.activeTaskId = undefined;
+      if (agent.state !== 'closed') {
+        agent.state = settlement.status === 'completed'
+          ? 'done'
+          : settlement.status === 'blocked'
+            ? 'blocked'
+            : 'failed';
+      }
+    }
+    return { ...result };
+  }
+
+  cancelTask(handle: AgentHandleInput, reason = 'Agent was closed.'): TaskResult | undefined {
+    const agent = this.getAgent(handle);
+    if (!agent.activeTaskId) return undefined;
+    return this.settleTask(agent.activeTaskId, {
+      status: 'cancelled',
+      ok: false,
+      returnCode: 130,
+      error: reason,
+    });
   }
 
   createPrompt(
@@ -478,6 +876,7 @@ export class LifecycleRegistry {
 
   cancelPrompts(handle: AgentHandle, reason = 'Agent was closed.'): void {
     const agent = this.getAgent(handle);
+    this.cancelTask(handle, reason);
     if (agent.activePromptId) {
       const prompt = this.prompts.get(agent.activePromptId);
       if (prompt)
