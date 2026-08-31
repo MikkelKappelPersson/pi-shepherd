@@ -26,6 +26,18 @@ export const AgentIdSchema = Type.String({
 export const PromptIdSchema = Type.String({
   description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or Herdr pane id.',
 });
+export const TaskIdSchema = Type.String({
+  description: 'Opaque task id returned by shepherd_delegate. Do not use an agent id or Herdr pane id.',
+});
+
+export const LifecycleDelegateParams = Type.Object({
+  action: Type.Literal('delegate', {
+    description: 'Start tracked asynchronous work on a spawned agent and return a task id without waiting.',
+  }),
+  target: AgentIdSchema,
+  task: Type.String({ description: 'Non-empty delegated task description.' }),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })),
+});
 
 export const LifecyclePromptParams = Type.Object({
   action: Type.Literal('prompt', {

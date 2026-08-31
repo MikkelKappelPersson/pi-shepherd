@@ -19,6 +19,7 @@ import { Type, type Static } from 'typebox';
 import {
   AgentScopeSchema,
   SpawnParams,
+  LifecycleDelegateParams,
   LifecyclePromptParams,
   WaitParams,
   WatchParams,
@@ -27,6 +28,7 @@ import {
 } from '../core/types.ts';
 import {
   startAgent,
+  delegateAgent,
   promptAgent,
   waitPrompts,
   statusAgent,
@@ -105,6 +107,7 @@ const AnyShepherdUnion = Type.Union(
     HerdParams,
     AgentsParams,
     SpawnParams,
+    LifecycleDelegateParams,
     LifecyclePromptParams,
     WaitParams,
     WatchParams,
@@ -427,7 +430,7 @@ export async function doAction(
           model: a.model,
           artifactSession,
         },
-        ctx
+        { ...ctx, sessionId: ctx.sessionManager?.getSessionId() }
       );
       return textResult(
         `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
@@ -444,6 +447,32 @@ export async function doAction(
           },
           fieldnote: artifactSession?.sessionRelativePath ?? null,
           ...(artifactSession ? { artifactSession } : {}),
+        }
+      );
+    }
+    case 'delegate': {
+      const a: any = args;
+      const timeoutMinutes = a.timeout ?? loadSettings(ctx.cwd).timeout;
+      if (!Number.isFinite(timeoutMinutes) || timeoutMinutes <= 0) {
+        throw new Error('Delegated task timeout must be a positive number of minutes.');
+      }
+      const task = await delegateAgent(a.target, a.task, {
+        timeoutMs: timeoutMinutes * 60_000,
+        sessionId: ctx.sessionManager?.getSessionId(),
+      });
+      const agent = lifecycleRegistry.getAgent(task.agentId).handle;
+      return textResult(
+        `Delegated task to ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
+        {
+          id: task.id,
+          taskId: task.id,
+          agentId: task.agentId,
+          state: 'running',
+          returnValue: {
+            taskId: task.id,
+            agentId: task.agentId,
+            state: 'running',
+          },
         }
       );
     }
@@ -690,15 +719,15 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
       'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
     promptSnippet:
       'Subagent orchestration tool for herdr.',
     promptGuidelines: [
-      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait or shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
-      'Use shepherd_watch after shepherd_prompt when the parent should continue without blocking; it accepts one prompt id or an array and sends custom completion follow-ups. Use shepherd_wait when a deterministic barrier and input-order results are needed. Waiting does not close an agent; close each agent explicitly when finished.',
+      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit tracked work with shepherd_delegate, collect results with shepherd_watch (or legacy shepherd_wait), inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+      'Use shepherd_watch after shepherd_delegate when the parent should continue without blocking; it accepts task ids and sends custom completion follow-ups. Use shepherd_wait only for legacy prompt ids when a deterministic barrier is needed. Waiting does not close an agent; close each agent explicitly when finished.',
       'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
       'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
     ],
@@ -782,6 +811,45 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     },
     renderResult: (result, options, theme, context) =>
       renderSpawnResult(result, options, theme, context),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_delegate',
+    label: 'Shepherd: delegate task',
+    description:
+      'Start tracked asynchronous work on a spawned agent and return a task id immediately. The task can span multiple Pi turns; use shepherd_watch to observe terminal completion. Do not treat an idle child or ended turn as task completion.',
+    promptSnippet:
+      'Delegate tracked asynchronous work without blocking the parent.',
+    promptGuidelines: [
+      'Use shepherd_delegate for work that may span multiple child turns or wait for another agent. The returned task id, not a prompt id or pane id, is the completion handle.',
+      'Use shepherd_watch after delegation when the parent should continue without blocking. A child must explicitly call shepherd_done before a successful task result is reported.',
+    ],
+    parameters: Type.Object({
+      target: Type.String({
+        description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
+      }),
+      task: Type.String({ description: 'Non-empty delegated task description.' }),
+      timeout: Type.Optional(
+        Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })
+      ),
+    }),
+    prepareArguments: input =>
+      prepareForSchema<Omit<Static<typeof LifecycleDelegateParams>, 'action'>>(input),
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd(
+        'delegate',
+        { action: 'delegate', ...params } as ShepherdArgs,
+        ctx,
+        signal,
+        onUpdate
+      ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
+    renderResult: (result, options, theme, context) =>
+      renderUserFacingResult(result, options, theme, context),
   });
 
   pi.registerTool({

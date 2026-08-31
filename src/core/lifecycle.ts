@@ -1,4 +1,15 @@
 import { discoverAgents, resolveDelegatedModel } from './discovery.ts';
+import {
+  createEnvelope,
+  createParentBroker,
+  publishFromParent,
+  pollParentInbox,
+  registerChild,
+  unregisterChild,
+  closeBrokerWhenChildrenGone,
+  type ParentBroker,
+  type ShepherdMessageEnvelope,
+} from './messaging.ts';
 import { loadSettings } from '../extension/config.ts';
 import {
   ensureHerdrRuntime,
@@ -31,6 +42,10 @@ import {
   type AgentStatus,
   formatAgentName,
   validateAgentLabel,
+  sessionOwner,
+  type CreateTaskOptions,
+  type TaskHandle,
+  type TaskResult,
 } from './orchestration.ts';
 import {
   reserveArtifacts,
@@ -39,6 +54,55 @@ import {
   type ShepherdSession,
   type ArtifactReservation,
 } from './artifact-sessions.ts';
+
+let parentBroker: ParentBroker | undefined;
+let parentBrokerSessionId: string | undefined;
+let parentBrokerTimer: ReturnType<typeof setInterval> | undefined;
+let parentBrokerTicking = false;
+let lastTrackedTaskRuntimeCheck = 0;
+
+function startParentBrokerMonitor(): void {
+  if (parentBrokerTimer) return;
+  parentBrokerTimer = setInterval(() => void processParentBrokerMessages(), 250);
+  (parentBrokerTimer as any).unref?.();
+}
+
+function stopParentBrokerMonitor(): void {
+  if (parentBrokerTimer) clearInterval(parentBrokerTimer);
+  parentBrokerTimer = undefined;
+  parentBrokerTicking = false;
+  lastTrackedTaskRuntimeCheck = 0;
+}
+
+/** Ensure one parent-owned mailbox exists for the current Shepherd session. */
+export function ensureParentBroker(sessionId?: string): ParentBroker {
+  const id = sessionId?.trim() || sessionOwner();
+  if (!id) throw new Error('Unable to resolve the parent Shepherd session identity.');
+  if (parentBroker && !parentBroker.closed && parentBrokerSessionId === id) return parentBroker;
+  parentBroker = createParentBroker(id);
+  parentBrokerSessionId = id;
+  startParentBrokerMonitor();
+  return parentBroker;
+}
+
+export function currentParentBroker(): ParentBroker | undefined {
+  return parentBroker && !parentBroker.closed ? parentBroker : undefined;
+}
+
+/**
+ * Close the broker only after the Herdr integration confirms all child panes
+ * are gone. Returning false preserves the mailbox for live children.
+ */
+export function shutdownParentBroker(childrenGone: () => boolean): boolean {
+  if (!parentBroker) return true;
+  const closed = closeBrokerWhenChildrenGone(parentBroker, childrenGone);
+  if (closed) {
+    stopParentBrokerMonitor();
+    parentBroker = undefined;
+    parentBrokerSessionId = undefined;
+  }
+  return closed;
+}
 
 export interface StartOptions {
   cwd?: string;
@@ -57,6 +121,7 @@ export async function startAgent(
     model?: { provider: string; id: string };
     hasUI?: boolean;
     ui?: any;
+    sessionId?: string;
   }
 ): Promise<AgentHandle> {
   const cwd = options.cwd ?? ctx.cwd;
@@ -88,6 +153,9 @@ export async function startAgent(
     if (!ok) throw new Error('Project-local agent was not approved.');
   }
   await ensureHerdrRuntime();
+  const broker = ensureParentBroker(ctx.sessionId);
+  const reservedAgentId = lifecycleRegistry.allocateAgentId();
+  const childCapability = registerChild(broker, reservedAgentId);
   const placement = options.placement ?? 'tab';
   const herdrPlacement = placement === 'pane_right' || placement === 'pane_down' ? 'pane' : placement;
   const direction = placement === 'pane_down' ? 'down' : 'right';
@@ -110,6 +178,7 @@ export async function startAgent(
     const files = launchPiInPane(paneId, {
       name,
       persistent: true,
+      childBroker: { rootDir: broker.rootDir, ...childCapability },
       systemPrompt: found.systemPrompt,
       // Prompt-shaping options belong to the discovered agent definition.
       omitSystemPrompt: found.omitSystemPrompt,
@@ -136,14 +205,16 @@ export async function startAgent(
       );
     }
     return lifecycleRegistry.registerAgent(
-      { agent: name, label, model: delegatedModel, paneId, tabId, workspaceId },
+      { id: reservedAgentId, agent: name, label, model: delegatedModel, paneId, tabId, workspaceId },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         completionResultPath: files.sessionFile,
         artifactSession: options.artifactSession,
+        childCapability,
       }
     );
   } catch (error) {
+    try { unregisterChild(broker, reservedAgentId); } catch {}
     if (paneId) {
       try {
         herdrExecSync(['pane', 'close', paneId]);
@@ -178,6 +249,178 @@ function finalizePromptArtifact(handle: PromptHandle, result: PromptResult): voi
           ? 'completed'
           : 'failed';
   finalizeArtifact(session, artifact, { status, output: result.text, error: result.error });
+}
+
+function finalizeTaskArtifact(handle: TaskHandle, result: TaskResult): void {
+  const { session, artifact } = lifecycleRegistry.taskArtifact(handle);
+  if (!session || !artifact) return;
+  const status =
+    result.status === 'timed_out'
+      ? 'timed-out'
+      : result.status === 'cancelled'
+        ? 'cancelled'
+        : result.status === 'completed'
+          ? 'completed'
+          : result.status === 'blocked'
+            ? 'failed'
+            : 'failed';
+  finalizeArtifact(session, artifact, { status, output: result.text, error: result.error });
+}
+
+export interface DelegateOptions extends CreateTaskOptions {
+  /** Parent pi session identity used for broker creation in tests/startup. */
+  sessionId?: string;
+  /** Internal parent-bound artifact session, resolved by the parent tool. */
+  artifactSession?: ShepherdSession;
+}
+
+/**
+ * Submit a tracked task through the parent broker. This returns after the task
+ * envelope is queued; completion is intentionally handled by shepherd_done in
+ * a later phase rather than by this call or by a child turn ending.
+ */
+export async function delegateAgent(
+  handle: AgentHandleInput,
+  description: string,
+  options: DelegateOptions = {}
+): Promise<TaskHandle> {
+  if (typeof description !== 'string' || !description.trim()) throw new Error('Delegated task description must not be empty.');
+  const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
+  const record = lifecycleRegistry.getAgent(canonical);
+  if (!record.handle.paneId) throw new Error('Agent handle has no pane.');
+  const detected = await waitForHerdrAgentDetected(record.handle.paneId, { timeoutMs: 15_000 });
+  if (!detected.detected) throw new Error(`Agent "${canonical.id}" is not detected.`);
+
+  const broker = ensureParentBroker(options.sessionId);
+  let childCapability = lifecycleRegistry.agentChildCapability(canonical);
+  if (!childCapability) {
+    childCapability = registerChild(broker, canonical.id);
+    lifecycleRegistry.attachAgentChildCapability(canonical, childCapability);
+  }
+
+  const task = lifecycleRegistry.createTask(canonical, description, {
+    timeoutMs: options.timeoutMs,
+    deadlineAt: options.deadlineAt,
+    artifactSession: options.artifactSession ?? lifecycleRegistry.artifactSession(canonical),
+  });
+  const session = options.artifactSession ?? lifecycleRegistry.artifactSession(canonical);
+  try {
+    if (session) {
+      const artifact = reserveArtifacts(session, [
+        { agent: record.handle.agent, mode: 'single', task: description },
+      ])[0];
+      markArtifactStarted(session, artifact, { taskId: task.id, agentId: task.agentId });
+      lifecycleRegistry.attachTaskArtifact(task, session, artifact, result =>
+        finalizeTaskArtifact(task, result)
+      );
+    }
+    const envelope = createEnvelope(
+      { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+      {
+        kind: 'task',
+        targetId: canonical.id,
+        taskId: task.id,
+        delivery: 'followUp',
+        content: description,
+      }
+    );
+    publishFromParent(broker, envelope);
+    lifecycleRegistry.setTaskRunning(task);
+    return task;
+  } catch (error) {
+    lifecycleRegistry.settleTask(task, {
+      status: 'failed',
+      ok: false,
+      returnCode: 1,
+      error: String((error as any)?.message ?? error),
+    });
+    throw new Error(`Task submission failed: ${String((error as any)?.message ?? error)}`);
+  }
+}
+
+/** Apply one explicit child completion to the parent task registry. */
+function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | undefined {
+  if (envelope.kind !== 'task_done' || !envelope.taskId || !envelope.status) return undefined;
+  let task;
+  try {
+    task = lifecycleRegistry.getTask(envelope.taskId);
+  } catch {
+    // The broker may contain a late completion after a parent restart/close;
+    // unknown session-local task ids are ignored rather than creating records.
+    return undefined;
+  }
+  if (['completed', 'blocked', 'failed', 'cancelled', 'timed_out'].includes(task.state)) {
+    return lifecycleRegistry.taskResult(task.taskId);
+  }
+  if (envelope.status === 'completed' && task.pendingRequestIds.length > 0) {
+    // A child cannot declare success while required replies remain pending.
+    // Leave the task waiting so the reply or an explicit blocked/failed result
+    // can resolve it later.
+    return undefined;
+  }
+  try {
+    return lifecycleRegistry.settleTaskForAgent(envelope.taskId, { id: envelope.senderId }, {
+      status: envelope.status,
+      text: envelope.summary ?? envelope.content,
+      error: envelope.error,
+    });
+  } catch {
+    // Ownership and lifecycle failures are rejected at the registry boundary;
+    // malformed/late control messages must not stop broker polling.
+    return undefined;
+  }
+}
+
+/**
+ * Drain parent control messages and observe external terminal failures. This
+ * is deliberately separate from prompt watchers: idle and turn-settled states
+ * are never considered successful task completion.
+ */
+export async function processParentBrokerMessages(): Promise<TaskResult[]> {
+  const broker = currentParentBroker();
+  if (!broker || parentBrokerTicking) return [];
+  parentBrokerTicking = true;
+  const settled: TaskResult[] = [];
+  try {
+    for (const envelope of pollParentInbox(broker)) {
+      const result = applyTaskDoneEnvelope(envelope);
+      if (result) settled.push(result);
+    }
+    const now = Date.now();
+    if (now - lastTrackedTaskRuntimeCheck >= 1_000) {
+      lastTrackedTaskRuntimeCheck = now;
+      for (const task of lifecycleRegistry.allTasks()) {
+        if (!['created', 'running', 'waiting'].includes(task.state)) continue;
+        let agent: AgentHandle;
+        try {
+          agent = lifecycleRegistry.getAgent({ id: task.agentId }).handle;
+        } catch {
+          continue;
+        }
+        if (!agent.paneId) continue;
+        if (!paneExists(agent.paneId)) {
+          const result = lifecycleRegistry.settleTask(task.taskId, {
+            status: 'failed',
+            error: 'Agent pane disappeared before the task completed.',
+          });
+          settled.push(result);
+          continue;
+        }
+        const providerError = await readImmediateAgentError(agent.paneId);
+        if (providerError) {
+          const result = lifecycleRegistry.settleTask(task.taskId, {
+            status: 'failed',
+            returnCode: 1,
+            error: providerError,
+          });
+          settled.push(result);
+        }
+      }
+    }
+  } finally {
+    parentBrokerTicking = false;
+  }
+  return settled;
 }
 
 function extractAgentError(output: string): string | undefined {

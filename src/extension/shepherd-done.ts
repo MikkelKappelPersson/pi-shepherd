@@ -37,7 +37,11 @@ function writeSidecar(payload: Record<string, unknown>): void {
 		// prompts. Rename is atomic, so the parent never parses a partial JSON file.
 		const target = `${sessionFile}.exit`;
 		const temporary = `${target}.${randomUUID()}.tmp`;
-		writeFileSync(temporary, JSON.stringify({ ...payload, signalId: randomUUID() }));
+		const taskId = process.env.PI_SHEPHERD_TASK_ID;
+		writeFileSync(
+			temporary,
+			JSON.stringify({ ...payload, ...(taskId ? { taskId } : {}), signalId: randomUUID() }),
+		);
 		renameSync(temporary, target);
 	} catch {
 		// Best effort — the parent can still detect the terminal sentinel.
@@ -169,7 +173,6 @@ export default function (pi: ExtensionAPI) {
 	let broker: ChildBroker | undefined;
 	let brokerError: string | undefined;
 	let pollTimer: ReturnType<typeof setInterval> | undefined;
-	const completedTasks = new Map<string, ReturnType<typeof publishFromChild>>();
 
 	if (agentSystemPromptFile) {
 		try {
@@ -310,16 +313,6 @@ export default function (pi: ExtensionAPI) {
 				return childResult("shepherd_done", args, "Shepherd task completion was rejected.", { accepted: false, error }, { code: "task_mismatch", error }, 1);
 			}
 			try {
-				const previous = completedTasks.get(args.taskId);
-				if (previous) {
-					return childResult(
-						"shepherd_done",
-						args,
-						"Shepherd task completion was already accepted.",
-						previous,
-						{ taskId: args.taskId, status: args.status, delivery: previous.delivery, duplicate: true },
-					);
-				}
 				const completion = createEnvelope(
 					{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
 					{
@@ -333,7 +326,6 @@ export default function (pi: ExtensionAPI) {
 					},
 				);
 				const accepted = publishFromChild(active, completion);
-				completedTasks.set(args.taskId, accepted);
 				return childResult(
 					"shepherd_done",
 					args,
@@ -370,12 +362,22 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_end", (event: any, ctx: { shutdown: () => void }) => {
 		// Persistent shepherd agents stay alive, but must still publish a
-		// completion signal for the parent. One-shot agents publish it and exit.
+		// completion signal for the legacy prompt path. One-shot agents publish
+		// it and exit. A tracked task is different: a normal agent_end is only a
+		// turn observation, so it must not claim task success or shut down a child
+		// that may need to resume after a peer reply.
 		if (!autoExit && !stayOpen) return;
 		const outcome = latestAssistantOutcome(event?.messages);
 		if (!outcome.exit) return; // aborted / no assistant turn — leave open.
-		if (outcome.error) writeSidecar({ type: "error", errorMessage: outcome.error.errorMessage });
-		else writeSidecar({ type: "done" });
+		if (outcome.error) {
+			// Provider errors are still useful process-failure diagnostics for the
+			// parent, even when a tracked task is active.
+			writeSidecar({ type: "error", errorMessage: outcome.error.errorMessage });
+			if (!stayOpen) ctx.shutdown();
+			return;
+		}
+		if (configuredTaskId) return;
+		writeSidecar({ type: "done" });
 		// Stay open: report completion to the parent via the sidecar, but keep
 		// this pi session alive in the tab so the user can keep driving it.
 		if (stayOpen) return;

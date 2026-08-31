@@ -49,14 +49,17 @@ function run(worker) {
 const parent = run(false);
 const worker = run(true);
 
-assert.equal(parent.tools.length, 8, "parent registers the umbrella and seven lifecycle tools");
+assert.equal(parent.tools.length, 9, "parent registers the umbrella and eight lifecycle tools");
 assert.ok(parent.tools.includes("shepherd"), "parent registers the umbrella shepherd tool");
+assert.ok(parent.tools.includes("shepherd_delegate"), "parent registers tracked delegation");
 assert.ok(parent.commands.includes("shepherd"), "parent registers the /shepherd command");
 const umbrella = parent.toolDetails.shepherd;
 assert.ok(umbrella.description.includes("shepherd_spawn"), "umbrella description names the lifecycle tools");
+assert.ok(umbrella.description.includes("shepherd_delegate"), "umbrella description names tracked delegation");
 const guidance = umbrella.promptGuidelines.join(" ");
 assert.ok(guidance.includes("shepherd_wait"), "umbrella guidance explains the lifecycle workflow");
 assert.ok(guidance.includes("shepherd_watch"), "umbrella guidance explains asynchronous watching");
+assert.ok(guidance.includes("shepherd_delegate"), "umbrella guidance explains tracked delegation");
 assert.ok(guidance.includes("Waiting does not close"), "umbrella guidance explains close semantics");
 assert.ok(guidance.includes("shepherd.md"), "umbrella guidance explains fieldnotes");
 assert.equal(worker.tools.length, 0, "worker does not register parent Shepherd tools");

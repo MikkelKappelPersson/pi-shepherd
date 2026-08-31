@@ -23,6 +23,7 @@ registerShepherdTools({
 const expectedNames = [
   'shepherd',
   'shepherd_spawn',
+  'shepherd_delegate',
   'shepherd_prompt',
   'shepherd_wait',
   'shepherd_watch',
@@ -49,6 +50,14 @@ for (const tool of registered) {
     if (['shepherd_prompt', 'shepherd_wait', 'shepherd_watch', 'shepherd_status', 'shepherd_close'].includes(tool.name)) {
       assert.ok('id' in schema.properties, `${tool.name} must expose a top-level id`);
       assert.ok(!('handle' in schema.properties), `${tool.name} must not expose a public handle`);
+    }
+    if (tool.name === 'shepherd_delegate') {
+      assert.deepEqual(schema.required, ['target', 'task'], 'shepherd_delegate requires target and task');
+      assert.deepEqual(
+        Object.keys(schema.properties).sort(),
+        ['target', 'task', 'timeout'],
+        'shepherd_delegate exposes only the public delegation arguments'
+      );
     }
     if (tool.name === 'shepherd_spawn') {
       assert.deepEqual(schema.required, ['agent', 'label'], 'shepherd_spawn requires only agent and label');

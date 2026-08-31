@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Phase 3 verification for the child-side messaging/completion extension. */
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
 import {
   createEnvelope,
   createParentBroker,
@@ -18,6 +19,7 @@ const envNames = [
   'PI_SHEPHERD_BROKER_TOKEN',
   'PI_SHEPHERD_AGENT_INBOX',
   'PI_SHEPHERD_TASK_ID',
+  'PI_SHEPHERD_SESSION',
 ];
 const savedEnv = Object.fromEntries(envNames.map(name => [name, process.env[name]]));
 
@@ -32,6 +34,7 @@ try {
     process.env.PI_SHEPHERD_BROKER_TOKEN = capability.token;
     process.env.PI_SHEPHERD_AGENT_INBOX = capability.inboxPath;
     process.env.PI_SHEPHERD_TASK_ID = 'shepherd-task-child-surface';
+    process.env.PI_SHEPHERD_SESSION = `${root}/child-session.jsonl`;
 
     const registered = [];
     const handlers = new Map();
@@ -94,9 +97,20 @@ try {
       status: 'completed',
       summary: 'A different summary must not create a second completion.',
     });
-    assert.equal(duplicateDone.details.duplicate, true);
-    assert.deepEqual(pollParentInbox(broker), []);
-    console.log('PASS repeated child shepherd_done calls are idempotent');
+    assert.equal(duplicateDone.details.returnCode, 0);
+    const retryCompletion = pollParentInbox(broker)[0];
+    assert.equal(retryCompletion.kind, 'task_done');
+    assert.equal(retryCompletion.taskId, 'shepherd-task-child-surface');
+    console.log('PASS repeated child shepherd_done calls remain safe for parent idempotent settlement');
+
+    let shutdowns = 0;
+    await handlers.get('agent_end')(
+      { messages: [{ role: 'assistant', stopReason: 'stop' }] },
+      { shutdown() { shutdowns += 1; } },
+    );
+    assert.equal(shutdowns, 0);
+    assert.equal(fs.existsSync(`${root}/child-session.jsonl.exit`), false);
+    console.log('PASS normal agent_end does not complete or shut down a tracked task');
 
     const incoming = createEnvelope(
       { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },

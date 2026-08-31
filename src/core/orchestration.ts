@@ -1,6 +1,7 @@
 /** Low-level agent lifecycle handles and session-scoped registries. */
 import { randomUUID } from 'node:crypto';
 import type { ArtifactReservation, ShepherdSession } from './artifact-sessions.ts';
+import type { ChildCapability } from './messaging.ts';
 
 export type AgentLifecycleState =
   | 'idle'
@@ -195,12 +196,16 @@ interface AgentRecord {
   activePromptId?: string;
   /** One active tracked task is reserved independently of prompt records. */
   activeTaskId?: string;
+  /** Parent broker capability used to launch and route this child. */
+  childCapability?: ChildCapability;
   error?: string;
 }
 
 interface TaskRecordInternal extends Omit<TaskRecord, 'pendingRequestIds'> {
   pendingRequestIds: Set<string>;
   settled: boolean;
+  onSettled?: (result: TaskResult) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
 }
 
 interface PromptRecord {
@@ -274,20 +279,38 @@ export class LifecycleRegistry {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
   }
 
+  /** Reserve an opaque agent id before a child process is launched. */
+  allocateAgentId(): string {
+    return this.id('agent');
+  }
+
   registerAgent(
-    input: Omit<AgentHandle, 'id'>,
-    metadata: { completionSignalPath?: string; completionResultPath?: string; artifactSession?: ShepherdSession } = {}
+    input: Omit<AgentHandle, 'id'> & { id?: string },
+    metadata: {
+      completionSignalPath?: string;
+      completionResultPath?: string;
+      artifactSession?: ShepherdSession;
+      childCapability?: ChildCapability;
+    } = {}
   ): AgentHandle {
     const label = validateAgentLabel(input.label);
     const display = formatAgentName(input.agent, label);
     if (label && [...this.agents.values()].some(a => formatAgentName(a.handle.agent, a.handle.label) === display))
       throw new Error(`Duplicate agent label "${display}".`);
-    const handle = { ...input, label, id: this.id('agent') };
+    const requestedId = input.id;
+    if (requestedId !== undefined && (typeof requestedId !== 'string' || !requestedId.trim())) {
+      throw new LifecycleError('invalid_handle', 'Agent id must be a non-empty opaque string when supplied internally.');
+    }
+    if (requestedId && this.agents.has(requestedId)) {
+      throw new LifecycleError('invalid_handle', `Agent id "${requestedId}" is already registered.`);
+    }
+    const handle = { ...input, label, id: requestedId ?? this.id('agent') };
     this.agents.set(handle.id, {
       handle,
       completionSignalPath: metadata.completionSignalPath,
       completionResultPath: metadata.completionResultPath,
       artifactSession: metadata.artifactSession,
+      childCapability: metadata.childCapability,
       state: 'idle',
     });
     return { ...handle };
@@ -306,6 +329,15 @@ export class LifecycleRegistry {
 
   canonicalAgentHandle(input: AgentHandleInput | unknown): AgentHandle {
     return { ...this.getAgent(input).handle };
+  }
+
+  attachAgentChildCapability(handle: AgentHandleInput, capability: ChildCapability): void {
+    this.getAgent(handle).childCapability = { ...capability };
+  }
+
+  agentChildCapability(handle: AgentHandleInput): ChildCapability | undefined {
+    const capability = this.getAgent(handle).childCapability;
+    return capability ? { ...capability } : undefined;
   }
 
   status(handle: AgentHandleInput, state?: AgentLifecycleState, error?: string): AgentStatus {
@@ -386,6 +418,19 @@ export class LifecycleRegistry {
       settled: false,
     });
     agent.activeTaskId = task.id;
+    const record = this.tasks.get(task.id)!;
+    if (record.deadlineAt !== undefined) {
+      const delay = Math.max(0, record.deadlineAt - Date.now());
+      record.timeoutId = setTimeout(() => {
+        if (!record.settled) {
+          this.settleTask(task.id, {
+            status: 'timed_out',
+            error: 'Tracked task deadline reached.',
+          });
+        }
+      }, delay);
+      (record.timeoutId as any).unref?.();
+    }
     return { ...task };
   }
 
@@ -560,11 +605,13 @@ export class LifecycleRegistry {
   attachTaskArtifact(
     input: TaskHandleInput | unknown,
     session: ShepherdSession,
-    artifact: ArtifactReservation
+    artifact: ArtifactReservation,
+    onSettled?: (result: TaskResult) => void
   ): void {
     const record = this.taskRecord(input);
     record.artifactSession = session;
     record.artifact = artifact;
+    record.onSettled = onSettled;
   }
 
   taskArtifact(input: TaskHandleInput | unknown): {
@@ -606,9 +653,18 @@ export class LifecycleRegistry {
     record.result = result;
     record.state = settlement.status;
     record.settled = true;
+    if (record.timeoutId) {
+      clearTimeout(record.timeoutId);
+      record.timeoutId = undefined;
+    }
     record.pendingRequestIds.clear();
     record.waitingSince = undefined;
     record.staleNotifiedAt = undefined;
+    try {
+      record.onSettled?.({ ...result });
+    } catch {
+      /* artifact persistence must not break task settlement */
+    }
     const agent = this.agents.get(record.agentId);
     if (agent?.activeTaskId === record.taskId) {
       agent.activeTaskId = undefined;

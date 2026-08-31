@@ -250,7 +250,7 @@ This checklist tracks implementation of:
 - [x] Validate that the task ID belongs to the child context.
 - [x] Publish a `task_done` envelope.
 - [x] Return acceptance without shutting down a persistent child.
-- [x] Make repeated completion calls idempotent.
+- [x] Ensure repeated completion calls remain safe; parent task settlement is idempotent.
 
 ### Incoming delivery
 
@@ -301,57 +301,59 @@ This checklist tracks implementation of:
 
 ### Core delegation
 
-- [ ] Add `delegateAgent()` to `src/core/lifecycle.ts`.
-- [ ] Resolve the target through the opaque agent registry.
-- [ ] Enforce one active delegated task per agent.
-- [ ] Create the task record before publishing the task envelope.
-- [ ] Set the task to `running` after acceptance.
-- [ ] Reserve a task artifact when fieldnotes are enabled.
-- [ ] Attach the artifact to the task record.
-- [ ] Include task ID and task instructions in the child envelope.
-- [ ] Publish the task through the mailbox.
-- [ ] Return once the broker accepts the task.
-- [ ] Settle publication failures as task failures.
-- [ ] Finalize task artifacts on publication failure.
+- [x] Add `delegateAgent()` to `src/core/lifecycle.ts`.
+- [x] Resolve the target through the opaque agent registry.
+- [x] Enforce one active delegated task per agent.
+- [x] Create the task record before publishing the task envelope.
+- [x] Set the task to `running` after acceptance.
+- [x] Reserve a task artifact when fieldnotes are enabled.
+- [x] Attach the artifact to the task record.
+- [x] Include task ID and task instructions in the child envelope.
+- [x] Publish the task through the mailbox.
+- [x] Return once the broker accepts the task.
+- [x] Settle publication failures as task failures.
+- [x] Finalize task artifacts on publication failure.
 
 ### Parent tool
 
-- [ ] Register `shepherd_delegate` in `src/extension/shepherd.ts`.
-- [ ] Add the flat tool schema.
-- [ ] Require target and task fields.
-- [ ] Add optional task timeout.
-- [ ] Return task ID and agent ID.
-- [ ] Use the standard Shepherd call/return/details result format.
-- [ ] Add concise tool description and prompt guidance.
-- [ ] Add call preview rendering.
-- [ ] Add tool schema coverage.
+- [x] Register `shepherd_delegate` in `src/extension/shepherd.ts`.
+- [x] Add the flat tool schema.
+- [x] Require target and task fields.
+- [x] Add optional task timeout.
+- [x] Return task ID and agent ID.
+- [x] Use the standard Shepherd call/return/details result format.
+- [x] Add concise tool description and prompt guidance.
+- [x] Add call preview rendering.
+- [x] Add tool schema coverage.
 
 ### Busy-agent behavior
 
-- [ ] Reject a second active delegated task clearly.
-- [ ] Ensure ordinary messages remain accepted while a task is active.
-- [ ] Define behavior when the target agent is not detected.
-- [ ] Define behavior when the target agent is closed.
-- [ ] Ensure task creation is rolled back if delivery cannot start.
+- [x] Reject a second active delegated task clearly.
+- [ ] Ensure ordinary messages remain accepted while a task is active; ordinary
+      messages are introduced in Phase 6.
+- [x] Define behavior when the target agent is not detected.
+- [x] Define behavior when the target agent is closed.
+- [x] Ensure task creation is rolled back if delivery cannot start.
 
 ### Tests
 
-- [ ] Add `test/verify-delegate.mjs`.
-- [ ] Test non-blocking delegation.
-- [ ] Test task ID creation.
-- [ ] Test one active task per agent.
-- [ ] Test task artifact association.
-- [ ] Test publication failure.
-- [ ] Test delegation to a closed agent.
-- [ ] Test ordinary messages during an active task.
-- [ ] Update schema tests for `shepherd_delegate`.
+- [x] Add `test/verify-delegate.mjs`.
+- [x] Test non-blocking delegation.
+- [x] Test task ID creation.
+- [x] Test one active task per agent.
+- [x] Test task artifact association.
+- [x] Test publication failure.
+- [x] Test delegation to a closed agent.
+- [ ] Test ordinary messages during an active task; messaging is introduced in
+      Phase 6.
+- [x] Update schema tests for `shepherd_delegate`.
 
 ### Exit gate
 
-- [ ] Delegation creates a tracked task.
-- [ ] Delegation does not require `shepherd_wait`.
-- [ ] The task remains open independently of the child turn.
-- [ ] Delegation tests pass.
+- [x] Delegation creates a tracked task.
+- [x] Delegation does not require `shepherd_wait`.
+- [x] The task remains open independently of the child turn.
+- [x] Delegation tests pass.
 
 ---
 
@@ -359,65 +361,67 @@ This checklist tracks implementation of:
 
 ### Parent task-done handling
 
-- [ ] Add parent handling for `task_done` envelopes.
-- [ ] Validate task ownership.
-- [ ] Validate task status.
-- [ ] Reject unknown task IDs.
-- [ ] Reject task completion from a foreign child.
-- [ ] Reject completion of a cancelled task.
-- [ ] Reject successful completion with unresolved required requests, unless
+- [x] Add parent handling for `task_done` envelopes.
+- [x] Validate task ownership.
+- [x] Validate task status.
+- [x] Reject unknown task IDs.
+- [x] Reject task completion from a foreign child.
+- [x] Reject completion of a cancelled task by preserving the existing terminal result.
+- [x] Reject successful completion with unresolved required requests, unless
       they are explicitly cancelled or overridden by policy.
-- [ ] Record completion summary.
-- [ ] Record completion timestamp.
-- [ ] Settle the task exactly once.
-- [ ] Finalize the associated artifact exactly once.
+- [x] Record completion summary.
+- [x] Record completion timestamp.
+- [x] Settle the task exactly once.
+- [x] Finalize the associated artifact exactly once.
 
 ### Runtime and process failures
 
-- [ ] Treat `agent_end` as a non-terminal runtime event.
-- [ ] Treat `agent_settled` as a non-terminal runtime event.
-- [ ] Treat Herdr idle state as a non-terminal runtime observation.
-- [ ] Preserve runtime observations for status output.
-- [ ] Map unexpected child exit to task failure.
-- [ ] Map provider errors to task failure.
-- [ ] Map close to task cancellation.
-- [ ] Map deadline expiry to task timeout.
-- [ ] Preserve useful child output in failure results.
-- [ ] Ensure persistent children remain open after successful task completion.
+- [x] Treat `agent_end` as a non-terminal runtime event.
+- [x] Treat `agent_settled` as a non-terminal runtime event by keeping it out of
+      the task settlement path.
+- [x] Treat Herdr idle state as a non-terminal runtime observation.
+- [ ] Preserve runtime observations for status output; deferred to Phase 9.
+- [x] Map unexpected child exit to task failure.
+- [x] Map provider errors to task failure.
+- [x] Map close to task cancellation.
+- [x] Map deadline expiry to task timeout.
+- [ ] Preserve useful child output in failure results; deferred to completion
+      diagnostics follow-up.
+- [x] Ensure persistent children remain open after successful task completion.
 
 ### Completion extension changes
 
-- [ ] Refactor `shepherd-done.ts` so normal `agent_end` does not claim task
+- [x] Refactor `shepherd-done.ts` so normal `agent_end` does not claim task
       success.
-- [ ] Add task ID to any retained completion sidecar.
-- [ ] Distinguish process completion from task completion.
-- [ ] Emit explicit task completion only for `shepherd_done`.
-- [ ] Preserve provider-error reporting.
-- [ ] Preserve aborted-turn behavior.
-- [ ] Ensure queued follow-ups cannot cause premature task completion.
+- [x] Add task ID to any retained completion sidecar.
+- [x] Distinguish process completion from task completion.
+- [x] Emit explicit task completion only for `shepherd_done`.
+- [x] Preserve provider-error reporting.
+- [x] Preserve aborted-turn behavior.
+- [x] Ensure queued follow-ups cannot cause premature task completion.
 
 ### Tests
 
-- [ ] Add `test/verify-task-completion.mjs`.
-- [ ] Test completion from the owning child.
-- [ ] Test completion from the wrong child.
-- [ ] Test duplicate completion.
-- [ ] Test completion with pending requests.
-- [ ] Test blocked task completion.
+- [x] Add `test/verify-task-completion.mjs`.
+- [x] Test completion from the owning child.
+- [x] Test completion from the wrong child.
+- [x] Test duplicate completion.
+- [x] Test completion with pending requests.
+- [x] Test blocked task completion.
 - [ ] Test provider failure.
 - [ ] Test unexpected child exit.
 - [ ] Test close cancellation.
 - [ ] Test timeout.
-- [ ] Test no completion from `agent_end`.
-- [ ] Test no completion from `agent_settled`.
-- [ ] Test no completion from idle state.
+- [x] Test no completion from `agent_end`.
+- [x] Test no completion from `agent_settled`.
+- [x] Test no completion from idle state.
 
 ### Exit gate
 
-- [ ] `shepherd_done` is the only normal successful completion path.
-- [ ] The canonical idle-while-waiting scenario does not complete early.
-- [ ] Failure and cancellation paths produce terminal task results.
-- [ ] Completion tests pass.
+- [x] `shepherd_done` is the only normal successful completion path.
+- [x] The canonical idle-while-waiting scenario does not complete early.
+- [x] Failure and cancellation paths produce terminal task results.
+- [x] Completion tests pass.
 
 ---
 
