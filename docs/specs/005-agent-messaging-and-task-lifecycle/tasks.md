@@ -2,8 +2,8 @@
 
 This checklist tracks implementation of:
 
-- `docs/specs/001-agent-messaging-and-task-lifecycle/spec.md`
-- `docs/specs/001-agent-messaging-and-task-lifecycle/plan.md`
+- `docs/specs/005-agent-messaging-and-task-lifecycle/spec.md`
+- `docs/specs/005-agent-messaging-and-task-lifecycle/plan.md`
 
 ## How to use this checklist
 
@@ -39,7 +39,7 @@ This checklist tracks implementation of:
 - [x] Confirm the current completion path uses `agent_end` and sidecar signals.
 - [x] Confirm the current registry enforces one unresolved prompt per agent.
 - [x] Confirm current fieldnote finalization is attached to prompt settlement.
-- [x] Capture the findings in `docs/specs/001-agent-messaging-and-task-lifecycle/baseline.md`.
+- [x] Capture the findings in `docs/specs/005-agent-messaging-and-task-lifecycle/baseline.md`.
 
 ### Test scaffolding
 
@@ -385,8 +385,10 @@ This checklist tracks implementation of:
 - [x] Map provider errors to task failure.
 - [x] Map close to task cancellation.
 - [x] Map deadline expiry to task timeout.
-- [ ] Preserve useful child output in failure results; deferred to completion
-      diagnostics follow-up.
+- [x] Preserve useful child output in failure results; deferred to the
+      completion diagnostics follow-up tracked in
+      https://github.com/MikkelKappelPersson/pi-shepherd/issues/11 (spec closed
+      with this item intentionally outstanding).
 - [x] Ensure persistent children remain open after successful task completion.
 
 ### Completion extension changes

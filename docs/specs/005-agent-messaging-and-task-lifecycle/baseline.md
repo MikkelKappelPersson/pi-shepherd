@@ -6,7 +6,7 @@ replace explicitly.
 
 ## Repository and test baseline
 
-- Branch: `feature/001-agent-messaging-and-task-lifecycle`
+- Branch: `feat/005-agent-messaging-and-task-lifecycle`
 - Package version: `0.1.7`
 - Runtime: TypeScript executed directly by Node; no build step.
 - Full baseline command: `npm test`

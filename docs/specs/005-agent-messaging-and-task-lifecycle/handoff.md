@@ -2,7 +2,7 @@
 
 ## Session state
 
-- Branch: `feature/001-agent-messaging-and-task-lifecycle`
+- Branch: `feat/005-agent-messaging-and-task-lifecycle`
 - Repository: `MikkelKappelPersson/pi-shepherd`
 - Current HEAD: tip of the feature branch — `b2c3b59` plus the Phase 5 failure-test commit and this handoff update (hashes shift when this doc changes; use `git log --oneline`)
 - Working tree: contains the Phase 11 launch-tool fix, verification updates, and documentation/checklist edits
@@ -544,3 +544,21 @@ a0dab9f test: establish async task lifecycle phase zero
       shepherd_watch-only completion observation) and update active documentation.
 - [x] Keep explicit `shepherd_done` completion authoritative.
 - [x] Update this handoff if architecture or compatibility decisions change.
+
+## Spec close-out (2026-09-01)
+
+The spec is closed as delivered. Phases 0–10 are implemented; the full test
+suite passes and the `docs/manual-tests/ping-pong-peer-messaging.md` smoke
+test passes live, including watcher-completion delivery before cleanup
+(steered watcher delivery, issue #10).
+
+Deferred work is tracked out-of-band rather than left open in this spec:
+
+- Preserve useful child output in failure results —
+  https://github.com/MikkelKappelPersson/pi-shepherd/issues/11
+
+Housekeeping at close: the spec directory moved from
+`docs/specs/001-agent-messaging-and-task-lifecycle` to
+`docs/specs/005-agent-messaging-and-task-lifecycle`, and the branch was
+renamed from `feature/001-agent-messaging-and-task-lifecycle` to
+`feat/005-agent-messaging-and-task-lifecycle`.

@@ -3,7 +3,7 @@
 ## Status
 
 Proposed implementation plan for
-`docs/specs/001-agent-messaging-and-task-lifecycle/spec.md`.
+`docs/specs/005-agent-messaging-and-task-lifecycle/spec.md`.
 
 No implementation is included in this plan. The plan is intentionally staged so
 that task lifecycle correctness is established before peer messaging and UI
