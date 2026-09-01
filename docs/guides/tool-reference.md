@@ -18,7 +18,6 @@ pi-shepherd exposes these structured tools to the Shepherd. Lifecycle IDs are op
 | `shepherd_delegate` | `target`: agent ID, `task`: description; optional `timeout` | Start a tracked task and return a task ID without waiting. One active task per agent. |
 | `shepherd_message` | `target`: agent ID, `message`; optional `taskId`, `threadId`, `replyTo`, `expectsReply`, `delivery` | Send an asynchronous message (parent or peer). `expectsReply` opens a tracked reply request; the sender's task enters `waiting` until the reply. |
 | `shepherd_prompt` | `id`: agent ID, `message`: one-turn message | **Deprecated** compatibility path. Ties completion to one child turn; prefer `shepherd_delegate` for tracked work. |
-| `shepherd_wait` | `id`: task ID(s) (preferred) or legacy prompt ID(s); optional `timeout` | Compatibility wait. Task ids and prompt ids cannot be mixed; timeout bounds the wait only, not the work. |
 | `shepherd_watch` | `id`: task ID(s) (preferred) or legacy prompt ID(s) | Register a non-blocking completion watcher; completions arrive as follow-ups. |
 | `shepherd_close` | `id`: agent ID | Close an owned agent, cancel its active task (and unresolved prompt), and clear pending requests. |
 

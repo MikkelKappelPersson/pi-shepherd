@@ -34,7 +34,7 @@ index.ts                 extension entry and /shepherd command
 - `shepherd_done` (child-side) is the only normal successful completion
   signal for a tracked task; idle/`agent_end`/`agent_settled` never settle a
   task.
-- `shepherd_wait({ id })` compatibility wait: task ids (preferred) or legacy
+- `shepherd_watch({ id })` compatibility wait: task ids (preferred) or legacy
   prompt ids; a wait timeout bounds the wait only.
 - `shepherd_watch({ id })` non-blocking task-watcher; completions arrive as
   follow-ups.

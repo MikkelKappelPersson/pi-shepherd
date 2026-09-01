@@ -374,10 +374,6 @@ export function formatShepherdCommand(
       if (options.message !== undefined) tokens.push(cliValue(options.message, valueLimit));
       add('timeout');
       break;
-    case 'wait':
-      tokens.push(handlePreview(options.id, idLimit));
-      add('timeout');
-      break;
     case 'status':
     case 'close':
       tokens.push(handlePreview(options.id, idLimit));

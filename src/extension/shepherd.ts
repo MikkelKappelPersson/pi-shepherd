@@ -2,7 +2,7 @@
  * Shepherd tool — the model-facing `shepherd` tool for the parent pi session.
  *
  * One tool surface:
- *   - spawn/prompt/wait/watch/status/read/close/prune — manage pi agents living in
+ *   - spawn/prompt/watch/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
  * Registered by index.ts in the parent session only. Launched agents get the
@@ -22,7 +22,6 @@ import {
   LifecycleDelegateParams,
   LifecycleMessageParams,
   LifecyclePromptParams,
-  WaitParams,
   WatchParams,
   LifecycleStatusParams,
   LifecycleCloseParams,
@@ -33,7 +32,6 @@ import {
   startAgent,
   delegateAgent,
   promptAgent,
-  waitPrompts,
   statusAgent,
   closeAgent,
   promptWatcherService,
@@ -119,7 +117,6 @@ const AnyShepherdUnion = Type.Union(
     LifecycleDelegateParams,
     LifecycleMessageParams,
     LifecyclePromptParams,
-    WaitParams,
     WatchParams,
     LifecycleStatusParams,
     LifecycleCloseParams,
@@ -588,7 +585,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       }
     } catch {
       // Delivery is best effort. The completion remains in the lifecycle
-      // prompt registry and can still be retrieved by shepherd_wait.
+      // prompt registry and can still be retrieved by shepherd_watch.
     }
   });
   configureParentMessageNotifications(notification => {
@@ -804,81 +801,6 @@ export async function doAction(
           ...(artifact.session ? { artifactSession: artifact.session } : {}),
         }
       );
-    }
-    case 'wait': {
-      const a: any = args;
-      // Convert timeout from minutes to milliseconds for internal use.
-      // Default: from settings (20 minutes).
-      const defaultTimeout = loadSettings(ctx.cwd).timeout;
-      const timeoutMinutes = a.timeout ?? defaultTimeout;
-      const timeoutMs = timeoutMinutes * 60_000;
-      const ids: string[] = Array.isArray(a.id ?? a.handle) ? (a.id ?? a.handle) : [a.id ?? a.handle];
-      if (ids.length === 0) {
-        throw new LifecycleError('invalid_handle', 'Expected one or more task (or legacy prompt) ids to wait for.');
-      }
-      // Task ids are the preferred compatibility target; anything else must be
-      // a known legacy prompt id. Agent ids and Herdr pane ids are rejected the
-      // same way shepherd_watch rejects them.
-      const taskIds = ids.filter(id => lifecycleRegistry.isTaskId(id));
-      const promptIds: string[] = [];
-      for (const id of ids) {
-        if (taskIds.includes(id)) continue;
-        try {
-          lifecycleRegistry.getPrompt(id);
-        } catch {
-          throw new LifecycleError(
-            'invalid_handle',
-            `Unknown wait target "${id}". Pass a task id from shepherd_delegate or a legacy prompt id from shepherd_prompt; agent ids and Herdr pane ids are not valid wait targets.`
-          );
-        }
-        promptIds.push(id);
-      }
-      if (taskIds.length > 0 && promptIds.length > 0) {
-        throw new LifecycleError(
-          'invalid_handle',
-          'A single shepherd_wait call cannot mix task ids and legacy prompt ids; wait for tasks in one call and prompts in another.'
-        );
-      }
-      if (taskIds.length > 0) {
-        try {
-          const results = await lifecycleRegistry.waitForTasks(ids, timeoutMs);
-          const returnCode = results.find(r => r.returnCode !== 0)?.returnCode ?? 0;
-          const names = results.map(item => displayAgentName(item.agentId));
-          const summary = `waited for ${names.join(', ')}`;
-          return textResult(summary, {
-            returnCode,
-            result: results,
-            returnValue: results,
-            tasks: results.map(r => ({
-              taskId: r.taskId,
-              agentId: r.agentId,
-              status: r.status,
-              ok: r.ok,
-              returnCode: r.returnCode,
-              ...(r.text !== undefined ? { text: r.text } : {}),
-              ...(r.error !== undefined ? { error: r.error } : {}),
-            })),
-          });
-        } catch (error) {
-          if (error instanceof LifecycleError && error.code === 'timeout') {
-            return textResult(error.message, {
-              returnCode: 124,
-              timedOut: true,
-              result: [],
-              returnValue: [],
-              error: error.message,
-            });
-          }
-          throw error;
-        }
-      }
-      // Legacy prompt path: unchanged behavior.
-      const result = await waitPrompts(ids, { timeout: timeoutMs });
-      const results = Array.isArray(result) ? result : [result];
-      const returnCode = results.find(r => typeof r.returnCode === 'number' && r.returnCode !== 0)?.returnCode ?? 0;
-      const names = results.map(item => displayAgentName(item.agentId));
-      const summary = `waited for ${names.join(', ')}`;
-      return textResult(summary, { returnCode, result, returnValue: result });
     }
     case 'watch': {
       const a: any = args;
@@ -1146,15 +1068,15 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
       'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_message, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_message, shepherd_prompt, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
     promptSnippet:
       'Subagent orchestration tool for herdr.',
     promptGuidelines: [
-      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit tracked work with shepherd_delegate, collect results with shepherd_watch (or legacy shepherd_wait), inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
-      'Use shepherd_watch after shepherd_delegate when the parent should continue without blocking; it accepts task ids and sends custom completion follow-ups. Use shepherd_wait only for legacy prompt ids when a deterministic barrier is needed. Waiting does not close an agent; close each agent explicitly when finished.',
+      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit tracked work with shepherd_delegate, collect results with shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+      'Use shepherd_watch after shepherd_delegate when the parent should continue without blocking; it accepts task ids and sends custom completion follow-ups. Waiting is non-blocking; close each agent explicitly when finished.',
       'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
       'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
     ],
@@ -1203,7 +1125,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     promptSnippet:
       'Spawn a new agent in a Herdr pane.',
     promptGuidelines: [
-            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_wait. For parallel wait, pass an array of prompt ids. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
+            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
             ],
     parameters: Type.Object({
       agent: Type.String({
@@ -1327,7 +1249,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_prompt',
     label: 'Shepherd: prompt agent (deprecated)',
     description:
-      'Deprecated compatibility path: submits one message to a spawned agent and returns a prompt id without waiting, tying completion to a single child turn. For tracked work that must survive peer replies, prefer shepherd_delegate (a task) + shepherd_watch; use shepherd_message for follow-ups. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_wait.',
+      'Deprecated compatibility path: submits one message to a spawned agent and returns a prompt id without waiting, tying completion to a single child turn. For tracked work that must survive peer replies, prefer shepherd_delegate (a task) + shepherd_watch; use shepherd_message for follow-ups. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_watch.',
     promptSnippet:
       'Deprecated: prompt a spawned agent with a one-turn message (prefer shepherd_delegate for tracked work).',
     parameters: Type.Object({
@@ -1336,13 +1258,13 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       }),
       message: Type.String({
         description:
-          'One-turn message to submit to the spawned agent. For multi-step or reply-dependent work use shepherd_delegate instead. Submission returns immediately; use shepherd_wait for the result.',
+          'One-turn message to submit to the spawned agent. For multi-step or reply-dependent work use shepherd_delegate instead. Submission returns immediately; use shepherd_watch for the result.',
       }),
       timeout: Type.Optional(
         Type.Integer({
           default: 20,
           description:
-            'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. The completion timeout belongs to shepherd_wait.',
+            'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. Completion is reported asynchronously by shepherd_watch.',
         })
       ),
     }),
@@ -1366,66 +1288,16 @@ export function registerShepherdTools(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: 'shepherd_wait',
-    label: 'Shepherd: wait for task or prompt',
-    description:
-      'Compatibility wait: block until the given task ids (from shepherd_delegate, preferred) or legacy prompt ids (from shepherd_prompt) settle. Results stay in array input order; waiting does not close agents, and a timeout only ends the wait, not the work. Prefer shepherd_watch for new orchestration.',
-    promptSnippet:
-      'Block until task(s) or legacy prompt(s) settle and return their results.',
-    promptGuidelines: [
-      'When using shepherd_wait, passing task ids from shepherd_delegate is preferred; legacy prompt ids from shepherd_prompt still work. Do not mix the two in one call.',
-      'When using shepherd_wait, waiting does not close an agent and does not settle anything by itself; timeout bounds the wait only, and tasks keep running afterwards (watch them with shepherd_watch).',
-      'Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.'
-    ],
-    parameters: Type.Object({
-      id: Type.Union(
-        [
-          TaskIdSchema,
-          PromptIdSchema,
-          Type.Array(
-            Type.Union([TaskIdSchema, PromptIdSchema]),
-            {
-              minItems: 1,
-              description:
-                'Array of opaque task (preferred) or legacy prompt ids for parallel waiting.',
-            }
-          ),
-        ],
-        {
-          description:
-            'One or more opaque ids: task ids from shepherd_delegate are preferred; legacy prompt ids from shepherd_prompt still work. Do not pass an agent id or pane id, and do not mix task and prompt ids in one call.',
-        }
-      ),
-      timeout: Type.Optional(
-        Type.Integer({
-          default: 20,
-          description:
-            'Maximum time to keep waiting, in minutes (default: 20). Bounds the wait only - the work keeps running afterwards. Suggested: 1, 2, 5, 10, 20, 30, 60.',
-        })
-      ),
-    }),
-    prepareArguments: input => prepareForSchema<Omit<Static<typeof WaitParams>, 'action'>>(input),
-    execute: (_id, params, signal, onUpdate, ctx) =>
-      executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
-    },
-    renderResult: (result, options, theme, context) =>
-      renderUserFacingResult(result, options, theme, context),
-  });
-
-  pi.registerTool({
     name: 'shepherd_watch',
     label: 'Shepherd: watch task',
     description:
-      'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Legacy prompt ids from shepherd_prompt are still accepted. Use shepherd_wait only when a deterministic blocking barrier is required.',
+      'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Legacy prompt ids from shepherd_prompt are still accepted.',
     promptSnippet:
       'Watch task completion asynchronously without blocking the parent turn.',
     promptGuidelines: [
       'Pass task ids returned by shepherd_delegate; legacy prompt ids from shepherd_prompt are also accepted. Never pass agent ids or Herdr pane ids.',
-      'Array watchers report each task as it settles and may coalesce close-together completions into one notification. Use shepherd_wait for input-order barrier semantics on legacy prompt ids.',
+      'Array watchers report each task as it settles and may coalesce close-together completions into one notification.',
+      'Use shepherd_status between watcher notifications to inspect running or waiting task state without blocking the parent turn.',
     ],
     parameters: Type.Object({
       id: Type.Union(

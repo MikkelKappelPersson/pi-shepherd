@@ -43,7 +43,6 @@ pi-shepherd exposes these tools to the Shepherd. You can use them explicitly whe
 | `shepherd_delegate` | Start a tracked task; returns immediately with a task ID |
 | `shepherd_message` | Send an asynchronous message (parent or peer); `expectsReply` opens a tracked reply request |
 | `shepherd_watch` | Receive task completion without blocking the current turn (task IDs preferred, legacy prompt IDs still work) |
-| `shepherd_wait` | Compatibility wait for task IDs (preferred) or legacy prompt IDs; timeout bounds the wait only |
 | `shepherd_status` | Inspect an agent without focusing its pane; reports process and task state independently |
 | `shepherd_close` | Close an owned agent, cancel its active task, and clear pending requests |
 | `shepherd_read` | Read recent terminal output for diagnostics |
@@ -91,7 +90,7 @@ shepherd_delegate({ target: "<agent ID>", task: "Implement the auth middleware f
 shepherd_watch({ id: "<task ID>" })
 ```
 
-When the task settles, the watcher delivers a follow-up containing the result. Watchers finish automatically after all their tasks settle; they do not close agents. Prefer `shepherd_watch` for new orchestration; `shepherd_wait` remains as a compatibility adapter and blocks the current turn.
+When the task settles, the watcher delivers a follow-up containing the result. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
 
 ### Messaging between agents
 
@@ -110,11 +109,11 @@ While the answer is outstanding, the sender's task is `waiting` — even though 
 
 ### Continue working while an agent runs
 
-`shepherd_watch` (above) is the non-blocking form. For the legacy prompt path, `shepherd_wait({ id: prompt.id })` still blocks until the prompt settles, but its timeout ends the wait only — the agent keeps working.
+`shepherd_watch({ id: prompt.id })` is also non-blocking for the legacy prompt path; completion arrives as a follow-up.
 
 ### Compatibility
 
-`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_wait` is a **compatibility adapter** that now accepts task IDs (`shepherd_delegate`) in addition to legacy prompt IDs; a single call cannot mix the two, and its timeout only ends the wait — the work keeps running and can be watched with `shepherd_watch` afterwards. Nothing in the tracked-task protocol requires `shepherd_wait`; `shepherd_watch` is the preferred asynchronous alternative.
+`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_watch` accepts task IDs (`shepherd_delegate`) and legacy prompt IDs (`shepherd_prompt`) and returns immediately; completions arrive as follow-ups. Use `shepherd_status` to inspect running or waiting tasks.
 
 ## Agent definitions
 

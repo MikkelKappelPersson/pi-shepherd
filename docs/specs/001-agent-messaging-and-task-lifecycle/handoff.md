@@ -329,15 +329,11 @@ Decisions (spec "Compatibility" section):
   `shepherd_watch`), so the model migrates instead of defaulting to it. Its
   completion semantics remain one-child-turn-completion; that is documented,
   not silently changed, so it cannot be mistaken for task tracking.
-- `shepherd_wait`: **retained as a compatibility adapter, now task-aware.**
-  Accepts task ids (preferred, from `shepherd_delegate`) and legacy prompt
-  ids (from `shepherd_prompt`); a single call cannot mix the two. Task waits
-  resolve via the task-watcher registry hook (no polling), in input order, and
-  a wait timeout rejects with `timeout` (code `timeout`, returnCode 124)
-  WITHOUT touching the tasks — they keep running and can be watched later with
-  `shepherd_watch`. Nothing in the new protocol depends on the parent calling
-  `shepherd_wait` to make progress; descriptions say `shepherd_watch` is the
-  preferred async alternative. The legacy prompt path is unchanged.
+- `shepherd_wait`: **hard-removed from the model-facing surface.** Its blocking
+  behavior obscured intermediate `waiting` state and encouraged the Shepherd
+  to remain visibly working while it waited. Use `shepherd_watch` for
+  non-blocking terminal notifications and `shepherd_status` for intermediate
+  task state. The legacy prompt path is observed through `shepherd_watch`.
 - `shepherd_watch`, `shepherd_delegate`, `shepherd_message`, `shepherd_done`:
   unchanged (already documented in phases 6–8).
 
@@ -545,6 +541,6 @@ a0dab9f test: establish async task lifecycle phase zero
 - [x] Implement Phase 8 stale-wait monitoring + `staleWaitThreshold` setting.
 - [x] Implement Phase 9 task-aware status and TUI projection.
 - [x] Make the Phase 10 compatibility decisions (shepherd_prompt deprecated;
-      shepherd_wait task-aware) and update active documentation.
+      shepherd_watch-only completion observation) and update active documentation.
 - [x] Keep explicit `shepherd_done` completion authoritative.
 - [x] Update this handoff if architecture or compatibility decisions change.
