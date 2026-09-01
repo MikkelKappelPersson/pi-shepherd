@@ -192,7 +192,7 @@ shepherd_delegate -> task ID       (for watch, wait, message taskId, shepherd_do
 shepherd_message  -> message ID    (answer it with replyTo)
 ```
 
-Task IDs identify the unit of work; message IDs identify individual envelopes and only matter when correlating a reply (the answering agent echoes the request's message ID as `replyTo`). Do not substitute a Herdr pane ID for any of these. Pane IDs are only diagnostic targets for `shepherd_read`.
+Task IDs identify the unit of work; message IDs identify individual envelopes and only matter when correlating a reply (the answering participant sets the request's message ID as `replyTo`). When the Shepherd answers a child-originated request, the parent resolves its own pending request as soon as that reply is queued, so the child does not need to send a redundant acknowledgment before calling `shepherd_done`. Do not substitute a Herdr pane ID for any of these. Pane IDs are only diagnostic targets for `shepherd_read`.
 
 ## Command reference
 

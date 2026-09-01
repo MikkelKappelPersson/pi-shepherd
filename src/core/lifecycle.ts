@@ -501,6 +501,19 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
     },
   );
   const accepted = publishFromParent(broker, envelope);
+  // The parent is also the owner of child-originated request state. When the
+  // parent answers one of those requests, resolve it here after successful
+  // publication instead of requiring the child to echo a second reply merely
+  // to unblock its own task. Child/peer replies are still resolved by the
+  // parent inbox path in processParentBrokerMessages().
+  if (input.replyTo && input.taskId) {
+    try {
+      lifecycleRegistry.resolveReplyForTask(input.taskId, input.replyTo);
+    } catch {
+      // A non-tracked or already-resolved reply is harmless and remains
+      // deliverable as an ordinary correlated message.
+    }
+  }
   let targetTaskState: string | undefined;
   if (input.taskId) {
     targetTaskState = lifecycleRegistry.getTask(input.taskId).state;

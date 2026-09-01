@@ -219,7 +219,12 @@ Required semantics:
 - A message does not create a task, settle a task, or consume the recipient's
   active-task slot.
 - A message that expects a reply creates a tracked pending request. If it is
-  associated with the sender's active task, that task enters `waiting`.
+  associated with the sender's active task, that task enters `waiting`. When
+  the Shepherd answers a child-originated request with a matching `replyTo`,
+  the parent resolves that pending request after successfully queueing the
+  answer; the child may then call `shepherd_done` without sending a redundant
+  acknowledgment. Peer replies continue to resolve through the parent broker
+  when the reply envelope is consumed.
 
 Incoming child-to-Shepherd messages must be injected into the parent as a
 Shepherd custom message. They must use the parent pi session's message
@@ -547,6 +552,8 @@ Focused tests must verify:
 - the Shepherd does not settle the task on `agent_end`, `agent_settled`, or
   idle state;
 - a matching reply returns the task to `running` and triggers child delivery;
+- a parent-originated matching reply resolves the pending request without
+  requiring a second child acknowledgment;
 - `shepherd_done` is the only normal successful completion path;
 - task watchers report terminal outcomes exactly once;
 - stale-wait notifications fire once per waiting episode and include useful

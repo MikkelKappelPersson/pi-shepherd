@@ -92,6 +92,57 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.equal(lifecycleRegistry.activeTaskForAgent(idleAgent), undefined, 'a message never creates a task');
     console.log('PASS a message to an idle recipient is queued without creating task state');
 
+    // ── Parent reply settles a child-originated request locally ────────────
+    const parentReplyTask = lifecycleRegistry.createTask(idleAgent, 'Complete the parent reply handshake.');
+    lifecycleRegistry.setTaskRunning(parentReplyTask.id);
+    const childQuestion = createEnvelope(
+      { sessionId: idleChild.sessionId, brokerId: idleChild.brokerId, senderId: idleChild.agentId },
+      {
+        kind: 'message',
+        targetId: 'shepherd',
+        taskId: parentReplyTask.id,
+        expectsReply: true,
+        delivery: 'followUp',
+        content: 'CHILD_REQUEST: please answer directly.',
+      },
+    );
+    assert.equal(publishFromChild(idleChild, childQuestion).accepted, true);
+    const childRequestMirror = createEnvelope(
+      { sessionId: idleChild.sessionId, brokerId: idleChild.brokerId, senderId: idleChild.agentId },
+      {
+        kind: 'runtime',
+        targetId: 'shepherd',
+        taskId: parentReplyTask.id,
+        replyTo: childQuestion.messageId,
+        requestOpen: true,
+        requestTargetId: broker.parentId,
+        summary: childQuestion.content,
+        delivery: 'followUp',
+      },
+    );
+    assert.equal(publishFromChild(idleChild, childRequestMirror).accepted, true);
+    await processParentBrokerMessages();
+    assert.equal(lifecycleRegistry.getTask(parentReplyTask.id).state, 'waiting');
+    const directAnswer = sendParentMessage({
+      target: idleAgent.id,
+      taskId: parentReplyTask.id,
+      replyTo: childQuestion.messageId,
+      message: 'PARENT_DIRECT_REPLY: request answered.',
+    });
+    assert.equal(directAnswer.accepted, true);
+    assert.equal(directAnswer.targetTaskState, 'running');
+    assert.equal(lifecycleRegistry.getTask(parentReplyTask.id).state, 'running');
+    const directAnswerEnvelope = pollChildInbox(idleChild).find(
+      message => message.replyTo === childQuestion.messageId,
+    );
+    assert.ok(directAnswerEnvelope, 'the direct parent reply reaches the child');
+    const directCompletion = lifecycleRegistry.settleTask(parentReplyTask.id, {
+      status: 'completed',
+      text: 'Completed after the direct parent reply.',
+    });
+    assert.equal(directCompletion.status, 'completed');
+    console.log('PASS parent reply resolves a child-originated request without a redundant child acknowledgment');
+
     // ── Parent -> child: plain message leaves task state unchanged ────────
     const plain = sendParentMessage({ target: scout.id, message: 'Any progress so far?', taskId: scoutTask.id });
     assert.match(plain.messageId, /^shepherd-message-/);
