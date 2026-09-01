@@ -137,6 +137,7 @@ try {
     assert.match(sentUserMessages[0].content, /Shepherd message from Shepherd/);
     assert.match(sentUserMessages[0].content, /Reply to: request-123/);
     assert.equal(sentUserMessages[0].options.deliverAs, 'steer');
+    assert.equal(sentUserMessages[0].options.triggerTurn, true);
     assert.ok(
       messageTool.promptGuidelines.some(guideline => guideline.includes("request, not your own task ID")),
       'child guidance explains requester task id for replies',

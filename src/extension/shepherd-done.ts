@@ -166,6 +166,15 @@ function deliveryMode(value: unknown): ShepherdDelivery {
 	return value === "steer" ? "steer" : "followUp";
 }
 
+function deliveryOptions(message: ShepherdMessageEnvelope): { deliverAs: ShepherdDelivery; triggerTurn: boolean } {
+	return {
+		deliverAs: deliveryMode(message.delivery),
+		// Passive messages wait for the child's next turn. Requests, replies,
+		// and delegated tasks must wake the child so waiting workflows can proceed.
+		triggerTurn: message.kind === "reply" || message.kind === "task" || message.expectsReply === true,
+	};
+}
+
 export default function (pi: ExtensionAPI) {
 	const autoExit = process.env.PI_SHEPHERD_AUTO_EXIT === "1";
 	const stayOpen = process.env.PI_SHEPHERD_STAY_OPEN === "1";
@@ -233,9 +242,7 @@ export default function (pi: ExtensionAPI) {
 			// request id.
 			if (message.replyTo) receivedMessageTaskIds.set(message.replyTo, message.taskId);
 			try {
-				pi.sendUserMessage(incomingMessageText(message), {
-					deliverAs: deliveryMode(message.delivery),
-				});
+				pi.sendUserMessage(incomingMessageText(message), deliveryOptions(message));
 			} catch (error) {
 				sendDeliveryFailure(message, error);
 			}
@@ -259,6 +266,7 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"When replying with replyTo, use the task ID from the incoming request, not your own task ID. If the incoming message is in context, omit taskId and the child surface will infer it.",
 			"A reply must set replyTo to the exact incoming Message ID. Do not call shepherd_done while your task's required request remains unresolved.",
+			"Requests and replies wake waiting agents automatically; after sending a request, end the turn and wait for the queued response rather than polling or sending acknowledgments.",
 		],
 		parameters: Type.Object({
 			target: Type.String({ description: "Shepherd, parent, or an opaque registered Shepherd agent id." }),
