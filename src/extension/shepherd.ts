@@ -467,6 +467,14 @@ function registerTaskCompletionRenderer(pi: ExtensionAPI): void {
  * completion is a terminal outcome (shepherd_done or an explicit
  * failure/cancellation/timeout), so it always triggers a parent turn to process
  * the result — matching the prompt bridge's delivery policy.
+ *
+ * Delivery uses `steer` rather than `followUp`: pi only delivers queued
+ * followUp messages when the parent run has no more tool calls at all, so a
+ * completion observed while the Shepherd is mid-turn (the normal async-watch
+ * flow) would otherwise sit queued until the whole turn ends — after cleanup
+ * tool calls such as shepherd_close. Steer surfaces the completion between
+ * tool rounds, and `triggerTurn` still fires immediately when the parent is
+ * idle.
  */
 function configureTaskWatcherBridge(pi: ExtensionAPI): void {
   registerTaskCompletionRenderer(pi);
@@ -509,7 +517,7 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
           display: true,
           details: notification,
         },
-        { deliverAs: 'followUp', triggerTurn: true }
+        { deliverAs: 'steer', triggerTurn: true }
       );
       if (sendResult && typeof sendResult.catch === 'function') {
         sendResult.catch(() => undefined);
@@ -527,12 +535,17 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
 export function parentMessageDeliveryOptions(message: {
   kind: string;
   expectsReply?: boolean;
-}): { deliverAs: 'followUp'; triggerTurn: boolean } {
+}): { deliverAs: 'followUp' | 'steer'; triggerTurn: boolean } {
   // Ordinary child notifications remain passive, but a request or reply is a
-  // decision point: the parent must get a turn to answer or resume waiting work.
+  // decision point: the parent must get a turn to answer or resume waiting
+  // work. Wake-ups use `steer` so pi surfaces them between tool rounds while
+  // the Shepherd is mid-turn (followUp would queue until the whole run ends,
+  // after cleanup calls such as shepherd_close); when the parent is idle,
+  // `triggerTurn` still starts a turn immediately.
+  const wake = message.kind === 'reply' || message.expectsReply === true;
   return {
-    deliverAs: 'followUp',
-    triggerTurn: message.kind === 'reply' || message.expectsReply === true,
+    deliverAs: wake ? 'steer' : 'followUp',
+    triggerTurn: wake,
   };
 }
 
@@ -578,7 +591,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
           display: true,
           details: notification,
         },
-        { deliverAs: 'followUp', triggerTurn: true }
+        { deliverAs: 'steer', triggerTurn: true }
       );
       if (sendResult && typeof sendResult.catch === 'function') {
         sendResult.catch(() => undefined);
@@ -1205,15 +1218,16 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_message',
     label: 'Shepherd: message agent',
     description:
-      'Send one asynchronous message to a spawned agent and return immediately. Pass the agent id printed by shepherd_spawn as the top-level target argument, not a Herdr pane id. The returned message id identifies this message for reply correlation. An accepted message means the broker queued it for delivery; it does not mean the recipient read it or replied. With expectsReply and a taskId the task enters waiting until a matching reply arrives.',
+      'Send one asynchronous message to a spawned agent and return immediately. target MUST be the exact opaque agent id returned by shepherd_spawn; copy that id verbatim. Never pass an agent definition name such as "planner", a display label such as "manual planner", a Herdr pane id, or a placeholder such as "<planner agent ID>"—the call will be rejected. The returned message id identifies this message for reply correlation. An accepted message means the broker queued it for delivery; it does not mean the recipient read it or replied. With expectsReply and a taskId the task enters waiting until a matching reply arrives.',
     promptSnippet:
-      'send an asynchronous message to a spawned agent.',
+      'send an asynchronous message using the exact opaque id returned by shepherd_spawn.',
     promptGuidelines: [
+      'Before calling shepherd_message, copy target from the id field in shepherd_spawn output. Do not infer or substitute the agent definition name, display label, pane id, or any angle-bracket placeholder; invalid targets fail instead of being resolved by name.',
       'Use shepherd_message for questions to an agent while it is busy or idle; the recipient receives it as a queued follow-up. Do not use it to submit tracked work — that is shepherd_delegate.',
       'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. For peer replies, use the requester\'s task ID—the task whose request is being answered—not the responder\'s task ID. A plain message never alters task state.',
     ],
     parameters: Type.Object({
-      target: Type.String({ description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.' }),
+      target: Type.String({ description: 'Exact opaque agent id returned by shepherd_spawn; copy it verbatim. Agent names (for example "planner"), labels, Herdr pane ids, and placeholders are rejected.' }),
       message: Type.String({ description: 'Non-empty message content.' }),
       taskId: Type.Optional(TaskIdSchema),
       threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),

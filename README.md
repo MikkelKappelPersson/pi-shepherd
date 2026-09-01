@@ -90,7 +90,7 @@ shepherd_delegate({ target: "<agent ID>", task: "Implement the auth middleware f
 shepherd_watch({ id: "<task ID>" })
 ```
 
-When the task settles, the watcher delivers a follow-up containing the result. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
+When the task settles, the watcher delivers a completion notification containing the result. Delivery uses pi's steer mode: if the Shepherd is mid-turn, the notification is injected between tool rounds (before cleanup calls such as `shepherd_close`); if the Shepherd is idle, it triggers a new turn immediately. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
 
 ### Messaging between agents
 
@@ -105,15 +105,19 @@ shepherd_message({
 })
 ```
 
-While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the recipient's next turn; `steer` injects it urgently into an active turn. Child requests (`expectsReply: true`) and replies wake the parent for a follow-up turn at the next safe boundary; ordinary informational messages remain passive. A wake-up never interrupts an active tool call.
+The angle-bracket values above are documentation placeholders only. At runtime,
+copy the planner's exact `id` from `shepherd_spawn` into `target`; do not use
+`planner`, a display label, or a Herdr pane ID. Invalid targets are rejected.
+
+While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the recipient's next turn; `steer` injects it urgently into an active turn. Child requests (`expectsReply: true`) and replies wake the parent at the next safe boundary (between tool rounds when the Shepherd is mid-turn, immediately when it is idle); ordinary informational messages remain passive. A wake-up never interrupts an active tool call.
 
 ### Continue working while an agent runs
 
-`shepherd_watch({ id: prompt.id })` is also non-blocking for the legacy prompt path; completion arrives as a follow-up.
+`shepherd_watch({ id: prompt.id })` is also non-blocking for the legacy prompt path; completion arrives as a steered notification.
 
 ### Compatibility
 
-`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_watch` accepts task IDs (`shepherd_delegate`) and legacy prompt IDs (`shepherd_prompt`) and returns immediately; completions arrive as follow-ups. Use `shepherd_status` to inspect running or waiting tasks.
+`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_watch` accepts task IDs (`shepherd_delegate`) and legacy prompt IDs (`shepherd_prompt`) and returns immediately; completions arrive as steered notifications. Use `shepherd_status` to inspect running or waiting tasks.
 
 ## Agent definitions
 

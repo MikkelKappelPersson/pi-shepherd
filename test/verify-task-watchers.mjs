@@ -171,7 +171,7 @@ assert.equal(sentTask[0].message.details.completions[0].agentId, bridgeAgent.id)
 assert.match(sentTask[0].message.content, /\nreturn:\n/);
 assert.match(sentTask[0].message.content, /"taskId":/);
 assert.doesNotMatch(sentTask[0].message.content, /"promptId":/);
-assert.deepEqual(sentTask[0].options, { deliverAs: 'followUp', triggerTurn: true });
+assert.deepEqual(sentTask[0].options, { deliverAs: 'steer', triggerTurn: true });
 console.log('PASS the parent bridge delivers task completions as a turn-triggering follow-up with the task id');
 
 // A completion is not re-sent after the shutdown path releases state.

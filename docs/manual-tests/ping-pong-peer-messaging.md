@@ -39,12 +39,20 @@ Record the returned planner task ID.
 
 ### 3. Delegate the worker task
 
-Use the worker's returned agent ID and the planner's opaque agent ID:
+Use the worker's returned agent ID and put the planner's **actual opaque ID**
+from Step 1 into the task text. Do not pass the planner's definition name,
+display label, Herdr pane ID, or angle-bracket placeholder.
 
-> Send planner a peer request using `shepherd_message`: target `<planner agent
-> ID>`, message `Reply with exactly pong`, `expectsReply: true`. Wait for the
-> reply using normal turns (never `shepherd_wait`), then call `shepherd_done`
-> with text containing the reply. Do not call `shepherd_wait`.
+> Send planner a peer request using `shepherd_message`: set `target` to the
+> planner spawn result's `id` field (the full opaque `shepherd-agent-...` string),
+> message `Reply with exactly pong`, `expectsReply: true`. Wait for the reply
+> using normal turns (never `shepherd_wait`), then call `shepherd_done` with text
+> containing the reply. Do not call `shepherd_wait`.
+
+Do not copy a documentation placeholder into the worker task. Before calling
+`shepherd_delegate`, interpolate the exact ID copied from the planner's spawn
+result into the task text. `planner`, `manual planner`, Herdr pane IDs, and
+angle-bracket placeholders are invalid targets; the child tool rejects them.
 
 Record the returned worker task ID.
 
@@ -128,9 +136,12 @@ The test passes when:
 
 ## Recorded successful run
 
-The reloaded-extension run on 2026-09-01 succeeded with:
+The reloaded-extension run on 2026-09-01 (steered watcher delivery, issue #10
+fix) succeeded with:
 
 - Planner result: `completed`, `ok: true`, `returnCode: 0`, `planner replied`
-- Worker result: `completed`, `ok: true`, `returnCode: 0`, `Planner reply: pong`
-- Completion observation: `shepherd_watch`
+- Worker result: `completed`, `ok: true`, `returnCode: 0`, `received reply: pong`
+- Completion observation: both watcher completions were delivered as steered
+  follow-ups **mid-turn**, before any cleanup; the combined watcher settled
+  both tasks before the agents were closed
 - Cleanup: both agents closed after terminal completion

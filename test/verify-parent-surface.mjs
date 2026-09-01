@@ -63,6 +63,11 @@ assert.ok(guidance.includes("shepherd_watch"), "umbrella guidance explains async
 assert.ok(guidance.includes("shepherd_delegate"), "umbrella guidance explains tracked delegation");
 assert.ok(guidance.includes("close each agent"), "umbrella guidance explains close semantics");
 assert.ok(guidance.includes("shepherd.md"), "umbrella guidance explains fieldnotes");
+const messageTool = parent.toolDetails.shepherd_message;
+assert.ok(messageTool.description.includes("exact opaque agent id returned by shepherd_spawn"), "message description requires the exact spawned id");
+assert.ok(messageTool.description.includes("agent definition name"), "message description rejects definition names");
+assert.ok(messageTool.description.includes("will be rejected"), "message description promises invalid-target rejection");
+assert.ok(messageTool.promptGuidelines.join(" ").includes("angle-bracket placeholder"), "message guidance rejects unresolved placeholders");
 assert.equal(worker.tools.length, 0, "worker does not register parent Shepherd tools");
 assert.equal(worker.commands.length, 0, "worker does not register parent Shepherd commands");
 assert.deepEqual(
@@ -72,12 +77,12 @@ assert.deepEqual(
 );
 assert.deepEqual(
   parentMessageDeliveryOptions({ kind: "message", expectsReply: true }),
-  { deliverAs: "followUp", triggerTurn: true },
+  { deliverAs: "steer", triggerTurn: true },
   "child requests wake the parent to answer",
 );
 assert.deepEqual(
   parentMessageDeliveryOptions({ kind: "reply" }),
-  { deliverAs: "followUp", triggerTurn: true },
+  { deliverAs: "steer", triggerTurn: true },
   "child replies wake the parent to resume waiting work",
 );
 
