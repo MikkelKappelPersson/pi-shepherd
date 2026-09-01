@@ -180,7 +180,9 @@ Implemented:
 - `sendParentMessage()` and the parent message notifier/bridge in
   `src/core/lifecycle.ts`; child message delivery via
   `configureParentMessageNotifications()` and `sendUserMessage` delivery in
-  `src/extension/shepherd.ts` / `shepherd-done.ts`.
+  `src/extension/shepherd.ts` / `shepherd-done.ts`. Child requests and replies
+  wake the parent at the next safe turn boundary; ordinary child messages are
+  queued passively.
 - Task registry request/reply correlation in `src/core/orchestration.ts`
   (`openPendingRequest`, `resolveReplyForTask`, `clearPendingReply`) with a
   single outstanding request per task.
@@ -350,7 +352,7 @@ and starts a 250ms unref'd monitor. The monitor calls
 The parent currently handles these inbox events:
 
 - `task_done`: validates and settles the task
-- `message` / `reply`: routed to the parent Pi session as a custom Shepherd message (followUp); a `reply` also resolves the matching pending request on the sender's task and is relayed back to the asker's child inbox
+- `message` / `reply`: routed to the parent Pi session as a custom Shepherd message (followUp). Requests with `expectsReply` and replies trigger a parent turn at the next safe boundary; ordinary messages remain passive. A `reply` also resolves the matching pending request on the sender's task and is relayed back to the asker's child inbox
 - `runtime` with `requestOpen`: opens the task's pending request (task → waiting) so a busy recipient's queued question keeps the sender task open
 - Pane disappearance, provider error, and reply-deadline expiry settle tasks as failed / failed / blocked
 

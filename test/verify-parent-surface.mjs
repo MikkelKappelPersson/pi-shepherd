@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as path from "node:path";
+import { parentMessageDeliveryOptions } from "../src/extension/shepherd.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const indexUrl = pathToFileURL(path.join(root, "index.ts")).href;
@@ -64,6 +65,21 @@ assert.ok(guidance.includes("Waiting does not close"), "umbrella guidance explai
 assert.ok(guidance.includes("shepherd.md"), "umbrella guidance explains fieldnotes");
 assert.equal(worker.tools.length, 0, "worker does not register parent Shepherd tools");
 assert.equal(worker.commands.length, 0, "worker does not register parent Shepherd commands");
+assert.deepEqual(
+  parentMessageDeliveryOptions({ kind: "message" }),
+  { deliverAs: "followUp", triggerTurn: false },
+  "ordinary child messages remain passive",
+);
+assert.deepEqual(
+  parentMessageDeliveryOptions({ kind: "message", expectsReply: true }),
+  { deliverAs: "followUp", triggerTurn: true },
+  "child requests wake the parent to answer",
+);
+assert.deepEqual(
+  parentMessageDeliveryOptions({ kind: "reply" }),
+  { deliverAs: "followUp", triggerTurn: true },
+  "child replies wake the parent to resume waiting work",
+);
 
 console.log("PASS parent registers the Shepherd control plane");
 console.log("PASS launched worker excludes parent Shepherd tools and commands");

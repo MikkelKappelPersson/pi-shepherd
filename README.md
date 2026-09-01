@@ -106,7 +106,7 @@ shepherd_message({
 })
 ```
 
-While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the child's next turn; `steer` injects it urgently into an active turn.
+While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the recipient's next turn; `steer` injects it urgently into an active turn. Child requests (`expectsReply: true`) and replies wake the parent for a follow-up turn at the next safe boundary; ordinary informational messages remain passive. A wake-up never interrupts an active tool call.
 
 ### Continue working while an agent runs
 

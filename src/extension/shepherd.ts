@@ -527,6 +527,18 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
 /** Narrow extension-owned bridge from core watcher completions to pi.
  * Also wires child-originated messages (Phase 6) into the parent session.
  */
+export function parentMessageDeliveryOptions(message: {
+  kind: string;
+  expectsReply?: boolean;
+}): { deliverAs: 'followUp'; triggerTurn: boolean } {
+  // Ordinary child notifications remain passive, but a request or reply is a
+  // decision point: the parent must get a turn to answer or resume waiting work.
+  return {
+    deliverAs: 'followUp',
+    triggerTurn: message.kind === 'reply' || message.expectsReply === true,
+  };
+}
+
 function configurePromptWatcherBridge(pi: ExtensionAPI): void {
   registerPromptCompletionRenderer(pi);
   registerShepherdMessageRenderer(pi);
@@ -614,7 +626,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
           display: true,
           details: envelope,
         },
-        { deliverAs: 'followUp', triggerTurn: false }
+        parentMessageDeliveryOptions(envelope)
       );
       if (sendResult && typeof sendResult.catch === 'function') {
         sendResult.catch(() => undefined);
