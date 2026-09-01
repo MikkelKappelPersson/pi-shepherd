@@ -14,7 +14,7 @@ assert.match(byName.shepherd_watch.description, /non-blocking/i);
 assert.match(JSON.stringify(byName.shepherd_watch.promptGuidelines), /status/i);
 const promptParams = JSON.stringify(byName.shepherd_prompt.parameters);
 assert.match(promptParams, /shepherd_watch/i, 'deprecated prompt path points at shepherd_watch');
-const handoffPath = fileURLToPath(new URL('../docs/specs/001-agent-messaging-and-task-lifecycle/handoff.md', import.meta.url));
+const handoffPath = fileURLToPath(new URL('../docs/specs/005-agent-messaging-and-task-lifecycle/handoff.md', import.meta.url));
 const handoff = readFileSync(handoffPath, 'utf8');
 assert.match(handoff, /shepherd_wait.*removed|removed.*shepherd_wait/i, 'handoff records removal');
 console.log('PASS shepherd_wait is hard-removed from the model-facing surface');
