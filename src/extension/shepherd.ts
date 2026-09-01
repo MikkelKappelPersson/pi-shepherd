@@ -2,7 +2,7 @@
  * Shepherd tool — the model-facing `shepherd` tool for the parent pi session.
  *
  * One tool surface:
- *   - spawn/prompt/wait/watch/status/read/close/prune — manage pi agents living in
+ *   - spawn/prompt/watch/status/read/close/prune — manage pi agents living in
  *     Herdr panes (machinery in herdr.ts).
  *
  * Registered by index.ts in the parent session only. Launched agents get the
@@ -19,23 +19,32 @@ import { Type, type Static } from 'typebox';
 import {
   AgentScopeSchema,
   SpawnParams,
+  LifecycleDelegateParams,
+  LifecycleMessageParams,
   LifecyclePromptParams,
-  WaitParams,
   WatchParams,
   LifecycleStatusParams,
   LifecycleCloseParams,
+  TaskIdSchema,
+  PromptIdSchema,
 } from '../core/types.ts';
 import {
   startAgent,
+  delegateAgent,
   promptAgent,
-  waitPrompts,
   statusAgent,
   closeAgent,
   promptWatcherService,
   configurePromptWatcherNotifications,
+  taskWatcherService,
+  configureTaskWatcherNotifications,
+  configureStaleWaitNotifications,
+  type StaleWaitInfo,
+  sendParentMessage,
+  configureParentMessageNotifications,
 } from '../core/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from './config.ts';
-import { lifecycleRegistry } from '../core/orchestration.ts';
+import { lifecycleRegistry, LifecycleError } from '../core/orchestration.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
 import { resolveOrCreateParentArtifactSession, type ShepherdSession } from '../core/artifact-sessions.ts';
 import type { DelegatorModel } from '../core/discovery.ts';
@@ -105,8 +114,9 @@ const AnyShepherdUnion = Type.Union(
     HerdParams,
     AgentsParams,
     SpawnParams,
+    LifecycleDelegateParams,
+    LifecycleMessageParams,
     LifecyclePromptParams,
-    WaitParams,
     WatchParams,
     LifecycleStatusParams,
     LifecycleCloseParams,
@@ -299,6 +309,13 @@ export function setPromptWatcherSessionActive(active: boolean): void {
   watcherParentSessionActive = active;
 }
 
+let messageParentSessionActive = true;
+
+/** Enable/disable message delivery without changing the core service. */
+export function setShepherdMessageSessionActive(active: boolean): void {
+  messageParentSessionActive = active;
+}
+
 function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) => {
     const content = typeof message.content === 'string' ? message.content : '';
@@ -327,9 +344,214 @@ function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
   });
 }
 
-/** Narrow extension-owned bridge from core watcher completions to pi. */
+/** Enable/disable task-watcher delivery without changing the core service's state model. */
+let taskWatcherParentSessionActive = false;
+export function setTaskWatcherSessionActive(active: boolean): void {
+  taskWatcherParentSessionActive = active;
+}
+
+/** Enable/disable stale-wait delivery without changing the core monitor's state model. */
+let staleWaitParentSessionActive = false;
+export function setStaleWaitSessionActive(active: boolean): void {
+  staleWaitParentSessionActive = active;
+}
+
+function formatElapsedMs(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${s}s`;
+}
+
+function registerStaleWaitRenderer(pi: ExtensionAPI): void {
+  pi.registerMessageRenderer('shepherd.stale.wait', (message, options, theme) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const rendered = [
+      theme.fg('toolTitle', theme.bold('shepherd_stale_wait')),
+      theme.fg('accent', firstLine),
+      ...lines.map(line =>
+        ['action:'].includes(line) ? theme.fg('accent', line) : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  });
+}
+
+function configureStaleWaitBridge(pi: ExtensionAPI): void {
+  registerStaleWaitRenderer(pi);
+  configureStaleWaitNotifications(info => {
+    if (!staleWaitParentSessionActive) return;
+    const owner = info.label
+      ? `${info.agent ?? info.agentId}: ${info.label}`
+      : info.agent ?? info.agentId;
+    const recipient = info.recipientName
+      ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
+      : 'the target agent';
+    const body = [
+      `Waiting ${formatElapsedMs(info.elapsedMs)} for a reply (stale after ${info.thresholdMinutes} min).`,
+      `Task: ${info.taskId}`,
+      `Owner: ${owner} - ${info.description}`,
+      `Question: ${info.question}`,
+      `Pending request: ${info.requestMessageId} (waiting on ${recipient})`,
+    ].filter(Boolean).join('\n');
+    const actions = [
+      'Reply to the recipient on the owner\'s behalf via shepherd_message (set replyTo to the pending request).',
+      `Or nudge ${recipient} with shepherd_message (targetId = recipient).`,
+      'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
+    ].join('\n');
+    const content = formatUserFacingText({
+      content: [{ type: 'text' as const, text: body }],
+      details: {
+        call: {
+          name: 'shepherd_message (possible follow-up)',
+          arguments: { taskId: info.taskId, replyTo: info.requestMessageId },
+        },
+        taskId: info.taskId,
+        agentId: info.agentId,
+        elapsedMs: info.elapsedMs,
+        requestMessageId: info.requestMessageId,
+        action: actions,
+        returnValue: info,
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.stale.wait',
+          content,
+          display: true,
+          details: info,
+        },
+        { deliverAs: 'followUp', triggerTurn: false }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the reply deadline is the authoritative outcome.
+    }
+  });
+}
+
+function registerTaskCompletionRenderer(pi: ExtensionAPI): void {
+  pi.registerMessageRenderer('shepherd.task.completion', (message, options, theme) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const summary = firstLine.startsWith('shepherd_watcher ')
+      ? firstLine.slice('shepherd_watcher '.length)
+      : firstLine.startsWith('Shepherd watcher ')
+        ? firstLine.slice('Shepherd watcher '.length)
+        : firstLine;
+    const rendered = [
+      theme.fg('toolTitle', theme.bold('shepherd_watcher')) +
+        (summary ? ` ${theme.fg('accent', summary)}` : ''),
+      ...lines.map(line =>
+        ['call:', 'return:', 'details:'].includes(line)
+          ? theme.fg('accent', line)
+          : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  });
+}
+
+/**
+ * Bridge from core TASK watcher completions to the parent Pi session. A task
+ * completion is a terminal outcome (shepherd_done or an explicit
+ * failure/cancellation/timeout), so it always triggers a parent turn to process
+ * the result — matching the prompt bridge's delivery policy.
+ *
+ * Delivery uses `steer` rather than `followUp`: pi only delivers queued
+ * followUp messages when the parent run has no more tool calls at all, so a
+ * completion observed while the Shepherd is mid-turn (the normal async-watch
+ * flow) would otherwise sit queued until the whole turn ends — after cleanup
+ * tool calls such as shepherd_close. Steer surfaces the completion between
+ * tool rounds, and `triggerTurn` still fires immediately when the parent is
+ * idle.
+ */
+function configureTaskWatcherBridge(pi: ExtensionAPI): void {
+  registerTaskCompletionRenderer(pi);
+  configureTaskWatcherNotifications(notification => {
+    if (!taskWatcherParentSessionActive) return;
+    const taskIds = notification.completions.map(completion => completion.taskId);
+    const summary = notification.completions
+      .map(completion => {
+        const identity = completion.label
+          ? `${completion.agent ?? completion.agentId}: ${completion.label}`
+          : completion.agent ?? completion.agentId;
+        return `${identity} ${completion.status}`;
+      })
+      .join(', ');
+    const returnCode =
+      notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
+    const content = formatUserFacingText({
+      content: [
+        {
+          type: 'text',
+          text: `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
+        },
+      ],
+      details: {
+        call: {
+          name: 'shepherd_watch',
+          arguments: { id: taskIds.length === 1 ? taskIds[0] : taskIds },
+        },
+        watcherId: notification.watcherId,
+        taskIds,
+        returnCode,
+        returnValue: notification.completions,
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.task.completion',
+          content,
+          display: true,
+          details: notification,
+        },
+        { deliverAs: 'steer', triggerTurn: true }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort. The completion is already durable in the task
+      // registry and can be retrieved via shepherd_status.
+    }
+  });
+}
+
+/** Narrow extension-owned bridge from core watcher completions to pi.
+ * Also wires child-originated messages (Phase 6) into the parent session.
+ */
+export function parentMessageDeliveryOptions(message: {
+  kind: string;
+  expectsReply?: boolean;
+}): { deliverAs: 'followUp' | 'steer'; triggerTurn: boolean } {
+  // Ordinary child notifications remain passive, but a request or reply is a
+  // decision point: the parent must get a turn to answer or resume waiting
+  // work. Wake-ups use `steer` so pi surfaces them between tool rounds while
+  // the Shepherd is mid-turn (followUp would queue until the whole run ends,
+  // after cleanup calls such as shepherd_close); when the parent is idle,
+  // `triggerTurn` still starts a turn immediately.
+  const wake = message.kind === 'reply' || message.expectsReply === true;
+  return {
+    deliverAs: wake ? 'steer' : 'followUp',
+    triggerTurn: wake,
+  };
+}
+
 function configurePromptWatcherBridge(pi: ExtensionAPI): void {
   registerPromptCompletionRenderer(pi);
+  registerShepherdMessageRenderer(pi);
   configurePromptWatcherNotifications(notification => {
     if (!watcherParentSessionActive) return;
     const promptIds = notification.completions.map(completion => completion.promptId);
@@ -369,16 +591,84 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
           display: true,
           details: notification,
         },
-        { deliverAs: 'followUp', triggerTurn: true }
+        { deliverAs: 'steer', triggerTurn: true }
       );
       if (sendResult && typeof sendResult.catch === 'function') {
         sendResult.catch(() => undefined);
       }
     } catch {
       // Delivery is best effort. The completion remains in the lifecycle
-      // prompt registry and can still be retrieved by shepherd_wait.
+      // prompt registry and can still be retrieved by shepherd_watch.
     }
   });
+  configureParentMessageNotifications(notification => {
+    if (!messageParentSessionActive) return;
+    const { envelope } = notification;
+    if (envelope.kind === 'runtime') return; // task-state mirror only; never a user-facing message
+    const sender = displayAgentName(envelope.senderId);
+    const title = envelope.kind === 'reply' ? 'Shepherd reply' : 'Shepherd message';
+    const body = [
+      `${title} from ${sender}`,
+      `Message ID: ${envelope.messageId}`,
+      envelope.taskId ? `Task ID: ${envelope.taskId}` : undefined,
+      envelope.threadId ? `Thread ID: ${envelope.threadId}` : undefined,
+      envelope.replyTo ? `Reply to: ${envelope.replyTo}` : undefined,
+      '',
+      envelope.content ?? '',
+    ].filter(Boolean).join('\n');
+    const content = formatUserFacingText({
+      content: [{ type: 'text' as const, text: body }],
+      details: {
+        call: {
+          name: 'shepherd_message',
+          arguments: { target: envelope.senderId, message: envelope.content },
+        },
+        messageId: envelope.messageId,
+        from: envelope.senderId,
+        returnValue: { messageId: envelope.messageId, from: envelope.senderId, kind: envelope.kind },
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: envelope.kind === 'reply' ? 'shepherd.message.reply' : 'shepherd.message.incoming',
+          content,
+          display: true,
+          details: envelope,
+        },
+        parentMessageDeliveryOptions(envelope)
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the envelope remains in the parent's
+      // processed storage and the task state is already reconciled.
+    }
+  });
+}
+
+function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
+  const render = (message: any, options: any, theme: any) => {
+    const content = typeof message.content === 'string' ? message.content : '';
+    const lines = content.split('\n');
+    const firstLine = lines.shift() ?? '';
+    const isReply = firstLine.startsWith('reply:') || (message.customType === 'shepherd.message.reply');
+    const rendered = [
+      theme.fg('toolTitle', theme.bold(isReply ? 'shepherd_reply' : 'shepherd_message')) +
+        ` ${theme.fg('accent', firstLine)}`,
+      ...lines.map(line =>
+        ['call:', 'return:', 'details:'].includes(line)
+          ? theme.fg('accent', line)
+          : theme.fg('toolOutput', line)
+      ),
+    ].join('\n');
+    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
+    box.addChild(new Text(rendered, options.outputPad, 0));
+    return box;
+  };
+  pi.registerMessageRenderer('shepherd.message.incoming', render);
+  pi.registerMessageRenderer('shepherd.message.reply', render);
 }
 
 type ShepherdContext = {
@@ -427,7 +717,7 @@ export async function doAction(
           model: a.model,
           artifactSession,
         },
-        ctx
+        { ...ctx, sessionId: ctx.sessionManager?.getSessionId() }
       );
       return textResult(
         `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
@@ -444,6 +734,61 @@ export async function doAction(
           },
           fieldnote: artifactSession?.sessionRelativePath ?? null,
           ...(artifactSession ? { artifactSession } : {}),
+        }
+      );
+    }
+    case 'delegate': {
+      const a: any = args;
+      const timeoutMinutes = a.timeout ?? loadSettings(ctx.cwd).timeout;
+      if (!Number.isFinite(timeoutMinutes) || timeoutMinutes <= 0) {
+        throw new Error('Delegated task timeout must be a positive number of minutes.');
+      }
+      const task = await delegateAgent(a.target, a.task, {
+        timeoutMs: timeoutMinutes * 60_000,
+        sessionId: ctx.sessionManager?.getSessionId(),
+      });
+      const agent = lifecycleRegistry.getAgent(task.agentId).handle;
+      return textResult(
+        `Delegated task to ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
+        {
+          id: task.id,
+          taskId: task.id,
+          agentId: task.agentId,
+          state: 'running',
+          returnValue: {
+            taskId: task.id,
+            agentId: task.agentId,
+            state: 'running',
+          },
+        }
+      );
+    }
+    case 'message': {
+      const a: any = args;
+      const result = sendParentMessage({
+        target: a.target,
+        message: a.message,
+        taskId: a.taskId ?? a.id,
+        threadId: a.threadId,
+        replyTo: a.replyTo,
+        expectsReply: a.expectsReply,
+        delivery: a.delivery,
+      });
+      return textResult(
+        `Message queued to ${displayAgentName(result.targetId)}` +
+          (result.targetTaskState ? ` (task ${result.targetTaskState})` : ''),
+        {
+          id: result.messageId,
+          messageId: result.messageId,
+          returnValue: {
+            messageId: result.messageId,
+            accepted: result.accepted,
+            delivery: result.delivery,
+            ...(result.requestId ? { requestId: result.requestId } : {}),
+            targetId: result.targetId,
+          },
+          ...(result.requestId ? { requestId: result.requestId } : {}),
+          ...(result.targetTaskState ? { targetTaskState: result.targetTaskState } : {}),
         }
       );
     }
@@ -470,23 +815,49 @@ export async function doAction(
         }
       );
     }
-    case 'wait': {
-      const a: any = args;
-      // Convert timeout from minutes to milliseconds for internal use.
-      // Default: from settings (20 minutes).
-      const defaultTimeout = loadSettings(ctx.cwd).timeout;
-      const timeoutMinutes = a.timeout ?? defaultTimeout;
-      const timeoutMs = timeoutMinutes * 60_000;
-      const result = await waitPrompts(a.id ?? a.handle, { timeout: timeoutMs });
-      const results = Array.isArray(result) ? result : [result];
-      const returnCode = results.find(r => typeof r.returnCode === 'number' && r.returnCode !== 0)?.returnCode ?? 0;
-      const names = results.map(item => displayAgentName(item.agentId));
-      const summary = `waited for ${names.join(', ')}`;
-      return textResult(summary, { returnCode, result, returnValue: result });
-    }
     case 'watch': {
       const a: any = args;
-      const registration = promptWatcherService.watch(a.id);
+      const ids: string[] = Array.isArray(a.id) ? a.id : [a.id];
+      if (ids.length === 0) {
+        throw new LifecycleError('invalid_handle', 'Expected one or more task (or legacy prompt) ids to watch.');
+      }
+      // A tracker id is a task first; anything else must be a known prompt id.
+      // Agent ids and Herdr pane ids are rejected with a clear error here so
+      // the model is never silently pointing a watcher at the wrong scope.
+      const taskIds = ids.filter(id => lifecycleRegistry.isTaskId(id));
+      const promptIds: string[] = [];
+      for (const id of ids) {
+        if (taskIds.includes(id)) continue;
+        try {
+          lifecycleRegistry.getPrompt(id);
+        } catch {
+          throw new LifecycleError(
+            'invalid_handle',
+            `Unknown watcher target "${id}". Pass a task id from shepherd_delegate or a legacy prompt id from shepherd_prompt; agent ids and Herdr pane ids are not valid watcher targets.`
+          );
+        }
+        promptIds.push(id);
+      }
+      if (taskIds.length > 0 && promptIds.length > 0) {
+        throw new LifecycleError(
+          'invalid_handle',
+          'A single shepherd_watch call cannot mix task ids and legacy prompt ids; watch tasks in one call and prompts in another.'
+        );
+      }
+      if (taskIds.length > 0) {
+        const registration = taskWatcherService.watch(taskIds);
+        const summary = registration.pending.length > 0
+          ? `watching ${registration.pending.length} task${registration.pending.length === 1 ? '' : 's'} asynchronously`
+          : 'watch registered; all tasks were already settled';
+        return textResult(summary, {
+          watcherId: registration.watcherId,
+          taskIds: registration.taskIds,
+          pending: registration.pending,
+          completed: registration.completed,
+          returnValue: registration,
+        });
+      }
+      const registration = promptWatcherService.watch(promptIds);
       const summary = registration.pending.length > 0
         ? `watching ${registration.pending.length} prompt${registration.pending.length === 1 ? '' : 's'} asynchronously`
         : 'watch registered; all prompts were already settled';
@@ -504,9 +875,27 @@ export async function doAction(
       const publicResult = {
         id: result.handle.id,
         state: result.state,
+        ...(result.task
+          ? {
+              task: {
+                id: result.task.id,
+                state: result.task.state,
+                ...(result.task.waitingMs !== undefined ? { waitingMs: result.task.waitingMs } : {}),
+                ...(result.task.pendingRequestMessageId
+                  ? { pendingRequest: result.task.pendingRequestMessageId }
+                  : {}),
+                ...(result.task.waitingRecipient ? { waitingOn: result.task.waitingRecipient } : {}),
+                ...(result.task.stale ? { stale: true } : {}),
+              },
+            }
+          : {}),
         ...(result.error ? { error: result.error } : {}),
       };
-      return textResult(`agent ${publicResult.state}.`, { status: publicResult, returnValue: publicResult });
+      const taskNote = result.task ? `; task ${result.task.id} ${result.task.state}` : '';
+      return textResult(`agent ${result.state}${taskNote}.`, {
+        status: publicResult,
+        returnValue: publicResult,
+      });
     }
     case 'close': {
       const a: any = args;
@@ -683,6 +1072,8 @@ async function executeShepherd(
 
 export function registerShepherdTools(pi: ExtensionAPI) {
   configurePromptWatcherBridge(pi);
+  configureTaskWatcherBridge(pi);
+  configureStaleWaitBridge(pi);
   pi.registerTool({
     name: 'shepherd',
     label: 'Shepherd (manage Herdr agents)',
@@ -690,15 +1081,15 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Shepherd control plane: subagent framework for native Herdr agent orchestration inside Herdr panes.',
       'Terminology: the Shepherd is this parent pi session and acts as the orchestrator; the herd is the collection of agents; agents or subagents or sheep are the created workers.',
       'When enabled, fieldnotes are the durable session notes commonly called artifacts: one shared fieldnotes collection (the shepherd.md index) links the individual note assigned to each agent invocation.',
-      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_prompt, shepherd_wait, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
+      'This tool only lists: herd (live agents in Herdr), agents (discoverable definitions), prune (drop stale registrations). All lifecycle operations are separate tools: shepherd_spawn, shepherd_delegate, shepherd_message, shepherd_prompt, shepherd_watch, shepherd_status, shepherd_close, shepherd_read.',
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
     promptSnippet:
       'Subagent orchestration tool for herdr.',
     promptGuidelines: [
-      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit work with shepherd_prompt, collect results with shepherd_wait or shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
-      'Use shepherd_watch after shepherd_prompt when the parent should continue without blocking; it accepts one prompt id or an array and sends custom completion follow-ups. Use shepherd_wait when a deterministic barrier and input-order results are needed. Waiting does not close an agent; close each agent explicitly when finished.',
+      'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit tracked work with shepherd_delegate, collect results with shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
+      'Use shepherd_watch after shepherd_delegate when the parent should continue without blocking; it accepts task ids and sends custom completion follow-ups. Waiting is non-blocking; close each agent explicitly when finished.',
       'When fieldnotes are enabled, read the shared shepherd.md fieldnotes index before assigning or reviewing work, and write only to the assigned note for note-producing prompts.',
       'Fieldnotes can be enabled or disabled in /shepherd settings; the change applies when the next parent pi session starts.',
     ],
@@ -747,7 +1138,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     promptSnippet:
       'Spawn a new agent in a Herdr pane.',
     promptGuidelines: [
-            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_wait. For parallel wait, pass an array of prompt ids. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
+            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
             ],
     parameters: Type.Object({
       agent: Type.String({
@@ -785,25 +1176,109 @@ export function registerShepherdTools(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: 'shepherd_prompt',
-    label: 'Shepherd: prompt agent',
+    name: 'shepherd_delegate',
+    label: 'Shepherd: delegate task',
     description:
-      'Submit one message to a spawned agent and return immediately. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_wait.',
+      'Start tracked asynchronous work on a spawned agent and return a task id immediately. The task can span multiple Pi turns; use shepherd_watch to observe terminal completion. Do not treat an idle child or ended turn as task completion.',
     promptSnippet:
-      'prompt a spawned agent with a task or question.',
+      'Delegate tracked asynchronous work without blocking the parent.',
+    promptGuidelines: [
+      'Use shepherd_delegate for work that may span multiple child turns or wait for another agent. The returned task id, not a prompt id or pane id, is the completion handle.',
+      'Use shepherd_watch after delegation when the parent should continue without blocking. A child must explicitly call shepherd_done before a successful task result is reported.',
+    ],
+    parameters: Type.Object({
+      target: Type.String({
+        description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
+      }),
+      task: Type.String({ description: 'Non-empty delegated task description.' }),
+      timeout: Type.Optional(
+        Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })
+      ),
+    }),
+    prepareArguments: input =>
+      prepareForSchema<Omit<Static<typeof LifecycleDelegateParams>, 'action'>>(input),
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd(
+        'delegate',
+        { action: 'delegate', ...params } as ShepherdArgs,
+        ctx,
+        signal,
+        onUpdate
+      ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
+    renderResult: (result, options, theme, context) =>
+      renderUserFacingResult(result, options, theme, context),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_message',
+    label: 'Shepherd: message agent',
+    description:
+      'Send one asynchronous message to a spawned agent and return immediately. target MUST be the exact opaque agent id returned by shepherd_spawn; copy that id verbatim. Never pass an agent definition name such as "planner", a display label such as "manual planner", a Herdr pane id, or a placeholder such as "<planner agent ID>"—the call will be rejected. The returned message id identifies this message for reply correlation. An accepted message means the broker queued it for delivery; it does not mean the recipient read it or replied. With expectsReply and a taskId the task enters waiting until a matching reply arrives.',
+    promptSnippet:
+      'send an asynchronous message using the exact opaque id returned by shepherd_spawn.',
+    promptGuidelines: [
+      'Before calling shepherd_message, copy target from the id field in shepherd_spawn output. Do not infer or substitute the agent definition name, display label, pane id, or any angle-bracket placeholder; invalid targets fail instead of being resolved by name.',
+      'Use shepherd_message for questions to an agent while it is busy or idle; the recipient receives it as a queued follow-up. Do not use it to submit tracked work — that is shepherd_delegate.',
+      'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. For peer replies, use the requester\'s task ID—the task whose request is being answered—not the responder\'s task ID. A plain message never alters task state.',
+    ],
+    parameters: Type.Object({
+      target: Type.String({ description: 'Exact opaque agent id returned by shepherd_spawn; copy it verbatim. Agent names (for example "planner"), labels, Herdr pane ids, and placeholders are rejected.' }),
+      message: Type.String({ description: 'Non-empty message content.' }),
+      taskId: Type.Optional(TaskIdSchema),
+      threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),
+      replyTo: Type.Optional(Type.String({ description: 'Message id of the request being answered.' })),
+      expectsReply: Type.Optional(Type.Boolean({ description: 'Track this message as a request that expects a reply.' })),
+      delivery: Type.Optional(
+        Type.Union(
+          [Type.Literal('followUp'), Type.Literal('steer')],
+          { description: 'Delivery mode; followUp is the default, steer is for urgent input.' }
+        )
+      ),
+    }),
+    prepareArguments: input =>
+      prepareForSchema<Omit<Static<typeof LifecycleMessageParams>, 'action'>>(input),
+    execute: (_id, params, signal, onUpdate, ctx) =>
+      executeShepherd(
+        'message',
+        { action: 'message', ...params } as ShepherdArgs,
+        ctx,
+        signal,
+        onUpdate
+      ),
+    renderCall(_args, _theme, context) {
+      const component = reusableText(context.lastComponent);
+      component.setText('');
+      return component;
+    },
+    renderResult: (result, options, theme, context) =>
+      renderUserFacingResult(result, options, theme, context),
+  });
+
+  pi.registerTool({
+    name: 'shepherd_prompt',
+    label: 'Shepherd: prompt agent (deprecated)',
+    description:
+      'Deprecated compatibility path: submits one message to a spawned agent and returns a prompt id without waiting, tying completion to a single child turn. For tracked work that must survive peer replies, prefer shepherd_delegate (a task) + shepherd_watch; use shepherd_message for follow-ups. Pass the agent id printed by shepherd_spawn as the top-level id argument, not a Herdr pane id. The result prints a prompt id; pass that id to shepherd_watch.',
+    promptSnippet:
+      'Deprecated: prompt a spawned agent with a one-turn message (prefer shepherd_delegate for tracked work).',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
       }),
       message: Type.String({
         description:
-          'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.',
+          'One-turn message to submit to the spawned agent. For multi-step or reply-dependent work use shepherd_delegate instead. Submission returns immediately; use shepherd_watch for the result.',
       }),
       timeout: Type.Optional(
         Type.Integer({
           default: 20,
           description:
-            'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. The completion timeout belongs to shepherd_wait.',
+            'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. Completion is reported asynchronously by shepherd_watch.',
         })
       ),
     }),
@@ -827,88 +1302,35 @@ export function registerShepherdTools(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: 'shepherd_wait',
-    label: 'Shepherd: wait for prompt',
-    description:
-      'Wait for one or more prompts to settle. Pass the prompt id printed by shepherd_prompt, or an array of prompt ids for parallel work. Results stay in array input order; waiting does not close agents.',
-    promptSnippet:
-      'Wait for agent(s) to complete their work and return results.',
-    promptGuidelines: [
-      'When using shepherd_wait, waiting does not close an agent. Close each agent explicitly when it is no longer needed; shepherd_close also cancels its unresolved prompt.',
-      'When using shepherd_wait, for sequential work, wait for one result before including its text in the next prompt. For independent work, spawn and prompt multiple agents, then call shepherd_wait once with an array of prompt ids.'
-    ],
-    parameters: Type.Object({
-      id: Type.Union(
-        [
-          Type.String({
-            description:
-              'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
-          }),
-          Type.Array(
-            Type.String({
-              description:
-                'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
-            }),
-            {
-              minItems: 1,
-              description: 'Array of opaque prompt ids for parallel waiting.',
-            }
-          ),
-        ],
-        {
-          description:
-            'One opaque prompt id returned by shepherd_prompt, or an array of prompt ids for parallel work. Do not pass an agent id or pane id.',
-        }
-      ),
-      timeout: Type.Optional(
-        Type.Integer({
-          default: 20,
-          description:
-            'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.',
-        })
-      ),
-    }),
-    prepareArguments: input => prepareForSchema<Omit<Static<typeof WaitParams>, 'action'>>(input),
-    execute: (_id, params, signal, onUpdate, ctx) =>
-      executeShepherd('wait', { action: 'wait', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
-    },
-    renderResult: (result, options, theme, context) =>
-      renderUserFacingResult(result, options, theme, context),
-  });
-
-  pi.registerTool({
     name: 'shepherd_watch',
-    label: 'Shepherd: watch prompt',
+    label: 'Shepherd: watch task',
     description:
-      'Register a non-blocking one-shot watcher for one prompt or an array of prompt ids. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Use shepherd_wait when a deterministic blocking barrier is required.',
+      'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Legacy prompt ids from shepherd_prompt are still accepted.',
     promptSnippet:
-      'Watch prompt completion asynchronously without blocking the parent turn.',
+      'Watch task completion asynchronously without blocking the parent turn.',
     promptGuidelines: [
-      'Pass prompt ids returned by shepherd_prompt, never agent ids or Herdr pane ids.',
-      'Array watchers report each prompt as it settles and may coalesce close-together completions into one notification. Use shepherd_wait for input-order barrier semantics.',
+      'Pass task ids returned by shepherd_delegate; legacy prompt ids from shepherd_prompt are also accepted. Never pass agent ids or Herdr pane ids.',
+      'Array watchers report each task as it settles and may coalesce close-together completions into one notification.',
+      'Use shepherd_status between watcher notifications to inspect running or waiting task state without blocking the parent turn.',
     ],
     parameters: Type.Object({
       id: Type.Union(
         [
           Type.String({
-            description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
+            description: 'Opaque task id returned by shepherd_delegate. A legacy prompt id from shepherd_prompt is also accepted. Do not use an agent id or pane id.',
           }),
           Type.Array(
             Type.String({
-              description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or pane id.',
+              description: 'Opaque task id returned by shepherd_delegate; a legacy prompt id from shepherd_prompt is also accepted.',
             }),
             {
               minItems: 1,
-              description: 'Array of opaque prompt ids; completions are reported independently as they settle.',
+              description: 'Array of opaque task ids; completions are reported independently as each task settles.',
             }
           ),
         ],
         {
-          description: 'One opaque prompt id or a non-empty array of prompt ids returned by shepherd_prompt.',
+          description: 'One opaque task id or a non-empty array of task ids returned by shepherd_delegate; legacy prompt ids are also accepted.',
         }
       ),
     }),

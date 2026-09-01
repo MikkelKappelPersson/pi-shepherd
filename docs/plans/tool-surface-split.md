@@ -53,7 +53,7 @@ Secondary issues surfaced by the investigation:
    ├─ shepherd        (herd|agents|prune)         ├─ agents, herd, spawn      (existing, renamed)
    ├─ shepherd_spawn  (agent, options…)           ├─ status, read             (new)
    ├─ shepherd_prompt (id, message, timeout)     └─ prompt/wait/close         (new, see §5)
-   ├─ shepherd_wait   (id[], timeout)
+   ├─ shepherd_watch   (id[], timeout)
    ├─ shepherd_status (id)
    ├─ shepherd_close  (id)
    └─ shepherd_read   (name, lines, source)
@@ -129,7 +129,7 @@ One registration helper, six declarative tools. All roots are plain objects.
         `timeout`: startup readiness uses fixed internal grace periods; timeout only
         applies to prompts/waits — see the start-case comment in `doAction`)
       - `shepherd_prompt`: `id` (required agent id), `message` (required), `timeout` ✅
-      - `shepherd_wait`: `id` (required prompt id or array of prompt ids), `timeout` ✅
+      - `shepherd_watch`: `id` (required prompt id or array of prompt ids), `timeout` ✅
       - `shepherd_status`: `id` (required agent id) ✅
       - `shepherd_close`: `id` (required agent id) ✅
       - `shepherd_read`: `name` (required), `lines`?, `source`? ✅
@@ -232,7 +232,7 @@ Files: `shepherd.ts`, `index.ts`, `test/verify-parent-surface.mjs`, `package.jso
       with "core semantics live in `doAction()`/`lifecycle.ts`; tools and `/shepherd`
       are thin adapters." ✅
 - [x] `docs/dictionary`: add entries for the split tool names and note the two surfaces. ✅
-- [x] README: update invocation examples (both `shepherd_wait …` and `/shepherd …`),
+- [x] README: update invocation examples (both `shepherd_watch …` and `/shepherd …`),
       add a compatibility note (old `shepherd action=prompt` form is gone). ✅
 - [x] Grep sweep for stale references: `shepherd action=`, `action=start` etc. in
       active docs, skills, prompts, and test fixtures. ✅ Current public docs and

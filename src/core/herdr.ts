@@ -26,7 +26,9 @@ import { promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
-import { sessionOwner } from "./orchestration.ts";
+import { lifecycleRegistry, sessionOwner } from "./orchestration.ts";
+import type { ChildCapability } from "./messaging.ts";
+import type { AgentHandle, AgentTaskStatus } from "./orchestration.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -160,24 +162,70 @@ export function listHerdrAgents(): HerdrAgentSummary[] {
 }
 
 /**
- * The subagents pi-shepherd is currently working on in THIS parent session:
- * our own panes (owned by this session) whose agent is not idle (working,
- * waiting on input, errored, …). Used for the persistent "below the editor"
- * status widget. Panes owned by other shepherd sessions are excluded so each
- * widget only shows the sheep its shepherd spawned.
+ * The active tracked task for every pane owned by this session, keyed by pane
+ * id. Reads only the in-memory lifecycle registry (no Herdr or mailbox calls)
+ * so it is safe to call on each status-widget poll tick. An agent can own an
+ * open task while its Herdr process is idle — most importantly a `waiting`
+ * task, where the child is parked until a peer reply arrives.
  */
-export function workingSubagents(): HerdrAgentSummary[] {
+export interface ActiveTaskByPane {
+	paneId: string;
+	agentHandle: AgentHandle;
+	task: AgentTaskStatus;
+}
+
+export function activeTasksByPane(): Map<string, ActiveTaskByPane> {
+	const out = new Map<string, ActiveTaskByPane>();
+	let handles: AgentHandle[];
+	try {
+		handles = lifecycleRegistry.allAgents();
+	} catch {
+		return out;
+	}
+	for (const handle of handles) {
+		if (!handle.paneId) continue;
+		let status: ReturnType<typeof lifecycleRegistry.status>;
+		try {
+			status = lifecycleRegistry.status(handle);
+		} catch {
+			continue;
+		}
+		if (status.task) out.set(handle.paneId, { paneId: handle.paneId, agentHandle: handle, task: status.task });
+	}
+	return out;
+}
+
+/**
+ * The subagents pi-shepherd is working on **or waiting on** in THIS parent
+ * session: our own panes (owned by this session) whose Herdr agent is not
+ * idle, OR whose process is idle but which still own an open tracked task.
+ * The second case matters: an idle child may own a `waiting` task parked on a
+ * peer reply, and dropping it here would silently hide in-flight work. Used
+ * for the persistent "below the editor" status widget. Panes owned by other
+ * shepherd sessions are excluded so each widget only shows the sheep its
+ * shepherd spawned.
+ */
+export function workingOrWaitingSubagents(): HerdrAgentSummary[] {
 	// `rec.agent` in `herdr agent list` is always the program name (“pi”),
 	// not the agent kind. For shepherd panes the agent kind (scout/worker/…)
 	// is what we recorded when the tab was created — use that for the label.
 	const panes = loadCreatedPanes().filter((p) => paneOwner(p) === sessionOwner());
 	const kindByPane = new Map(panes.map((p) => [p.paneId, p.name]));
+	const taskByPane = activeTasksByPane();
 	return listHerdrAgents()
-		.filter((s) => s.shepherd && s.state !== "idle" && kindByPane.has(s.paneId))
+		.filter((s) => s.shepherd && kindByPane.has(s.paneId) && (s.state !== "idle" || taskByPane.has(s.paneId)))
 		.map((s) => {
 			const kind = kindByPane.get(s.paneId);
 			return kind && kind !== "pi" ? { ...s, name: kind } : s;
 		});
+}
+
+/**
+ * Backwards-compatible name for the working set; retained for callers that
+ * do not need idle-but-waiting agents.
+ */
+export function workingSubagents(): HerdrAgentSummary[] {
+	return workingOrWaitingSubagents().filter((s) => s.state !== "idle");
 }
 
 export async function herdrExec(args: string[]): Promise<unknown> {
@@ -517,6 +565,9 @@ function sendEscapeInHerdr(paneId: string): void {
  * The shepherd-done extension + env vars are always wired in, so the pane
  * participates in the same completion sidecar lifecycle as persistent runs.
  */
+/** Extension tools registered by shepherd-done.ts; always kept available even
+ *  when an agent definition passes a restrictive --tools allowlist. */
+const CHILD_SURFACE_TOOLS = ["shepherd_message", "shepherd_done"];
 export function writePiLaunchFiles(opts: {
 	name: string;
 	task?: string;
@@ -529,6 +580,10 @@ export function writePiLaunchFiles(opts: {
 	persistent?: boolean;
 	model?: string;
 	tools?: string[];
+	/** Child-side mailbox capability, supplied once the parent broker exists. */
+	childBroker?: ChildCapability & { rootDir: string };
+	/** Active tracked task context, when this launch is for delegated work. */
+	taskId?: string;
 }): { dir: string; sessionFile: string; scriptFile: string } {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shepherd-"));
 	const safe = opts.name.replace(/[^\w.-]+/g, "_") || "agent";
@@ -539,7 +594,13 @@ export function writePiLaunchFiles(opts: {
 	const args: string[] = ["--session", shellQuote(sessionFile), "-e", shellQuote(doneExt)];
 	if (opts.model) args.push("--model", shellQuote(opts.model));
 	if (opts.omitContextFiles) args.push("--no-context-files");
-	if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
+	// --tools is an allowlist: adding the child-surface tools keeps the
+	// shepherd-done extension's shepherd_message/shepherd_done available even
+	// when the agent definition restricts built-in tools.
+	const tools = opts.tools
+		? [...new Set([...opts.tools, ...CHILD_SURFACE_TOOLS])]
+		: undefined;
+	if (tools && tools.length > 0) args.push("--tools", tools.join(","));
 
 	let systemPromptFile: string | undefined;
 	if (opts.systemPrompt !== undefined) {
@@ -552,7 +613,8 @@ export function writePiLaunchFiles(opts: {
 	}
 	if (opts.task !== undefined) {
 		const taskFile = path.join(dir, `task-${safe}.md`);
-		const task = `${opts.task}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. When finished, stop and make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
+		const taskContext = opts.taskId ? `\nTask ID: ${opts.taskId}` : "";
+		const task = `${opts.task}${taskContext}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. A delegated task may span multiple Pi turns: ending the current turn or becoming idle does not complete the task. Use shepherd_message when you need information from another participant. When you ask another participant a question, set taskId to your delegated Task ID, set expectsReply to true, and remember the returned Message ID. When you later have the answer to a request, send a shepherd_message TO THE SHEPHERD (target \"shepherd\") with taskId set and replyTo set to the original request's Message ID, so the Shepherd can correlate the reply and resume the waiting task. Do not reply directly to another participant's address for a tracked request; route it through the Shepherd. If the task cannot proceed, call shepherd_done with status blocked and explain why. Call shepherd_done only when the whole task is complete or explicitly blocked/failed. When finished, make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
 		fs.writeFileSync(taskFile, task, { encoding: "utf8", mode: "0600" });
 		args.push(`'@${taskFile}'`);
 	}
@@ -566,6 +628,12 @@ export function writePiLaunchFiles(opts: {
 		opts.omitPiDocumentation
 			? "export PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1"
 			: "unset PI_SHEPHERD_OMIT_PI_DOCUMENTATION",
+		opts.childBroker
+			? `export PI_SHEPHERD_BROKER_DIR=${shellQuote(opts.childBroker.rootDir)}\nexport PI_SHEPHERD_BROKER_SESSION_ID=${shellQuote(opts.childBroker.sessionId)}\nexport PI_SHEPHERD_BROKER_ID=${shellQuote(opts.childBroker.brokerId)}\nexport PI_SHEPHERD_AGENT_ID=${shellQuote(opts.childBroker.agentId)}\nexport PI_SHEPHERD_BROKER_TOKEN=${shellQuote(opts.childBroker.token)}\nexport PI_SHEPHERD_AGENT_INBOX=${shellQuote(opts.childBroker.inboxPath)}`
+			: "unset PI_SHEPHERD_BROKER_DIR PI_SHEPHERD_BROKER_SESSION_ID PI_SHEPHERD_BROKER_ID PI_SHEPHERD_AGENT_ID PI_SHEPHERD_BROKER_TOKEN PI_SHEPHERD_AGENT_INBOX",
+		opts.taskId
+			? `export PI_SHEPHERD_TASK_ID=${shellQuote(opts.taskId)}`
+			: "unset PI_SHEPHERD_TASK_ID",
 
 		`export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
 		opts.stayOpen || opts.persistent ? "export PI_SHEPHERD_STAY_OPEN=1" : "export PI_SHEPHERD_STAY_OPEN=0",
@@ -597,6 +665,10 @@ export function launchPiInPane(
 		omitContextFiles?: boolean;
 		model?: string;
 		tools?: string[];
+		/** Child-side mailbox capability, supplied once the parent broker exists. */
+		childBroker?: ChildCapability & { rootDir: string };
+		/** Active tracked task context, when this launch is for delegated work. */
+		taskId?: string;
 	},
 ): { dir: string; sessionFile: string; scriptFile: string } {
 	const files = writePiLaunchFiles(opts);

@@ -33,6 +33,9 @@ import {
 
 const TIMEOUT_CHOICES = [1, 2, 5, 10, 20, 30, 60];
 const TIMEOUT_DISPLAY = (n: number) => `${n} min`;
+// 0 disables stale-wait reminders; the rest are minutes.
+const STALE_WAIT_CHOICES = [0, 1, 2, 5, 10, 15, 30];
+const STALE_WAIT_DISPLAY = (n: number) => (n === 0 ? "off (no reminders)" : `${n} min`);
 
 /** Translate a settings change (string value from the list) back into state. */
 function applyValue(settings: ShepherdSettings, id: string, value: string): ShepherdSettings {
@@ -67,6 +70,13 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
 			// numeric portion rather than passing the decorated label to Number.
 			const n = Number.parseInt(value, 10);
 			if (Number.isFinite(n) && n > 0) next.timeout = n;
+			break;
+		}
+		case "staleWaitThreshold": {
+			const n = Number.parseInt(value, 10);
+			// 0 (off) and values >= 1 are both valid; "off" stores 0, other
+			// choices store their minute count.
+			if (Number.isFinite(n) && n >= 0) next.staleWaitThreshold = n;
 			break;
 		}
 	}
@@ -157,6 +167,14 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
 			description: "Time limit in minutes before a Herdr run is reported timed out.",
 			currentValue: TIMEOUT_DISPLAY(settings.timeout),
 			values: TIMEOUT_CHOICES.map(TIMEOUT_DISPLAY),
+		},
+		{
+			id: "staleWaitThreshold",
+			label: "Stale wait reminder",
+			description:
+				"Minutes before a task waiting on a required reply raises one stale-wait reminder. Off (no reminders) disables it.",
+			currentValue: STALE_WAIT_DISPLAY(settings.staleWaitThreshold),
+			values: STALE_WAIT_CHOICES.map(STALE_WAIT_DISPLAY),
 		},
 	];
 

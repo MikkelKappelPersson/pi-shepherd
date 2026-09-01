@@ -55,8 +55,17 @@ let registeredMessageRenderer;
 registerShepherdTools({
   registerTool() {},
   registerMessageRenderer(customType, renderer) {
-    assert.equal(customType, 'shepherd.prompt.completion');
-    registeredMessageRenderer = renderer;
+    assert.ok(
+      [
+        'shepherd.prompt.completion',
+        'shepherd.task.completion',
+        'shepherd.message.incoming',
+        'shepherd.message.reply',
+        'shepherd.stale.wait',
+      ].includes(customType),
+      'unexpected custom message renderer: ' + customType
+    );
+    if (customType === 'shepherd.prompt.completion') registeredMessageRenderer = renderer;
   },
   sendMessage(message, options) {
     sent.push({ message, options });
@@ -95,6 +104,6 @@ assert.match(sent[0].message.content, /\ncall:\n    shepherd_watch \{"id":".*"\}
 assert.match(sent[0].message.content, /\nreturn:\n    \[\{"promptId":"/);
 assert.match(sent[0].message.content, /\ndetails:\n/);
 assert.doesNotMatch(sent[0].message.content, /Process the structured completion details/);
-assert.deepEqual(sent[0].options, { deliverAs: 'followUp', triggerTurn: true });
+assert.deepEqual(sent[0].options, { deliverAs: 'steer', triggerTurn: true });
 promptWatcherService.shutdown();
 console.log('All watcher assertions passed.');

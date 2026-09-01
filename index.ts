@@ -15,19 +15,24 @@ import {
   doAction,
   registerShepherdTools,
   setPromptWatcherSessionActive,
+  setTaskWatcherSessionActive,
+  setStaleWaitSessionActive,
+  setShepherdMessageSessionActive,
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
-import { shutdownPromptWatchers } from './src/core/lifecycle.ts';
+import { shutdownPromptWatchers, shutdownTaskWatchers, shutdownStaleWaitMonitor } from './src/core/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
   paneOwnedByCurrentSession,
-  workingSubagents,
+  workingOrWaitingSubagents,
+  activeTasksByPane,
   loadCreatedPanes,
   type HerdrAgentSummary,
 } from './src/core/herdr.ts';
+import type { AgentTaskStatus } from './src/core/orchestration.ts';
 
 /**
  * Persistent "below the editor" status box listing the subagents currently
@@ -43,6 +48,8 @@ interface WorkingSnapshotItem extends HerdrAgentSummary {
   createdAt?: number;
   /** Wall-clock ms when this agent started its current walking streak. */
   walkStartMs?: number;
+  /** The agent's open tracked task, if any (independent of the process state). */
+  task?: AgentTaskStatus;
 }
 
 function registerSubagentStatusWidget(pi: ExtensionAPI): void {
@@ -63,7 +70,8 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
       // only the panes owned by THIS session belong in this widget.
       const panes = loadCreatedPanes().filter(paneOwnedByCurrentSession);
       const createdAtById = new Map(panes.map((p) => [p.paneId, p.createdAt]));
-      const agents = workingSubagents();
+      const agents = workingOrWaitingSubagents();
+      const tasksByPane = activeTasksByPane();
       const workingNow = new Set(agents.filter((s) => s.state === 'working').map((s) => s.paneId));
       const now = Date.now();
       for (const paneId of walkStarts.keys()) {
@@ -76,6 +84,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
         ...s,
         createdAt: createdAtById.get(s.paneId),
         walkStartMs: walkStarts.get(s.paneId),
+        task: tasksByPane.get(s.paneId)?.task,
       }));
       tui.requestRender();
     };
@@ -219,16 +228,42 @@ function renderWorkingAgents(
   useEmoji = true
 ): string[] {
   const title = 'shepherd';
-  const info = `${agents.length} working`;
+  // Process and task state are shown independently: a pane may be working
+  // with a running task, or idle while its task waits on a required reply.
+  const workingCount = agents.filter((agent) => agent.state === 'working').length;
+  const waitingCount = agents.filter((agent) => agent.task?.state === 'waiting').length;
+  const infoParts: string[] = [];
+  if (workingCount > 0) infoParts.push(`${workingCount} working`);
+  if (waitingCount > 0) infoParts.push(`${waitingCount} waiting`);
+  if (infoParts.length === 0 && agents.length > 0) infoParts.push(`${agents.length} active`);
+  const info = infoParts.join(' · ');
 
   const lines: string[] = [borderTop(title, info, width, theme)];
 
   for (const agent of agents) {
+    const task = agent.task;
+    const waitingOnReply = task?.state === 'waiting';
+    // An idle process that owns a waiting task renders as "waiting", not idle:
+    // the child is parked, not finished.
+    const iconState = waitingOnReply ? 'waiting' : agent.state;
     const elapsed = agent.createdAt != null ? ` ${formatElapsedMMSS(agent.createdAt)}` : '';
-    const icon = stateIcon(agent.state, theme, sheepFrame);
-    const right = ` ${theme.fg('text', agent.state)} `;
+    const icon = stateIcon(iconState, theme, sheepFrame);
+    // Right side: the task state wins while the task is open (working process +
+    // waiting task → "waiting"), stale episodes are flagged distinctly.
+    let rightState = agent.state;
+    if (task) rightState = task.state;
+    if (waitingOnReply && task?.stale) rightState = 'waiting (stale)';
+    const right = ` ${theme.fg('text', rightState)} `;
     const name = theme.fg('text', agent.name);
-    const prefix = ` ${icon}${elapsed}  ${name}`;
+    // Left side: waiting rows surface the elapsed wait and the expected-reply
+    // recipient so the operator sees what is being waited on.
+    let detail = '';
+    if (waitingOnReply && task) {
+      const waitingMins = Math.floor((task.waitingMs ?? 0) / 60_000);
+      detail = ` ⏳${waitingMins}m`;
+      if (task.waitingRecipient) detail += ` ←${task.waitingRecipient}`;
+    }
+    const prefix = ` ${icon}${elapsed}  ${name}${detail}`;
     const sheepGlyph = useEmoji ? '🐑' : 'o';
     const sheepWidth = visibleWidth(theme.fg('text', sheepGlyph));
     const leftWidth = Math.max(0, width - 2 - visibleWidth(right));
@@ -352,6 +387,9 @@ function currentCwd(): string {
 export default function (pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
     setPromptWatcherSessionActive(true);
+    setTaskWatcherSessionActive(true);
+    setStaleWaitSessionActive(true);
+    setShepherdMessageSessionActive(true);
     activeSessionCwd = ctx.cwd;
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
@@ -365,7 +403,12 @@ export default function (pi: ExtensionAPI) {
     // registrations, but leave prompts, child panes, result files, and notes
     // untouched for normal lifecycle retention.
     setPromptWatcherSessionActive(false);
+    setTaskWatcherSessionActive(false);
+    setStaleWaitSessionActive(false);
+    setShepherdMessageSessionActive(false);
     shutdownPromptWatchers();
+    shutdownTaskWatchers();
+    shutdownStaleWaitMonitor();
     // Drop the binding on teardown so a reload/new-session cycle without a
     // fresh identity never attributes fresh panes to a stale session.
     bindSessionOwner(undefined);

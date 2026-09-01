@@ -1,8 +1,9 @@
 # pi-shepherd — Implementation Plan
 
 pi-shepherd is a Herdr-native pi extension for explicit agent lifecycle
-orchestration. There is no workflow-oriented delegation API and no subprocess
-fallback.
+orchestration **and asynchronous tracked-task delegation**. There is no
+subprocess fallback; coordination between agents happens over a parent-
+mediated message broker.
 
 ## Architecture
 
@@ -22,14 +23,28 @@ index.ts                 extension entry and /shepherd command
 
 - `shepherd_spawn({ agent, ...options })` creates an idle persistent agent and
   submits no task.
-- `shepherd_prompt({ handle, message, ...options })` submits one message and
-  returns immediately.
-- `shepherd_wait({ handle })` waits for one or all prompts; arrays are concurrent
-  and preserve input order.
-- `shepherd_status({ handle })` performs non-mutating inspection.
-- `shepherd_close({ handle })` explicitly terminates an owned agent and cancels
-  unresolved prompts.
+- `shepherd_delegate({ target, task, timeout? })` starts a **tracked task** on
+  an agent and returns a task id without waiting. Delegation is the preferred
+  way to assign work that may need to survive peer replies.
+- `shepherd_message({ target, message, ... })` sends an asynchronous,
+  parent-mediated message to the parent or to an owned agent. With
+  `expectsReply` it opens a tracked reply request: the sender's task enters
+  `waiting` (its pi process may go idle) until a matching reply, a
+  `shepherd_done`, or the reply deadline.
+- `shepherd_done` (child-side) is the only normal successful completion
+  signal for a tracked task; idle/`agent_end`/`agent_settled` never settle a
+  task.
+- `shepherd_watch({ id })` compatibility wait: task ids (preferred) or legacy
+  prompt ids; a wait timeout bounds the wait only.
+- `shepherd_watch({ id })` non-blocking task-watcher; completions arrive as
+  follow-ups.
+- `shepherd_status({ id })` performs non-mutating inspection; reports
+  process state and task state independently.
+- `shepherd_close({ id })` explicitly terminates an owned agent, cancels its
+  active tracked task (and unresolved prompt), and clears pending requests.
 - `shepherd_read({ name, lines?, source? })` reads recent terminal output.
+- `shepherd_prompt({ id, message })` is a **deprecated** one-turn
+  compatibility path (see docs/guides/tool-reference.md).
 
 The umbrella `shepherd` control tool handles `agents`, `herd`, and `prune` and
 contains the shared lifecycle and fieldnotes guidance. The `/shepherd` command
@@ -37,12 +52,25 @@ supports the human-facing `agents`, `herd`, `spawn`, `status`, `read`, and
 `settings` actions.
 
 Parallel work and chains are caller composition, not first-class workflow
-modes. A one-shot operation is explicitly `shepherd_spawn + shepherd_prompt +
-shepherd_wait + shepherd_close`.
+modes. A one-shot tracked operation is
+`shepherd_spawn + shepherd_delegate + shepherd_watch + shepherd_close`.
 
 ## Completed implementation
 
-- Agent and prompt lifecycle references are opaque session-scoped ids exposed in tool arguments and result text. Full handle objects remain internal registry state; legacy nested handles are migrated at the model boundary during the transition.
+- Agent, task, prompt, and message references are opaque session-scoped ids exposed in tool arguments and result text. Full handle objects remain internal registry state.
+- Tracked tasks are independent of Herdr process state: `running`,
+  `waiting`, and the terminal states (`completed`, `blocked`, `failed`,
+  `cancelled`, `timed_out`) live in the lifecycle registry. Only
+  `shepherd_done` (or explicit failure/cancellation/timeout) settles a task;
+  a child's idle or `agent_end` never does.
+- Cross-agent communication is parent-mediated: the parent broker routes
+  envelopes between owned agents with provenance (sender, thread, replyTo)
+  and delivers them as queued follow-ups (`followUp`) or urgent input
+  (`steer`). Request/reply correlation uses `replyTo` == pending reply
+  `messageId`; one outstanding request per task is the initial policy.
+- Stale-wait reminders are informational only: at most one per waiting
+  episode, `triggerTurn: false`, and the reply deadline remains the only
+  mechanism that settles a stale wait to `blocked`.
 - Registries enforce one unresolved prompt per agent, idempotent settlement, and
   deterministic cancellation.
 - Persistent Herdr tabs launch pi with discovered system prompt, tools, model,

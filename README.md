@@ -40,12 +40,15 @@ pi-shepherd exposes these tools to the Shepherd. You can use them explicitly whe
 | --- | --- |
 | `shepherd` | List definitions (`agents`), list active agents (`herd`), or remove stale pane registrations (`prune`) |
 | `shepherd_spawn` | Create an idle persistent agent |
-| `shepherd_prompt` | Submit a task; returns immediately with a prompt ID |
-| `shepherd_wait` | Wait for one or more prompt IDs |
-| `shepherd_watch` | Receive completion without blocking the current turn |
-| `shepherd_status` | Inspect an agent without focusing its pane |
-| `shepherd_close` | Close an owned agent and cancel unresolved prompts |
+| `shepherd_delegate` | Start a tracked task; returns immediately with a task ID |
+| `shepherd_message` | Send an asynchronous message (parent or peer); `expectsReply` opens a tracked reply request |
+| `shepherd_watch` | Receive task completion without blocking the current turn (task IDs preferred, legacy prompt IDs still work) |
+| `shepherd_status` | Inspect an agent without focusing its pane; reports process and task state independently |
+| `shepherd_close` | Close an owned agent, cancel its active task, and clear pending requests |
 | `shepherd_read` | Read recent terminal output for diagnostics |
+| `shepherd_prompt` | **Deprecated** one-turn compatibility path; prefer `shepherd_delegate` for tracked work |
+
+Child agents additionally see `shepherd_message` (talk to the parent or a peer) and `shepherd_done` (the only normal successful completion of their tracked task).
 
 ## Your first delegation
 
@@ -77,15 +80,44 @@ Use parallel delegation when tasks are independent. Ask the Shepherd to delegate
 
 The Shepherd runs the independent tasks concurrently and combines their results. This is useful for comparing approaches, investigating separate parts of a codebase, or getting multiple reviews of the same change.
 
-### Continue working while an agent runs
+### Delegate, then watch
 
-Use `shepherd_watch` when you want to continue the current turn instead of waiting synchronously:
+The tracked-task workflow is: spawn, delegate, watch, close. `shepherd_delegate` starts the work and returns immediately with a **task ID**; nothing is settled until the child calls `shepherd_done` (or the task fails, is cancelled, or times out).
 
 ```text
-shepherd_watch({ id: prompt.id })
+shepherd_spawn({ agent: "worker", label: "auth" })
+shepherd_delegate({ target: "<agent ID>", task: "Implement the auth middleware from the plan." })
+shepherd_watch({ id: "<task ID>" })
 ```
 
-The call returns immediately. When the prompt finishes, Shepherd sends a follow-up containing the result. Watchers finish automatically after all their prompts settle; they do not close agents.
+When the task settles, the watcher delivers a completion notification containing the result. Delivery uses pi's steer mode: if the Shepherd is mid-turn, the notification is injected between tool rounds (before cleanup calls such as `shepherd_close`); if the Shepherd is idle, it triggers a new turn immediately. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
+
+### Messaging between agents
+
+Agents in the same project can message each other through the parent broker. The child's `shepherd_message` tool can target `parent` or an owned agent ID. A peer question that requires an answer is sent with `expectsReply: true`:
+
+```text
+shepherd_message({
+  target: "<planner agent ID>",
+  message: "Which retry backoff should the middleware use?",
+  taskId: "<own task ID>",
+  expectsReply: true
+})
+```
+
+The angle-bracket values above are documentation placeholders only. At runtime,
+copy the planner's exact `id` from `shepherd_spawn` into `target`; do not use
+`planner`, a display label, or a Herdr pane ID. Invalid targets are rejected.
+
+While the answer is outstanding, the sender's task is `waiting` — even though its pi process is `idle` and the child's turn has ended. The reply (correlated by `replyTo`) returns the task to `running`; a `shepherd_done`, cancellation, or the reply deadline settle it. Delivery modes: `followUp` (default) queues the message for the recipient's next turn; `steer` injects it urgently into an active turn. Child requests (`expectsReply: true`) and replies wake the parent at the next safe boundary (between tool rounds when the Shepherd is mid-turn, immediately when it is idle); ordinary informational messages remain passive. A wake-up never interrupts an active tool call.
+
+### Continue working while an agent runs
+
+`shepherd_watch({ id: prompt.id })` is also non-blocking for the legacy prompt path; completion arrives as a steered notification.
+
+### Compatibility
+
+`shepherd_prompt` is a **deprecated** one-turn compatibility path: each prompt still completes at the end of that child turn (that semantics is unchanged and documented, not silently altered). Use `shepherd_delegate` instead for any work that may need to answer or receive a reply. `shepherd_watch` accepts task IDs (`shepherd_delegate`) and legacy prompt IDs (`shepherd_prompt`) and returns immediately; completions arrive as steered notifications. Use `shepherd_status` to inspect running or waiting tasks.
 
 ## Agent definitions
 
@@ -158,12 +190,12 @@ The working directory and model default to the Shepherd session. `cwd` and `mode
 Lifecycle tools use short, opaque, session-scoped IDs:
 
 ```text
-shepherd_spawn -> agent ID
-shepherd_prompt -> prompt ID
-shepherd_wait -> result
+shepherd_spawn    -> agent ID      (for delegate, message, status, close)
+shepherd_delegate -> task ID       (for watch, wait, message taskId, shepherd_done)
+shepherd_message  -> message ID    (answer it with replyTo)
 ```
 
-Use the returned agent ID for `status` and `close`, and the returned prompt ID for `wait` and `watch`. Do not substitute a Herdr pane ID for a lifecycle ID. Pane IDs are only diagnostic targets for `shepherd_read`.
+Task IDs identify the unit of work; message IDs identify individual envelopes and only matter when correlating a reply (the answering participant sets the request's message ID as `replyTo`). When the Shepherd answers a child-originated request, the parent resolves its own pending request as soon as that reply is queued, so the child does not need to send a redundant acknowledgment before calling `shepherd_done`. Do not substitute a Herdr pane ID for any of these. Pane IDs are only diagnostic targets for `shepherd_read`.
 
 ## Command reference
 
@@ -198,8 +230,13 @@ Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu show
 | **Enable fieldnotes** (`fieldnotes`) | on, off | on | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts. |
 | **Use sheep emoji** (`emojiSheep`) | on, off | on | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead. |
 | **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `20` minutes | Set the default time limit before a Herdr run is reported as timed out. |
+| **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
 
 The settings menu also supports fuzzy search with `/`. Configuration is validated when read; invalid or missing values fall back to the next layer or the defaults above.
+
+### Stale-wait reminders
+
+When a delegated task is **waiting** on a required reply (set with `shepherd_message` + `expectsReply`, or set by the child asking another participant), it can sit there for a while if the target is busy. `staleWaitThreshold` controls how long a task may wait before the parent receives a **single** stale-wait reminder naming the task, the question, the target, and how long it has been waiting. The reminder is informational: it never cancels, times out, or blocks the task. The task's own reply deadline (`timeout`) remains the authoritative bound and settles the task as `blocked` if the reply never comes. A reply (or the task resuming/completing) clears the episode, so the same wait never re-notifies while open.
 
 User settings are stored in `pi-shepherd/config.json` inside the active pi agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). Project overrides are stored in `.shepherd/config.json` in the current working directory. Project configuration is a field-by-field delta over the user configuration: only values different from the user layer are written, and unset fields continue to inherit from it. The settings scope itself is always stored in the user file. A project configuration therefore requires selecting the `project` settings scope; project files are not searched by default.
 
@@ -215,7 +252,8 @@ For example, a user configuration can contain:
   "stayOpen": false,
   "fieldnotes": true,
   "emojiSheep": true,
-  "timeout": 20
+  "timeout": 20,
+  "staleWaitThreshold": 5
 }
 ```
 
@@ -239,6 +277,12 @@ This captures the prompt at pi’s `before_agent_start` hook without making a pr
 ```
 
 The command lists all active agents currently detected in Herdr. For one agent, use `/shepherd status` or `/shepherd read`.
+
+### Reading status
+
+`shepherd_status` reports **process state and task state independently**. A process can be `idle` while its delegated task is still `waiting` on a required reply, and one can be `working` while its task is `running`. When an agent owns an open task the status also includes the task ID, how long it has been `waiting`, the pending request (message) ID, the agent the reply is expected from, and a `stale` flag once a stale-wait reminder has fired.
+
+The persistent "below the editor" widget tracks the same two dimensions: it lists agents that are `working` **or** that are idle-but-`waiting` on a required reply (so an idle child parked on a peer reply is never hidden as done). Waiting rows render distinctly, show how long the wait has lasted, and name the agent being waited on; a `stale` wait is flagged. Pane and task IDs never leak into the display — rows use only display names.
 
 ## Fieldnotes
 

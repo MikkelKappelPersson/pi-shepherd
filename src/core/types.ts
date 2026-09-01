@@ -21,55 +21,69 @@ export const SpawnParams = Type.Object({
   model: Type.Optional(Type.String()),
 });
 export const AgentIdSchema = Type.String({
-  description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
+  description: 'Exact opaque agent id returned by shepherd_spawn. Copy it verbatim; do not use an agent name (such as "planner"), display label, Herdr pane id, or placeholder such as "<planner agent ID>".',
 });
 export const PromptIdSchema = Type.String({
   description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or Herdr pane id.',
 });
+export const TaskIdSchema = Type.String({
+  description: 'Opaque task id returned by shepherd_delegate. Do not use an agent id or Herdr pane id.',
+});
+
+export const LifecycleDelegateParams = Type.Object({
+  action: Type.Literal('delegate', {
+    description: 'Start tracked asynchronous work on a spawned agent and return a task id without waiting.',
+  }),
+  target: AgentIdSchema,
+  task: Type.String({ description: 'Non-empty delegated task description.' }),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })),
+});
 
 export const LifecyclePromptParams = Type.Object({
   action: Type.Literal('prompt', {
-    description: 'Submit one message to an agent and return a prompt id without waiting.',
+    description: 'Deprecated compatibility path: submits one message to an agent and returns a prompt id without waiting. For tracked work, prefer shepherd_delegate (task) + shepherd_watch; shepherd_prompt ties completion to one child turn, so it cannot carry work that must survive peer replies.',
   }),
   id: AgentIdSchema,
-  message: Type.String({ description: 'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_wait for the result.' }),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. The completion timeout belongs to shepherd_wait.' })),
+  message: Type.String({ description: 'Task or question to submit to the spawned agent. Submission returns immediately; use shepherd_watch for the result.' }),
+  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. Completion is reported asynchronously by shepherd_watch.' })),
 });
 export const WatchParams = Type.Object({
   action: Type.Literal('watch', {
-    description: 'Register a non-blocking one-shot watcher for prompt completions.',
+    description: 'Register a non-blocking one-shot watcher for task completions (legacy prompt ids are also accepted).',
   }),
   id: Type.Union(
     [
+      TaskIdSchema,
       PromptIdSchema,
-      Type.Array(PromptIdSchema, {
-        minItems: 1,
-        description: 'Array of opaque prompt ids; completions are reported as each prompt settles.',
-      }),
+      Type.Array(
+        Type.Union([TaskIdSchema, PromptIdSchema]),
+        {
+          minItems: 1,
+          description: 'Array of opaque task (or legacy prompt) ids; completions are reported as each settles.',
+        }
+      ),
     ],
     {
-      description: 'One opaque prompt id or a non-empty array of prompt ids returned by shepherd_prompt.',
+      description: 'One opaque task id (preferred) or legacy prompt id, or a non-empty array of such ids returned by shepherd_delegate (or shepherd_prompt).',
     }
   ),
 });
-export const WaitParams = Type.Object({
-  action: Type.Literal('wait', {
-    description: 'Wait for one or more prompt ids; agents remain alive.',
+export const LifecycleMessageParams = Type.Object({
+  action: Type.Literal('message', {
+    description: 'Send one asynchronous message to an agent and return a message id without waiting.',
   }),
-  id: Type.Union(
-    [
-      PromptIdSchema,
-      Type.Array(PromptIdSchema, {
-        minItems: 1,
-        description: 'Array of opaque prompt ids for parallel waiting.',
-      }),
-    ],
-    {
-      description:
-        'One opaque prompt id returned by shepherd_prompt, or an array of prompt ids for parallel work. Do not pass an agent id or pane id.',
-    }
+  target: AgentIdSchema,
+  message: Type.String({ description: 'Non-empty message content.' }),
+  taskId: Type.Optional(TaskIdSchema),
+  threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),
+  replyTo: Type.Optional(Type.String({ description: 'Message id of the request being answered.' })),
+  expectsReply: Type.Optional(Type.Boolean({ description: 'Track this message as a request that expects a reply.' })),
+  delivery: Type.Optional(
+    Type.Union(
+      [Type.Literal('followUp'), Type.Literal('steer')],
+      { description: 'Delivery mode; followUp is the default, steer is for urgent input.' }
+    )
   ),
-  timeout: Type.Optional(Type.Integer({ default: 20, description: 'Maximum time to wait for completion, in minutes (default: 20). Suggested: 1, 2, 5, 10, 20, 30, 60.' })),
 });
 export const LifecycleStatusParams = Type.Object({
   action: Type.Literal('status', { description: 'Inspect an agent without focusing or mutating its Herdr pane.' }),
