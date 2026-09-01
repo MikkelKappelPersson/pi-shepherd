@@ -3,9 +3,11 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import {
+  createChildBroker,
   createEnvelope,
   createParentBroker,
   pollParentInbox,
+  publishFromChild,
   publishFromParent,
   registerChild,
 } from '../src/core/messaging.ts';
@@ -27,6 +29,8 @@ try {
   await withTempDirectory('pi-shepherd-child-', async root => {
     const broker = createParentBroker('child-surface-session', { rootDir: `${root}/broker` });
     const capability = registerChild(broker, 'shepherd-agent-child-surface');
+    const peerCapability = registerChild(broker, 'shepherd-agent-peer-surface');
+    const peerChild = createChildBroker({ rootDir: broker.rootDir, ...peerCapability });
     process.env.PI_SHEPHERD_BROKER_DIR = broker.rootDir;
     process.env.PI_SHEPHERD_BROKER_SESSION_ID = capability.sessionId;
     process.env.PI_SHEPHERD_BROKER_ID = capability.brokerId;
@@ -59,9 +63,13 @@ try {
     assert.ok(handlers.has('session_start'));
     assert.ok(handlers.has('session_shutdown'));
     assert.ok(handlers.has('agent_end'));
+    const messageTool = registered.find(tool => tool.name === 'shepherd_message');
+    assert.ok(messageTool.description.includes('exact opaque agent id returned by shepherd_spawn'));
+    assert.ok(messageTool.description.includes('agent definition name'));
+    assert.ok(messageTool.description.includes('will be rejected'));
+    assert.ok(messageTool.promptGuidelines.join(' ').includes('angle-bracket placeholder'));
     console.log('PASS child registers only messaging and explicit completion tools');
 
-    const messageTool = registered.find(tool => tool.name === 'shepherd_message');
     const doneTool = registered.find(tool => tool.name === 'shepherd_done');
     const messageResult = await messageTool.execute('message-call', {
       target: 'shepherd',
@@ -85,6 +93,17 @@ try {
     assert.equal(mirror.replyTo, sentMessage.messageId);
     assert.equal(mirror.targetId, 'shepherd');
     console.log('PASS child shepherd_message publishes an asynchronous correlated envelope');
+
+    const invalidTargetResult = await messageTool.execute('invalid-target-call', {
+      target: 'planner',
+      message: 'This must not be routed by display name.',
+    });
+    assert.equal(invalidTargetResult.details.returnCode, 1);
+    assert.equal(invalidTargetResult.details.code, 'invalid_target');
+    assert.match(invalidTargetResult.content[0].text, /exact opaque agent id returned by shepherd_spawn/);
+    assert.match(invalidTargetResult.content[0].text, /agent name such as "planner"/);
+    assert.deepEqual(pollParentInbox(broker), [], 'invalid peer target is rejected before any message is queued');
+    console.log('PASS child shepherd_message rejects agent names instead of treating them as peer ids');
 
     const doneResult = await doneTool.execute('done-call', {
       taskId: 'shepherd-task-child-surface',
@@ -161,6 +180,33 @@ try {
     assert.ok(inferredEnvelope, 'reply with omitted taskId is published');
     assert.equal(inferredEnvelope.taskId, 'shepherd-task-child-surface');
     console.log('PASS child replies infer the requester task id and reject mismatched task ids');
+
+    const peerRequest = createEnvelope(
+      { sessionId: peerChild.sessionId, brokerId: peerChild.brokerId, senderId: peerChild.agentId },
+      {
+        kind: 'message',
+        targetId: capability.agentId,
+        taskId: 'shepherd-task-child-surface',
+        replyTo: undefined,
+        expectsReply: true,
+        delivery: 'followUp',
+        content: 'Reply directly to this peer request.',
+      },
+    );
+    publishFromChild(peerChild, peerRequest);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const directPeerReply = await messageTool.execute('direct-peer-reply', {
+      target: peerChild.agentId,
+      message: 'pong',
+      replyTo: peerRequest.messageId,
+    });
+    assert.equal(directPeerReply.details.returnCode, 0);
+    const replyMirror = pollParentInbox(broker).find(
+      message => message.kind === 'runtime' && message.replyReceived === true && message.replyTo === peerRequest.messageId,
+    );
+    assert.ok(replyMirror, 'direct peer replies mirror correlation to the parent');
+    assert.equal(replyMirror.taskId, 'shepherd-task-child-surface');
+    console.log('PASS direct peer replies notify the parent without requiring a duplicate relay');
 
     // A failed local delivery is reported to the parent as a runtime
     // diagnostic correlated with the undelivered message id.

@@ -261,15 +261,16 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "shepherd_message",
 		label: "Shepherd message",
-		description: "Send an asynchronous message to the Shepherd or another registered agent without waiting for a reply.",
-		promptSnippet: "send an asynchronous message to Shepherd or another agent",
+		description: "Send an asynchronous message to the Shepherd or another registered agent without waiting for a reply. For a peer, target MUST be the exact opaque agent id returned by shepherd_spawn; copy it verbatim. Never use an agent definition name such as \"planner\", a display label, a Herdr pane id, or a placeholder such as \"<planner agent ID>\"—the call will be rejected.",
+		promptSnippet: "send an asynchronous message using the exact opaque agent id returned by shepherd_spawn",
 		promptGuidelines: [
+			"For peer messages, copy target from the id field in shepherd_spawn output. Do not infer or substitute an agent definition name, display label, pane id, or angle-bracket placeholder; invalid targets fail instead of being resolved by name.",
 			"When replying with replyTo, use the task ID from the incoming request, not your own task ID. If the incoming message is in context, omit taskId and the child surface will infer it.",
 			"A reply must set replyTo to the exact incoming Message ID. Do not call shepherd_done while your task's required request remains unresolved.",
 			"Requests and replies wake waiting agents automatically; after sending a request, end the turn and wait for the queued response rather than polling or sending acknowledgments.",
 		],
 		parameters: Type.Object({
-			target: Type.String({ description: "Shepherd, parent, or an opaque registered Shepherd agent id." }),
+			target: Type.String({ description: "Use \"parent\"/\"shepherd\" for the parent, or the exact opaque peer agent id returned by shepherd_spawn. Agent names (for example \"planner\"), labels, pane ids, and placeholders are rejected." }),
 			message: Type.String({ description: "Non-empty message content." }),
 			taskId: Type.Optional(Type.String({ description: "Active delegated task id, when this message belongs to a task." })),
 			threadId: Type.Optional(Type.String({ description: "Conversation/thread correlation id." })),
@@ -309,6 +310,34 @@ export default function (pi: ExtensionAPI) {
 					},
 				);
 				const accepted = publishFromChild(active, message);
+				if (accepted.delivery === 'queued' && args.replyTo && !['shepherd', 'parent', active.parentId].includes(args.target)) {
+					// Peer replies are delivered directly to the peer inbox. Mirror only
+					// the correlation event to the parent so it can resume the requester's
+					// task; the parent must not relay a second copy of the reply.
+					const replyMirror = createEnvelope(
+						{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+						{
+							kind: "runtime",
+							targetId: active.parentId,
+							taskId,
+							replyTo: args.replyTo,
+							replyReceived: true,
+							summary: args.message,
+							delivery: "followUp",
+						},
+					);
+					try {
+						publishFromChild(active, replyMirror);
+					} catch {
+						return childResult(
+							"shepherd_message",
+							args,
+							"Shepherd reply accepted; task correlation degraded (reply mirror failed).",
+							{ accepted: true, messageId: message.messageId, delivery: accepted.delivery, requestTracking: "degraded" },
+							{ messageId: message.messageId, taskId: taskId ?? null, delivery: accepted.delivery },
+						);
+					}
+				}
 				if (accepted.delivery === 'queued' && args.expectsReply === true) {
 					// Mirror the tracked request into the parent inbox so the parent
 					// can open the request on the task (running -> waiting). The

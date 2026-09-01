@@ -36,6 +36,12 @@ export interface ShepherdMessageEnvelope {
    */
   requestOpen?: boolean;
   /**
+   * Set on a child runtime envelope that mirrors a reply already delivered
+   * directly to a peer. The parent uses it to resolve the requester's task
+   * without relaying a second copy of the reply.
+   */
+  replyReceived?: boolean;
+  /**
    * Companion to `requestOpen`: the opaque agent id the question was published
    * to, so the parent can display who the task is waiting for and name the
    * recipient in the reply-deadline outcome.
@@ -225,6 +231,9 @@ export function validateEnvelope(value: unknown): ShepherdMessageEnvelope {
   if (envelope.requestOpen !== undefined && typeof envelope.requestOpen !== 'boolean') {
     throw new MessagingError('invalid_envelope', 'requestOpen must be a boolean when present.');
   }
+  if (envelope.replyReceived !== undefined && typeof envelope.replyReceived !== 'boolean') {
+    throw new MessagingError('invalid_envelope', 'replyReceived must be a boolean when present.');
+  }
   if (envelope.status !== undefined && !STATUSES.has(envelope.status as ShepherdMessageStatus)) {
     throw new MessagingError('invalid_envelope', `Unsupported message status "${envelope.status}".`);
   }
@@ -327,9 +336,13 @@ function assertBrokerIdentity(
   }
 }
 
+function invalidChildTargetMessage(targetId: string): string {
+  return `Unknown child target "${targetId}". shepherd_message requires the exact opaque agent id returned by shepherd_spawn (for example "shepherd-agent-..."); do not use an agent name such as "planner", a display label, a Herdr pane id, or a placeholder such as "<planner agent ID>".`;
+}
+
 function queuePathForChild(broker: ParentBroker, targetId: string): string {
   const child = broker.children.get(targetId);
-  if (!child) throw new MessagingError('invalid_target', `Unknown child target "${targetId}".`);
+  if (!child) throw new MessagingError('invalid_target', invalidChildTargetMessage(targetId));
   return child.inboxPath;
 }
 
@@ -339,7 +352,7 @@ function queuePathForChildConnection(child: ChildBroker, targetId: string): stri
   }
   const manifestPath = path.join(child.rootDir, 'agents', childDirectoryName(targetId), 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
-    throw new MessagingError('invalid_target', `Unknown child target "${targetId}".`);
+    throw new MessagingError('invalid_target', invalidChildTargetMessage(targetId));
   }
   return path.join(child.rootDir, 'agents', childDirectoryName(targetId), 'inbox');
 }

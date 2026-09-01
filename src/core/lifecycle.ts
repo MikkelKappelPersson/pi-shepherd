@@ -424,6 +424,13 @@ export interface ParentMessageResult {
   targetTaskState?: string;
 }
 
+function messageTargetError(target: string): LifecycleError {
+  return new LifecycleError(
+    'invalid_target',
+    `Unknown message target "${target}". shepherd_message requires the exact opaque agent id returned by shepherd_spawn (for example "shepherd-agent-..."); do not use an agent name such as "planner", a display label, a Herdr pane id, or a placeholder such as "<planner agent ID>".`,
+  );
+}
+
 /**
  * Send a parent-originated message to an owned child. With `expectsReply` and
  * a task id the task enters `waiting` until a matching reply arrives.
@@ -433,7 +440,17 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
     throw new LifecycleError('invalid_task', 'Message content must not be empty.');
   }
   const broker = currentParentBroker() ?? ensureParentBroker();
-  const agent = lifecycleRegistry.getAgent({ id: input.target });
+  let agent;
+  try {
+    // Message targets are lifecycle ids, never agent definition names or
+    // display labels. Resolve strictly by the exact id returned by spawn.
+    agent = lifecycleRegistry.getAgent({ id: input.target });
+  } catch (error) {
+    if (error instanceof LifecycleError && ['unknown_handle', 'invalid_handle'].includes(error.code)) {
+      throw messageTargetError(input.target);
+    }
+    throw error;
+  }
   if (agent.state === 'closed') {
     throw new LifecycleError('closed_handle', `Agent "${input.target}" is closed.`);
   }
@@ -621,6 +638,17 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
 function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnvelope): TaskResult | undefined {
   switch (envelope.kind) {
     case 'runtime': {
+      if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
+        // Peer replies are delivered directly to the recipient's inbox. The
+        // child also sends this parent-only mirror so the parent can clear the
+        // requester's waiting task without relaying a duplicate reply.
+        try {
+          lifecycleRegistry.resolveReplyForTask(envelope.taskId, envelope.replyTo);
+        } catch {
+          // Unknown, duplicate, or already-resolved replies are harmless.
+        }
+        return undefined;
+      }
       if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
         try {
           const task = lifecycleRegistry.getTask(envelope.taskId);

@@ -92,6 +92,19 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.equal(lifecycleRegistry.activeTaskForAgent(idleAgent), undefined, 'a message never creates a task');
     console.log('PASS a message to an idle recipient is queued without creating task state');
 
+    assert.throws(
+      () => sendParentMessage({ target: 'planner', message: 'This must not resolve by agent name.' }),
+      error => {
+        assert.ok(error instanceof LifecycleError);
+        assert.equal(error.code, 'invalid_target');
+        assert.match(error.message, /exact opaque agent id returned by shepherd_spawn/);
+        assert.match(error.message, /agent name such as "planner"/);
+        return true;
+      },
+      'parent shepherd_message rejects agent definition names with actionable target guidance',
+    );
+    console.log('PASS parent shepherd_message rejects agent names instead of resolving them');
+
     // ── Parent reply settles a child-originated request locally ────────────
     const parentReplyTask = lifecycleRegistry.createTask(idleAgent, 'Complete the parent reply handshake.');
     lifecycleRegistry.setTaskRunning(parentReplyTask.id);
@@ -271,6 +284,67 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.notEqual(peerRelay.messageId, peerReply.messageId, 'relay uses a fresh message id');
     console.log('PASS planner reply resolves the request, the worker resumes, and the relay preserves sender provenance');
 
+    // A peer may answer directly to the requester's inbox. The child-side
+    // reply mirror still lets the parent clear the tracked waiting task, while
+    // avoiding a second parent-generated relay.
+    const directQuestion = createEnvelope(
+      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        kind: 'message',
+        targetId: planner.id,
+        taskId: scoutTask.id,
+        expectsReply: true,
+        delivery: 'followUp',
+        content: 'Can you answer directly?',
+      },
+    );
+    assert.equal(publishFromChild(scoutChild, directQuestion).delivery, 'queued');
+    const directRequestMirror = createEnvelope(
+      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        kind: 'runtime',
+        targetId: 'shepherd',
+        taskId: scoutTask.id,
+        replyTo: directQuestion.messageId,
+        requestOpen: true,
+        requestTargetId: planner.id,
+        summary: directQuestion.content,
+        delivery: 'followUp',
+      },
+    );
+    assert.equal(publishFromChild(scoutChild, directRequestMirror).accepted, true);
+    await processParentBrokerMessages();
+    assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'waiting');
+    const directPeerReply = createEnvelope(
+      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        kind: 'reply',
+        targetId: scout.id,
+        taskId: scoutTask.id,
+        replyTo: directQuestion.messageId,
+        delivery: 'followUp',
+        content: 'Direct pong.',
+      },
+    );
+    assert.equal(publishFromChild(plannerChild, directPeerReply).delivery, 'queued');
+    const directReplyMirror = createEnvelope(
+      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        kind: 'runtime',
+        targetId: 'shepherd',
+        taskId: scoutTask.id,
+        replyTo: directQuestion.messageId,
+        replyReceived: true,
+        summary: directPeerReply.content,
+        delivery: 'followUp',
+      },
+    );
+    assert.equal(publishFromChild(plannerChild, directReplyMirror).accepted, true);
+    await processParentBrokerMessages();
+    assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
+    assert.deepEqual(pollChildInbox(scoutChild), [directPeerReply]);
+    console.log('PASS direct peer reply mirrors resolve the waiting task without duplicate delivery');
+
     // ── Duplicate reply: idempotent, no second relay, no state change ─────
     const duplicateReply = createEnvelope(
       { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
@@ -325,9 +399,9 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
 
     assert.throws(
       () => sendParentMessage({ target: 'not-an-agent', message: 'Hello.' }),
-      error => error instanceof LifecycleError && error.code === 'unknown_handle',
+      error => error instanceof LifecycleError && error.code === 'invalid_target',
     );
-    console.log('PASS messaging an unknown target id is rejected');
+    console.log('PASS messaging an unknown target id is rejected as an invalid message target');
 
     const foreignTask = lifecycleRegistry.createTask(timeoutAgent, 'Task for the other worker.');
     lifecycleRegistry.setTaskRunning(foreignTask.id);

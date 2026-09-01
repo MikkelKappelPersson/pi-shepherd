@@ -21,7 +21,7 @@ export const SpawnParams = Type.Object({
   model: Type.Optional(Type.String()),
 });
 export const AgentIdSchema = Type.String({
-  description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
+  description: 'Exact opaque agent id returned by shepherd_spawn. Copy it verbatim; do not use an agent name (such as "planner"), display label, Herdr pane id, or placeholder such as "<planner agent ID>".',
 });
 export const PromptIdSchema = Type.String({
   description: 'Opaque prompt id returned by shepherd_prompt. Do not use an agent id or Herdr pane id.',

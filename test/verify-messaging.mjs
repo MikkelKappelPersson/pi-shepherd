@@ -117,6 +117,17 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
     'invalid_sender',
     'parent broker rejects non-parent sender'
   );
+  assert.throws(
+    () => publishFromChild(scout, { ...childToParent, targetId: 'planner', messageId: 'display-name-target' }),
+    error => {
+      assert.ok(error instanceof MessagingError);
+      assert.equal(error.code, 'invalid_target');
+      assert.match(error.message, /exact opaque agent id returned by shepherd_spawn/);
+      assert.match(error.message, /agent name such as "planner"/);
+      return true;
+    },
+    'agent definition names are rejected with actionable target guidance',
+  );
   expectMessagingError(
     () => publishFromChild(scout, { ...childToParent, targetId: 'unknown-agent', messageId: 'unknown-target' }),
     'invalid_target',
