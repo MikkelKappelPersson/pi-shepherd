@@ -1288,7 +1288,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'send an asynchronous message to a spawned agent.',
     promptGuidelines: [
       'Use shepherd_message for questions to an agent while it is busy or idle; the recipient receives it as a queued follow-up. Do not use it to submit tracked work — that is shepherd_delegate.',
-      'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. A plain message never alters task state.',
+      'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. For peer replies, use the requester\'s task ID—the task whose request is being answered—not the responder\'s task ID. A plain message never alters task state.',
     ],
     parameters: Type.Object({
       target: Type.String({ description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.' }),

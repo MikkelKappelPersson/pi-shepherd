@@ -176,6 +176,7 @@ export default function (pi: ExtensionAPI) {
 	let broker: ChildBroker | undefined;
 	let brokerError: string | undefined;
 	let pollTimer: ReturnType<typeof setInterval> | undefined;
+	const receivedMessageTaskIds = new Map<string, string | undefined>();
 
 	if (agentSystemPromptFile) {
 		try {
@@ -226,6 +227,11 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		for (const message of messages) {
+			receivedMessageTaskIds.set(message.messageId, message.taskId);
+			// Parent relays use a fresh envelope id while preserving the original
+			// request in replyTo; replies from this child correlate to that original
+			// request id.
+			if (message.replyTo) receivedMessageTaskIds.set(message.replyTo, message.taskId);
 			try {
 				pi.sendUserMessage(incomingMessageText(message), {
 					deliverAs: deliveryMode(message.delivery),
@@ -250,6 +256,10 @@ export default function (pi: ExtensionAPI) {
 		label: "Shepherd message",
 		description: "Send an asynchronous message to the Shepherd or another registered agent without waiting for a reply.",
 		promptSnippet: "send an asynchronous message to Shepherd or another agent",
+		promptGuidelines: [
+			"When replying with replyTo, use the task ID from the incoming request, not your own task ID. If the incoming message is in context, omit taskId and the child surface will infer it.",
+			"A reply must set replyTo to the exact incoming Message ID. Do not call shepherd_done while your task's required request remains unresolved.",
+		],
 		parameters: Type.Object({
 			target: Type.String({ description: "Shepherd, parent, or an opaque registered Shepherd agent id." }),
 			message: Type.String({ description: "Non-empty message content." }),
@@ -262,7 +272,20 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, args) {
 			const active = ensureBroker();
 			if (!active) return unavailableToolResult("shepherd_message", args, brokerError ?? "Broker unavailable.");
-			const taskId = args.taskId ?? configuredTaskId;
+			const referencedTaskId = args.replyTo ? receivedMessageTaskIds.get(args.replyTo) : undefined;
+			if (args.replyTo && receivedMessageTaskIds.has(args.replyTo) && args.taskId !== undefined && args.taskId !== referencedTaskId) {
+				return childResult(
+					"shepherd_message",
+					args,
+					"Shepherd reply rejected: task mismatch.",
+					{ accepted: false, error: `Reply ${args.replyTo} belongs to task ${referencedTaskId ?? "none"}; use that task id, not ${args.taskId}.` },
+					{ code: "reply_task_mismatch", replyTo: args.replyTo, expectedTaskId: referencedTaskId ?? null, providedTaskId: args.taskId },
+					1,
+				);
+			}
+			const taskId = args.replyTo && receivedMessageTaskIds.has(args.replyTo)
+				? referencedTaskId
+				: args.taskId ?? configuredTaskId;
 			try {
 				const message = createEnvelope(
 					{ sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },

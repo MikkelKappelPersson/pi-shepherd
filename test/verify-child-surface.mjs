@@ -137,6 +137,29 @@ try {
     assert.match(sentUserMessages[0].content, /Shepherd message from Shepherd/);
     assert.match(sentUserMessages[0].content, /Reply to: request-123/);
     assert.equal(sentUserMessages[0].options.deliverAs, 'steer');
+    assert.ok(
+      messageTool.promptGuidelines.some(guideline => guideline.includes("request, not your own task ID")),
+      'child guidance explains requester task id for replies',
+    );
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const mismatchedReply = await messageTool.execute('mismatched-reply', {
+      target: 'shepherd',
+      message: 'This must be rejected.',
+      taskId: 'shepherd-task-wrong-owner',
+      replyTo: 'request-123',
+    });
+    assert.equal(mismatchedReply.details.returnCode, 1);
+    assert.equal(mismatchedReply.details.code, 'reply_task_mismatch');
+    const inferredReply = await messageTool.execute('inferred-reply', {
+      target: 'shepherd',
+      message: 'The reply task id should be inferred.',
+      replyTo: 'request-123',
+    });
+    assert.equal(inferredReply.details.returnCode, 0);
+    const inferredEnvelope = pollParentInbox(broker).find(m => m.replyTo === 'request-123');
+    assert.ok(inferredEnvelope, 'reply with omitted taskId is published');
+    assert.equal(inferredEnvelope.taskId, 'shepherd-task-child-surface');
+    console.log('PASS child replies infer the requester task id and reject mismatched task ids');
 
     // A failed local delivery is reported to the parent as a runtime
     // diagnostic correlated with the undelivered message id.
