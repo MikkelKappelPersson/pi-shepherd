@@ -1,8 +1,8 @@
 {
   "name": "@luminascale/pi-shepherd",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
-  "description": "\ud83d\udc11 No-fuss herdr native subagent orchestration \ud83d\udc11",
+  "description": "🐑 No-fuss herdr native subagent orchestration 🐑",
   "license": "Apache-2.0",
   "homepage": "https://github.com/MikkelKappelPersson/pi-shepherd#readme",
   "repository": {
