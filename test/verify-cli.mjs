@@ -46,11 +46,11 @@ check(
 	'spawn: placement encodes pane direction',
 );
 
-const okSpawnSpace = parsed(['spawn', 'scout', '--cwd', '/tmp/x', '--model', 'openai/gpt-x']);
+const okSpawnSpace = parsed(['spawn', 'scout', '--cwd', '/tmp/x']);
 check(
-	okSpawnSpace.args.cwd === '/tmp/x' && okSpawnSpace.args.model === 'openai/gpt-x' &&
+	okSpawnSpace.args.cwd === '/tmp/x' && !('model' in okSpawnSpace.args) &&
 		!('agentScope' in okSpawnSpace.args),
-	'spawn: optional cwd and model values',
+	'spawn: optional cwd value; model comes from the agent definition',
 );
 
 okReadChecks();
@@ -134,7 +134,7 @@ for (const toks of [
 	['herd'],
 	['spawn', 'worker'],
 	['spawn', 'worker', '--placement=pane_down'],
-	['spawn', 'scout', '--cwd=/a b', '--model=openai/gpt-x'],
+	['spawn', 'scout', '--cwd=/a b'],
 	['read', 'p5', '--lines=7', '--source=visible'],
 ]) {
 	const err = roundTrip(toks);
@@ -154,11 +154,10 @@ const defaultsPreview = formatShepherdCommand('spawn', {
 	label: '10-second required-args smoke test',
 	placement: 'tab',
 	cwd: process.cwd(),
-	model: 'default',
 });
 check(
 	defaultsPreview.rest === 'scout --label="10-second required-args smoke test"',
-	'preview: spawn omits materialized default placement, cwd, and model',
+	'preview: spawn omits materialized default placement and cwd',
 );
 
 if (failures > 0) {

@@ -44,7 +44,6 @@ const OPTION_SPECS: Record<string, OptionSpec> = {
   label: { flag: 'label', key: 'label' },
   placement: { flag: 'placement', key: 'placement', values: PLACEMENT_VALUES },
   cwd: { flag: 'cwd', key: 'cwd' },
-  model: { flag: 'model', key: 'model' },
   lines: { flag: 'lines', key: 'lines', integer: true },
   source: { flag: 'source', key: 'source', values: SOURCE_VALUES },
   timeout: { flag: 'timeout', key: 'timeout', integer: true },
@@ -57,12 +56,12 @@ for (const spec of Object.values(OPTION_SPECS)) {
 }
 
 // Which option keys each command verb accepts (renderer and parser agree).
-const SPAWN_OPTION_KEYS = ['label', 'placement', 'cwd', 'model'];
+const SPAWN_OPTION_KEYS = ['label', 'placement', 'cwd'];
 const READ_OPTION_KEYS = ['lines', 'source'];
 
 const USAGE =
   'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
-  '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --cwd <path>, --model <provider/model>\n' +
+  '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --cwd <path>\n' +
   '  read options: --lines <n>, --source ' + SOURCE_VALUES.join('|');
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -268,7 +267,6 @@ export function omitMaterializedDefaults(
   const result = { ...options };
   if (verb !== 'spawn') return result;
   if (result.placement === 'tab') delete result.placement;
-  if (result.model === 'default') delete result.model;
   if (typeof result.cwd === 'string' && resolve(result.cwd) === resolve(defaultCwd)) delete result.cwd;
   return result;
 }

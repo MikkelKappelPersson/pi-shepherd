@@ -116,7 +116,6 @@ export function shutdownParentBroker(childrenGone: () => boolean): boolean {
 
 export interface StartOptions {
   cwd?: string;
-  model?: string;
   placement?: 'pane_right' | 'pane_down' | 'tab' | 'workspace';
   label?: string;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
@@ -173,7 +172,9 @@ export async function startAgent(
   let tabId = '';
   let workspaceId = '';
   try {
-    const delegatedModel = resolveDelegatedModel(options.model ?? found.model, ctx.model);
+    // The agent definition is the only source of an explicit child model;
+    // otherwise inherit the parent Shepherd's current provider/model.
+    const delegatedModel = resolveDelegatedModel(found.model, ctx.model);
     const created = createHerdrInstance(
       formatAgentName(name, label),
       cwd,
@@ -194,9 +195,8 @@ export async function startAgent(
       omitSystemPrompt: found.omitSystemPrompt,
       omitPiDocumentation: found.omitPiDocumentation === true,
       omitContextFiles: found.omitContextFiles === true,
-      // An explicit start option wins, then the agent definition, then the
-      // parent Shepherd's current provider/model. This keeps slash-command
-      // starts and model-facing starts on the same resolution path.
+      // The agent definition selects the model; absent a definition, inherit
+      // the parent Shepherd's current provider/model.
       model: delegatedModel,
       tools: found.tools,
     });

@@ -14,7 +14,7 @@ pi-shepherd exposes these structured tools to the Shepherd. Lifecycle IDs are op
 
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
-| `shepherd_spawn` | `agent`, `label`; optional `placement`, `cwd`, `model` | Create an idle persistent agent. Placement is `pane_right`, `pane_down`, `tab`, or `workspace`; the default is a background tab. |
+| `shepherd_spawn` | `agent`, `label`; optional `placement`, `cwd` | Create an idle persistent agent. Placement is `pane_right`, `pane_down`, `tab`, or `workspace`; the default is a background tab. The model comes only from the agent definition Markdown frontmatter. |
 | `shepherd_delegate` | `target`: agent ID, `task`: description; optional `timeout` | Start a tracked task and return a task ID without waiting. One active task per agent. |
 | `shepherd_message` | `target`: agent ID, `message`; optional `taskId`, `threadId`, `replyTo`, `expectsReply`, `delivery` | Send an asynchronous message (parent or peer). `expectsReply` opens a tracked reply request; the sender's task enters `waiting` until the reply. |
 | `shepherd_prompt` | `id`: agent ID, `message`: one-turn message | **Deprecated** compatibility path. Ties completion to one child turn; prefer `shepherd_delegate` for tracked work. |
@@ -28,12 +28,11 @@ shepherd_spawn({
   agent: "worker",
   label: "implementation",
   placement: "pane_right",
-  cwd: "/path/to/project",
-  model: "anthropic/claude-sonnet-4-5"
+  cwd: "/path/to/project"
 })
 ```
 
-`cwd` and `model` default to the Shepherd session. Agent scope, project approval, and prompt-shaping options come from settings and the discovered definition rather than spawn arguments. Only panes created and recorded by pi-shepherd can be closed by the extension.
+`cwd` defaults to the Shepherd session. The model comes only from the discovered agent definition; omission, `null`, or `default` inherits the Shepherd session model. Agent scope, project approval, and prompt-shaping options come from settings and the discovered definition rather than spawn arguments. Only panes created and recorded by pi-shepherd can be closed by the extension.
 
 ## Child-side tools
 

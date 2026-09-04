@@ -18,7 +18,6 @@ export const SpawnParams = Type.Object({
   label: Type.String({ description: 'Short task-specific human label for this spawned instance. Letters, numbers, spaces, _, -, and . only; max 64 characters.' }),
   placement: Type.Optional(SpawnPlacementSchema),
   cwd: Type.Optional(Type.String()),
-  model: Type.Optional(Type.String()),
 });
 export const AgentIdSchema = Type.String({
   description: 'Exact opaque agent id returned by shepherd_spawn. Copy it verbatim; do not use an agent name (such as "planner"), display label, Herdr pane id, or placeholder such as "<planner agent ID>".',

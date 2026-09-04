@@ -185,7 +185,7 @@ shepherd_spawn({
 })
 ```
 
-The working directory and model default to the Shepherd session. `cwd` and `model` can be supplied when spawning. Agent scope, project approval, and prompt-shaping options come from Shepherd settings and the discovered agent definition; they are not spawn overrides.
+The working directory defaults to the Shepherd session and `cwd` can be supplied when spawning. The child model is selected only by the discovered agent definition; omission, `null`, or `default` inherits the Shepherd session model. Agent scope, project approval, and prompt-shaping options come from Shepherd settings and the discovered agent definition; they are not spawn overrides.
 
 Lifecycle tools use short, opaque, session-scoped IDs:
 
@@ -211,7 +211,7 @@ The slash command is useful when you want to manage an agent directly rather tha
 /shepherd settings
 ```
 
-Supported actions are `agents`, `herd`, `prune`, `spawn`, `status`, `read`, and `settings`. `/shepherd list` remains a compatibility alias for `/shepherd agents`. Optional spawn flags include: `--placement pane_right|pane_down|tab|workspace`, `--cwd <path>`, and `--model <provider/model>`.
+Supported actions are `agents`, `herd`, `prune`, `spawn`, `status`, `read`, and `settings`. `/shepherd list` remains a compatibility alias for `/shepherd agents`. Optional spawn flags include: `--placement pane_right|pane_down|tab|workspace` and `--cwd <path>`.
 
 For one-shot delegation, prompting, waiting, parallel work, and opaque-ID lifecycle control, use the structured `shepherd_*` tools instead of manual commands. The old single-tool form such as `shepherd({ action: "prompt", ... })` is no longer supported.
 

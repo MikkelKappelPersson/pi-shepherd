@@ -714,7 +714,6 @@ export async function doAction(
           label: a.label,
           placement: a.placement,
           cwd: a.cwd,
-          model: a.model,
           artifactSession,
         },
         { ...ctx, sessionId: ctx.sessionManager?.getSessionId() }
@@ -1153,7 +1152,6 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         })
       ),
       cwd: Type.Optional(Type.String({ description: 'Working directory for the child; defaults to the parent cwd.' })),
-      model: Type.Optional(Type.String({ description: 'Provider-qualified child model; defaults to the parent model.' })),
     }),
     prepareArguments: input => prepareForSchema<Omit<Static<typeof SpawnParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
