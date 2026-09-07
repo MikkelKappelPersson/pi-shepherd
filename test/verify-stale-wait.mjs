@@ -8,6 +8,17 @@ import { registerShepherdTools, setStaleWaitSessionActive } from '../src/extensi
 
 const ONE_MIN = 60_000;
 
+// Keep this test independent of the developer's persisted Shepherd settings.
+// In particular, a user-configured staleWaitThreshold must not change the
+// test's documented five-minute default.
+const { createTempDirectory } = await import('./helpers/test-utils.mjs');
+const { rmSync } = await import('node:fs');
+const isolatedAgentDir = createTempDirectory('pi-shepherd-stale-wait-');
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+process.env.PI_CODING_AGENT_DIR = isolatedAgentDir;
+
+try {
+
 function makeMonitor(registry) {
   const infos = [];
   const monitor = new StaleWaitMonitor(registry, info => infos.push(info), 1_000);
@@ -245,3 +256,8 @@ await withFakeDateNow(0, async clock => {
 }
 
 console.log('All stale-wait assertions passed.');
+} finally {
+  if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  rmSync(isolatedAgentDir, { recursive: true, force: true });
+}
