@@ -68,6 +68,38 @@ const collapsedStatus = renderCollapsedLifecycleResult(
 assert.equal(collapsedStatus, 'agent done.');
 console.log('PASS collapsed status results hide protocol call/return/details text');
 
+const expandedStatus = formatExpandedToolResult({
+  content: [{ type: 'text', text: 'agent working; task shepherd-task-status running.' }],
+  details: {
+    call: { name: 'shepherd_status', arguments: { id: 'shepherd-agent-status' } },
+    returnValue: {
+      id: 'shepherd-agent-status',
+      state: 'working',
+      task: { id: 'shepherd-task-status', state: 'running' },
+    },
+    status: {
+      id: 'shepherd-agent-status',
+      state: 'working',
+      task: { id: 'shepherd-task-status', state: 'running' },
+    },
+    returnCode: 0,
+  },
+});
+assert.equal(
+  expandedStatus,
+  [
+    'call',
+    'id: shepherd-agent-status',
+    '',
+    'return',
+    'status: working',
+    'task:',
+    '  id: shepherd-task-status',
+    '  state: running',
+  ].join('\n')
+);
+console.log('PASS expanded status results remove duplicated status metadata');
+
 const collapsedHerd = renderCollapsedLifecycleResult(
   {
     content: [{ type: 'text', text: '• pi (self/focused) ●(shepherd) [working] pane=w1:p1 cwd=/private' }],

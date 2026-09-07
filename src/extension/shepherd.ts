@@ -1699,6 +1699,7 @@ export function formatExpandedToolResult(result: any): string | undefined {
   const returnedKeys = new Set(returnValueObject ? Object.keys(returnValueObject) : []);
   const extraEntries = Object.entries(details).filter(([key]) => {
     if (['call', 'returnValue', 'result', 'artifactSession', 'fieldnote', 'returnCode'].includes(key)) return false;
+    if (call.name === 'shepherd_status' && key === 'status') return false;
     if (key === 'error') return true;
     return !returnedKeys.has(key) && !['agent', 'label', 'model', 'id'].includes(key);
   });
@@ -1723,6 +1724,14 @@ function humanReturnSummary(callName: string, body: string, details: Record<stri
   if (callName === 'shepherd_prompt' && /prompted/i.test(body)) return 'prompted';
   if (callName === 'shepherd_watch' && /watching|already settled/i.test(body)) {
     return /watching/i.test(body) ? 'watching…' : 'completed';
+  }
+  if (callName === 'shepherd_status') {
+    const returned = details.returnValue && typeof details.returnValue === 'object'
+      ? details.returnValue
+      : details.result && typeof details.result === 'object' ? details.result : undefined;
+    if (typeof returned?.state === 'string') return returned.state;
+    const state = body.match(/\bagent\s+([a-z-]+)/i)?.[1];
+    return (state ?? body) || 'completed';
   }
   if (callName === 'shepherd_close' && /closed/i.test(body)) return 'closed';
   if (body.includes('\n')) return 'output';
@@ -1793,6 +1802,8 @@ function formatHumanReturnValue(
   }
   return Object.entries(value).flatMap(([key, entry]) => {
     if (callName === 'shepherd_spawn' && ['agent', 'label'].includes(key)) return [];
+    if (callName === 'shepherd_status' && key === 'id' && callArguments.id === entry) return [];
+    if (callName === 'shepherd_status' && key === 'state') return [];
     if (key === 'id' && callName === 'shepherd_spawn') {
       return formatHumanField('agent id', entry, indent);
     }

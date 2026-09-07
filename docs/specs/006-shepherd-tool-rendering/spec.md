@@ -444,7 +444,9 @@ Available agents: planner, reviewer, scout, worker
 | `shepherd_read` | `shepherd_read <target>` | compact preview; expanded terminal output |
 
 These summaries should be semantic rather than copies of the serialized tool
-protocol. Each renderer should preserve `expanded` and `isPartial` behavior.
+protocol. In particular, expanded `shepherd_status` output should show one
+status summary and the task fields, not repeat the same nested status record.
+Each renderer should preserve `expanded` and `isPartial` behavior.
 
 ## Acceptance criteria
 
