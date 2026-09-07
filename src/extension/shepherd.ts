@@ -707,7 +707,17 @@ export async function doAction(
       const artifactSession =
         'artifactSession' in a ? a.artifactSession : parentArtifactSession(ctx);
       // Startup readiness has its own fixed internal grace periods; timeout
-      // settings apply only to submitted prompts and their waits.
+      // settings apply only to submitted prompts and their waits. Emit a
+      // partial result so the TUI can show progress while Herdr starts the
+      // child pane.
+      onUpdate?.({
+        content: [{ type: 'text', text: `Spawning ${a.agent}…` }],
+        details: {
+          agent: a.agent,
+          label: a.label,
+          placement: a.placement,
+        },
+      });
       const handle = await startAgent(
         a.agent,
         {
@@ -1042,7 +1052,8 @@ async function executeShepherd(
   // registry and remain useful even if Herdr briefly disappears. The watcher
   // will resume polling when the runtime is reachable again.
   if (!isHerdrAvailable() && label !== 'watch') {
-    return withUserFacingContent(unavailableResult(label, args));
+    const failure = unavailableResult(label, args);
+    throw new Error(formatUserFacingText(failure) ?? HERDR_SETUP_HINT);
   }
   try {
     const result = await doAction(args, ctx, signal, onUpdate);
@@ -1055,7 +1066,7 @@ async function executeShepherd(
     const message = String(error?.message ?? error);
     const returnCode = typeof error?.returnCode === 'number' ? error.returnCode : 1;
     const code = typeof error?.code === 'string' ? error.code : 'shepherd_error';
-    return withUserFacingContent({
+    const failure = withUserFacingContent({
       content: [{ type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` }],
       details: {
         call: publicToolCall(label, args, ctx.cwd),
@@ -1066,6 +1077,10 @@ async function executeShepherd(
         error: message,
       },
     });
+    // Pi colors the complete tool shell using its native error state only
+    // when execute() throws. Preserve our structured protocol text in the
+    // thrown message while allowing Pi to set isError=true for the TUI.
+    throw new Error(failure.content[0]?.type === 'text' ? failure.content[0].text : message);
   }
 }
 
@@ -1162,11 +1177,18 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    // Suppress the default tool-name-only call preview. The result text below
-    // carries the complete, single-line spawn status instead.
-    renderCall(_args, _theme, context) {
+    // Render a useful invocation preview instead of the default tool-name-only
+    // row; the result renderer below supplies the completion state.
+    renderCall(args, theme, context) {
       const component = reusableText(context.lastComponent);
-      component.setText('');
+      const agent = typeof args.agent === 'string' ? args.agent : 'agent';
+      const label = typeof args.label === 'string' && args.label ? ` · ${args.label}` : '';
+      const placement = typeof args.placement === 'string' ? ` · ${args.placement}` : '';
+      component.setText(
+        theme.fg('toolTitle', theme.bold('shepherd_spawn')) +
+          ` ${theme.fg('accent', agent)}` +
+          theme.fg('dim', `${label}${placement}`)
+      );
       return component;
     },
     renderResult: (result, options, theme, context) =>
@@ -1435,34 +1457,53 @@ export function registerShepherdTools(pi: ExtensionAPI) {
   });
 }
 
-function renderSpawnResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
-  const rendered = formatUserFacingText(result);
-  if (rendered === undefined) return renderToolResult(result, options, theme, context);
+function renderSpawnResult(
+  result: any,
+  options: { expanded?: boolean; isPartial?: boolean },
+  theme: any,
+  context: any,
+) {
   const component = reusableText(context.lastComponent);
   const details = result?.details && typeof result.details === 'object' ? result.details : {};
-  const agent = typeof details.agent === 'string' ? details.agent : undefined;
-  const label = typeof details.label === 'string' ? details.label : undefined;
+  const failed = context?.isError === true || details.error !== undefined ||
+    (details.returnCode !== undefined && Number(details.returnCode) !== 0);
 
-  // Keep the compact one-line spawn status, but use the standard semantic
-  // theme colors: tool title, success state, and highlighted agent identity.
-  if (agent) {
-    const firstLine =
-      theme.fg('toolTitle', theme.bold('shepherd_spawn')) +
-      ' ' + theme.fg('accent', `spawned ${agent}${label ? `: ${label}` : ''}`);
-    const newline = rendered.indexOf('\n');
-    const remainder = newline >= 0 ? rendered.slice(newline) : '';
-    const styledRemainder = remainder
-      .split('\n')
-      .map(line =>
-        ['call:', 'return:', 'details:'].includes(line)
-          ? theme.fg('accent', line)
-          : theme.fg('toolOutput', line)
-      )
-      .join('\n');
-    component.setText(firstLine + styledRemainder);
-  } else {
-    component.setText(theme.fg('toolOutput', rendered));
+  if (options.isPartial) {
+    component.setText(theme.fg('warning', 'spawning…'));
+    return component;
   }
+
+  const rendered = formatUserFacingText(result);
+  if (rendered === undefined) return renderToolResult(result, options, theme, context);
+
+  const firstLine = rendered.split('\n')[0] ?? '';
+  const errorMessage = failed
+    ? typeof details.error === 'string'
+      ? details.error
+      : firstLine.replace(/^Herd spawn failed(?: \(return code \d+\))?:\s*/, '') || 'unknown error'
+    : undefined;
+  const status = failed
+    ? theme.fg('error', `✗ failed${errorMessage ? ` · ${errorMessage}` : ''}`)
+    : theme.fg('success', '✓ success');
+
+  // The call row already contains the agent, label, and placement. Keep the
+  // result row to a status only and reserve protocol details for expansion.
+  if (!options.expanded) {
+    component.setText(status);
+    return component;
+  }
+
+  const newline = rendered.indexOf('\n');
+  const remainder = newline >= 0 ? rendered.slice(newline) : '';
+  const styledRemainder = remainder
+    .split('\n')
+    .map(line =>
+      ['call:', 'return:', 'details:'].includes(line)
+        ? theme.fg('accent', line)
+        : theme.fg('toolOutput', line)
+    )
+    .join('\n');
+  component.setText(status + styledRemainder);
   return component;
 }
 
