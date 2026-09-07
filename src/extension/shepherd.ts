@@ -1754,7 +1754,8 @@ export function renderCollapsedLifecycleResult(
     const names = details.agents
       .map((agent: any) => agent && typeof agent.name === 'string' ? agent.name : undefined)
       .filter((name: string | undefined): name is string => name !== undefined);
-    return theme.fg('toolOutput', `Available agents: ${names.join(', ')}`);
+    return theme.fg('accent', 'Available agents:') +
+      (names.length > 0 ? ` ${theme.fg('toolOutput', names.join(', '))}` : '');
   }
   if (callName === 'shepherd_delegate') return theme.fg('success', '✓ delegated');
   if (callName === 'shepherd_message') {

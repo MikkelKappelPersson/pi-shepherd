@@ -104,7 +104,20 @@ const collapsedAgents = renderCollapsedLifecycleResult(
   {}
 );
 assert.equal(collapsedAgents, 'Available agents: planner, reviewer, worker');
-console.log('PASS collapsed available-agent results show only agent names');
+const styledCollapsedAgents = renderCollapsedLifecycleResult(
+  {
+    content: [{ type: 'text', text: 'Available agent names:' }],
+    details: { call: { name: 'shepherd' }, scope: 'both', agents: [{ name: 'planner' }], returnCode: 0 },
+  },
+  'shepherd',
+  {
+    bold: text => `<bold>${text}</bold>`,
+    fg: (color, text) => `<${color}>${text}</${color}>`,
+  },
+  {}
+);
+assert.equal(styledCollapsedAgents, '<accent>Available agents:</accent> <toolOutput>planner</toolOutput>');
+console.log('PASS collapsed available-agent labels use accent styling');
 
 const expandedHerd = formatExpandedToolResult({
   content: [{ type: 'text', text: '• pi (self/focused) [working]' }],
