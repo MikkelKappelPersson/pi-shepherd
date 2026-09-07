@@ -1746,9 +1746,15 @@ export function renderCollapsedLifecycleResult(
       : firstLine.replace(/^Herd \w+ failed(?: \(return code \d+\))?:\s*/, '') || 'unknown error';
     return theme.fg('error', `✗ failed${error ? ` · ${error}` : ''}`);
   }
-  if (callName === 'shepherd' && Array.isArray(details.agents) && details.scope === undefined) {
-    const agents = details.agents.filter((agent: any) => agent?.shepherd === true);
-    return theme.fg('toolOutput', `Active agents: ${agents.length}`);
+  if (callName === 'shepherd' && Array.isArray(details.agents)) {
+    if (details.scope === undefined) {
+      const agents = details.agents.filter((agent: any) => agent?.shepherd === true);
+      return theme.fg('toolOutput', `Active agents: ${agents.length}`);
+    }
+    const names = details.agents
+      .map((agent: any) => agent && typeof agent.name === 'string' ? agent.name : undefined)
+      .filter((name: string | undefined): name is string => name !== undefined);
+    return theme.fg('toolOutput', `Available agents: ${names.join(', ')}`);
   }
   if (callName === 'shepherd_delegate') return theme.fg('success', '✓ delegated');
   if (callName === 'shepherd_message') {

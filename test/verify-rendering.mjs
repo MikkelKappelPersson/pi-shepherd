@@ -85,6 +85,27 @@ assert.equal(collapsedHerd, 'Active agents: 1');
 assert.doesNotMatch(collapsedHerd, /pane=|cwd=|pi \(self\/focused\)/);
 console.log('PASS collapsed herd results show only the active-agent count');
 
+const collapsedAgents = renderCollapsedLifecycleResult(
+  {
+    content: [{ type: 'text', text: 'Available agent names (copy the name exactly; names are case-sensitive):' }],
+    details: {
+      call: { name: 'shepherd' },
+      scope: 'both',
+      agents: [
+        { name: 'planner', description: 'Creates plans' },
+        { name: 'reviewer', description: 'Reviews code' },
+        { name: 'worker', description: 'Does work' },
+      ],
+      returnCode: 0,
+    },
+  },
+  'shepherd',
+  plainTheme,
+  {}
+);
+assert.equal(collapsedAgents, 'Available agents: planner, reviewer, worker');
+console.log('PASS collapsed available-agent results show only agent names');
+
 const expandedHerd = formatExpandedToolResult({
   content: [{ type: 'text', text: '• pi (self/focused) [working]' }],
   details: {

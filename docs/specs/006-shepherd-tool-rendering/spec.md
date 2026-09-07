@@ -427,6 +427,12 @@ The parent Shepherd process has no spawned-agent ID, so it uses the stable
 `agent id: shepherd` alias. Herdr pane IDs, workspace IDs, and working
 directories remain hidden.
 
+The collapsed `shepherd agents` result is also name-only:
+
+```text
+Available agents: planner, reviewer, scout, worker
+```
+
 | Tool | Call row | Result row |
 |---|---|---|
 | `shepherd_spawn` | `shepherd_spawn worker · label · placement` | `spawning…`, `✓ success`, or `✗ failed · error` |

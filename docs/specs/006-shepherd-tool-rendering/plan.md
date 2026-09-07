@@ -124,7 +124,8 @@ The umbrella `shepherd herd` view also has a curated collapsed renderer:
 show only an `Active agents: <count>` summary. Expanded entries use opaque
 agent IDs (the parent uses the stable `shepherd` alias), indent state fields
 beneath the identity without list markers, and hide pane IDs, workspace IDs,
-and working directories.
+and working directories. The collapsed `shepherd agents` result is reduced to
+an `Available agents:` list of names.
 
 Each tool should preserve `expanded` and `isPartial` behavior and must not
 change `doAction()` lifecycle semantics.
