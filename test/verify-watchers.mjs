@@ -89,11 +89,11 @@ const renderedNotification = registeredMessageRenderer(
   { expanded: false, outputPad: 0 },
   { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
 );
-assert.ok(
-  renderedNotification
-    .render(200)
-    .some(line => line.trimEnd() === 'shepherd_watcher completion: planner: bridge done'),
-);
+const renderedLines = renderedNotification.render(200).map(line => line.trimEnd());
+assert.ok(renderedLines.includes('Shepherd watcher'));
+assert.ok(renderedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`)));
+assert.ok(renderedLines.some(line => line.includes('completions:')));
+assert.equal(renderedLines.some(line => /^(call:|return:|details:)$/.test(line)), false);
 assert.equal(sent[0].message.customType, 'shepherd.prompt.completion');
 assert.equal(sent[0].message.details.completions[0].promptId, bridgePrompt.id);
 assert.equal(sent[0].message.details.completions[0].agentId, bridgeAgent.id);

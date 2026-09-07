@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import {
+  formatExpandedToolResult,
+  formatParentMessageNotification,
+  renderCollapsedLifecycleResult,
+  formatStaleWaitNotification,
+  formatWatcherNotification,
+  styleExpandedToolResult,
+} from '../src/extension/shepherd.ts';
+
+const spawnResult = {
+  content: [{ type: 'text', text: 'shepherd_spawn spawned worker: code review' }],
+  details: {
+    call: {
+      name: 'shepherd_spawn',
+      arguments: {
+        agent: 'worker',
+        label: 'code review',
+        placement: 'tab',
+      },
+    },
+    id: 'shepherd-agent-123',
+    agent: 'worker',
+    label: 'code review',
+    model: 'github-copilot/gpt-5.6-luna',
+    returnValue: {
+      id: 'shepherd-agent-123',
+      agent: 'worker',
+      label: 'code review',
+      model: 'github-copilot/gpt-5.6-luna',
+    },
+    fieldnote: '.shepherd/sessions/secret',
+    artifactSession: { parentSessionId: 'secret' },
+    returnCode: 0,
+  },
+};
+assert.equal(
+  formatExpandedToolResult(spawnResult),
+  [
+    'call',
+    'agent: worker',
+    'label: code review',
+    'placement: tab',
+    '',
+    'return',
+    'status: spawned',
+    'agent id: shepherd-agent-123',
+    'model: github-copilot/gpt-5.6-luna',
+  ].join('\n'),
+  'spawn expanded output uses minimal headers, spacing, and curated return fields'
+);
+console.log('PASS spawn expanded output has minimal spaced call/return sections');
+
+const plainTheme = {
+  fg: (_color, text) => text,
+  bold: text => text,
+};
+const collapsedStatus = renderCollapsedLifecycleResult(
+  {
+    content: [{ type: 'text', text: 'agent done.\n\ncall:\n    shepherd_status {}' }],
+    details: { call: { name: 'shepherd_status' }, returnCode: 0 },
+  },
+  'shepherd_status',
+  plainTheme,
+  {}
+);
+assert.equal(collapsedStatus, 'agent done.');
+console.log('PASS collapsed status results hide protocol call/return/details text');
+
+const collapsedHerd = renderCollapsedLifecycleResult(
+  {
+    content: [{ type: 'text', text: '• pi (self/focused) ●(shepherd) [working] pane=w1:p1 cwd=/private' }],
+    details: {
+      call: { name: 'shepherd' },
+      agents: [{ name: 'pi', state: 'working', focused: true, shepherd: true, paneId: 'w1:p1', cwd: '/private' }],
+      returnCode: 0,
+    },
+  },
+  'shepherd',
+  plainTheme,
+  {}
+);
+assert.equal(collapsedHerd, 'Active agents: 1');
+assert.doesNotMatch(collapsedHerd, /pane=|cwd=|pi \(self\/focused\)/);
+console.log('PASS collapsed herd results show only the active-agent count');
+
+const expandedHerd = formatExpandedToolResult({
+  content: [{ type: 'text', text: '• pi (self/focused) [working]' }],
+  details: {
+    call: { name: 'shepherd', arguments: { agentScope: 'both' } },
+    agents: [
+      { name: 'pi', state: 'working', focused: true, shepherd: true },
+      { name: 'pi', state: 'idle', focused: false, shepherd: false },
+    ],
+    returnCode: 0,
+  },
+});
+assert.match(expandedHerd, /agents:\n  agent id: shepherd\n    state: working/);
+assert.doesNotMatch(expandedHerd, /\n\s+- /);
+assert.doesNotMatch(expandedHerd, /paneId|cwd/);
+console.log('PASS expanded herd arrays keep each item marker beside its first field');
+
+const spawnWithoutOptionalPlacement = structuredClone(spawnResult);
+delete spawnWithoutOptionalPlacement.details.call.arguments.placement;
+assert.doesNotMatch(
+  formatExpandedToolResult(spawnWithoutOptionalPlacement),
+  /placement:/,
+  'absent optional spawn placement is omitted'
+);
+console.log('PASS optional call arguments are omitted when absent');
+
+const messageResult = {
+  content: [{ type: 'text', text: 'Message queued to worker' }],
+  details: {
+    call: {
+      name: 'shepherd_message',
+      arguments: {
+        target: 'shepherd-agent-123',
+        message: 'First line\nStatus: pending\nThird line',
+      },
+    },
+    returnValue: {
+      messageId: 'shepherd-message-123',
+      accepted: true,
+      delivery: 'queued',
+    },
+    returnCode: 0,
+  },
+};
+const messageExpanded = formatExpandedToolResult(messageResult);
+assert.match(messageExpanded, /call\ntarget: shepherd-agent-123\nmessage:\nFirst line\nStatus: pending\nThird line\n\nreturn\nstatus: queued/);
+console.log('PASS multiline message content uses a raw copy-friendly block');
+
+const theme = {
+  bold: text => `<bold>${text}</bold>`,
+  fg: (color, text) => `<${color}>${text}</${color}>`,
+};
+const styledMessage = styleExpandedToolResult(messageExpanded, theme);
+assert.match(styledMessage, /<accent>message:<\/accent>/);
+assert.match(styledMessage, /<toolOutput>Status: pending<\/toolOutput>/);
+assert.doesNotMatch(styledMessage, /<accent>Status:/);
+assert.match(styledMessage, /<bold>call<\/bold>/);
+assert.match(styledMessage, /<bold>return<\/bold>/);
+console.log('PASS raw message lines stay normal while headers and labels are styled');
+
+const longSingleLine = 'A long single-line message that should wrap naturally in the terminal without introducing explicit line breaks.';
+const longMessage = formatExpandedToolResult({
+  content: [{ type: 'text', text: 'Message queued to worker' }],
+  details: {
+    call: { name: 'shepherd_message', arguments: { target: 'shepherd-agent-123', message: longSingleLine } },
+    returnValue: { messageId: 'shepherd-message-long', delivery: 'queued' },
+    returnCode: 0,
+  },
+});
+assert.match(longMessage, new RegExp(`message:\\n${longSingleLine.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\n\\nreturn`));
+console.log('PASS long single-line messages stay single-line in the raw block');
+
+const parentMessage = formatParentMessageNotification({
+  kind: 'reply',
+  senderId: 'shepherd-agent-123',
+  messageId: 'shepherd-message-123',
+  taskId: 'shepherd-task-123',
+  threadId: 'shepherd-message-001',
+  replyTo: 'shepherd-message-000',
+  content: 'Reply line one\nReply line two',
+});
+assert.match(parentMessage, /^Shepherd reply from shepherd-agent-123/);
+assert.match(parentMessage, /message id: shepherd-message-123/);
+assert.match(parentMessage, /message:\nReply line one\nReply line two/);
+assert.doesNotMatch(parentMessage, /\ncall:\n|\nreturn:\n|\ndetails:/);
+console.log('PASS incoming replies use a human-readable notification layout');
+
+const watcher = formatWatcherNotification({
+  watcherId: 'shepherd-watcher-123',
+  taskIds: ['shepherd-task-123'],
+  completions: [{
+    taskId: 'shepherd-task-123',
+    agentId: 'shepherd-agent-123',
+    status: 'completed',
+    text: 'Finished the task.',
+    returnCode: 0,
+  }],
+}, 'task');
+assert.match(watcher, /^Shepherd watcher/);
+assert.match(watcher, /watcher id: shepherd-watcher-123/);
+assert.match(watcher, /completions:/);
+assert.doesNotMatch(watcher, /\ncall:\n|\nreturn:\n|\ndetails:/);
+console.log('PASS watcher notifications use structured human-readable fields');
+
+const stale = formatStaleWaitNotification({
+  taskId: 'shepherd-task-123',
+  agentId: 'shepherd-agent-123',
+  agent: 'worker',
+  label: 'code review',
+  elapsedMs: 61000,
+  thresholdMinutes: 1,
+  description: 'Review the implementation.',
+  question: 'Should the notification be reformatted?',
+  requestMessageId: 'shepherd-message-000',
+  recipientName: 'planner',
+});
+assert.match(stale, /^Shepherd stale wait/);
+assert.match(stale, /question:\nShould the notification be reformatted\?/);
+assert.match(stale, /actions:\n/);
+console.log('PASS stale-wait notifications use readable raw question/action blocks');
+
+console.log('All rendering assertions passed.');

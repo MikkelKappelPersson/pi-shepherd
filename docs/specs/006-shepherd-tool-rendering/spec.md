@@ -184,21 +184,26 @@ The collapsed result row is:
 The call row supplies the operation context. The result row should not repeat
 `worker`, the label, placement, or the opaque agent ID.
 
-When expanded, the success result retains the protocol details below the
-status line:
+When expanded, the success result uses the final spaced, human-readable
+layout:
 
 ```text
 ✓ success
 
-call:
-    shepherd_spawn {...}
+call
+agent: worker
+label: minimal headers verification
+placement: tab
 
-return:
-    {...}
-
-details:
-    ...
+return
+status: spawned
+agent id: shepherd-agent-...
+model: github-copilot/gpt-5.6-luna
 ```
+
+Optional call arguments remain visible in the expanded call when they were
+provided. For example, `placement: tab` is shown when that placement was part
+of the invocation; absent optional arguments are omitted.
 
 ### Failed result
 
@@ -215,19 +220,20 @@ For example:
 ```
 
 The complete tool shell must use Pi's native error background. Expanded output
-retains the status and protocol details:
+retains the status, call, and curated error return:
 
 ```text
 ✗ failed · Unknown agent "worker" in user scope. No agents are available.
 
-call:
-    shepherd_spawn {...}
+call
+agent: worker
+label: code review
+placement: tab
 
-return:
-    {"code":"shepherd_error", ...}
-
-details:
-    return code: 1
+return
+status: failed
+error: Unknown agent "worker" in user scope. No agents are available.
+return code: 1
 ```
 
 The error message should come from structured error details when available.
@@ -256,23 +262,170 @@ This deliberately separates:
 
 ## Expanded output
 
-Expanded output is the debugging and inspection path. It may include:
+Expanded output is the human inspection path. It should be semantic and
+copy-friendly rather than a dump of JSON. The expanded renderer should retain the call and return concepts, but format
+each as labeled fields. It should not render a separate details section:
 
-- the serialized public call;
-- the returned value;
-- opaque lifecycle IDs;
-- model selection;
-- fieldnote/artifact paths;
-- return codes;
-- structured error information.
+```text
+call
+target: worker
+expects reply: yes
+delivery: followUp
+message:
+First line
+Second line
+Third line
 
-The expanded renderer should preserve section labels (`call:`, `return:`, and
-`details:`) and use the standard Shepherd theme treatment. It must not change
-the underlying result content merely to make the collapsed view shorter.
+return
+status: queued
+message id: shepherd-message-...
+delivery: queued
+```
+
+Message values always start on the line after the `message:` label. Top-level
+call arguments and return fields are rendered without indentation so labels and
+raw message content share the same visual edge. Multiline text is rendered as a raw text
+block without Markdown fences or per-line prefixes. Long single-line messages
+use the same layout and wrap naturally in the terminal. Nested objects and
+arrays may still use indentation. Section headers and argument/return labels
+should use bold styling without accent color while argument and return labels
+use accent styling. Values remain normal output styling. The message content
+itself should remain unstyled normal text. This keeps the
+message content easy to select and paste while avoiding visual fence characters
+that Pi does not render as a special text block.
+
+Common scalar values should be rendered as labeled fields rather than JSON:
+
+```text
+agent: worker
+label: code review
+placement: pane_right
+return code: 0
+```
+
+Nested objects should become nested labeled sections, and arrays should use one
+item per line. Ordinary strings should not receive JSON quotes or escaped
+newline sequences. Opaque lifecycle IDs, model names, fieldnote/artifact paths,
+return codes, and structured error information remain available in expanded
+output because this is the inspection path.
+
+The return section is curated for human use. It should include the primary
+operation result, useful identifiers, state, delivery information, and errors.
+It should omit duplicate call arguments, successful `returnCode: 0`, recursive
+artifact/session metadata, and internal parent-session paths. The complete
+`details` object remains available to the model/API; it is not rendered as a
+separate human-facing section.
+
+A dedicated copy-message interaction is out of scope for this iteration. The
+raw message block is intentionally not prefixed or fenced so selecting its
+content preserves the message text as closely as possible.
+
+The expanded section labels are intentionally minimal:
+
+```text
+call
+return
+```
+The operation name is already present in the outer call row, and the result
+status is rendered as a `status:` field under `return`.
+
+The expanded renderer must not change the underlying result content merely to
+make the collapsed view shorter. The model/API-facing result and structured
+`details` remain the source of truth; this is a TUI-only presentation layer.
+Expanded non-spawn results begin with one blank line so the `call` section is
+visually separated from the outer invocation row.
+The final spawn presentation is:
+
+```text
+shepherd_spawn worker · minimal headers verification · tab
+✓ success
+
+call
+agent: worker
+label: minimal headers verification
+placement: tab
+
+return
+status: spawned
+agent id: shepherd-agent-...
+model: github-copilot/gpt-5.6-luna
+```
+
+## Formatting function names
+
+The existing `formatUserFacingText()` and `withUserFacingContent()` names are
+misleading because their output is also delivered to the model/API surface.
+Before adding the human-readable expanded formatter, rename them to neutral
+names:
+
+```text
+formatUserFacingText()   → formatToolResultText()
+withUserFacingContent()  → withToolResultText()
+```
+
+The new TUI-only functions should have clearly separate names, for example:
+
+```text
+formatExpandedToolResult()
+formatHumanValue()
+formatMultilineValue()
+```
+
+`formatToolResultText()` remains responsible for shared protocol-oriented text;
+`formatExpandedToolResult()` is responsible only for the human-readable TUI
+view. The latter renders only `call` and a curated `return`; it does not emit a
+separate `details` section.
+
+## Custom notification rendering
+
+Incoming replies, child messages, task completions, prompt completions, and
+stale-wait notices are delivered through `pi.sendMessage()`, so they do not
+use a registered tool's `renderResult()` callback. Their message `content`
+remains protocol-oriented for the model/API, while the custom message renderer
+uses the structured `details` payload for the human-facing view.
+
+A reply is rendered as a compact metadata block followed by a raw message
+block:
+
+```text
+Shepherd reply from worker: code review
+message id: shepherd-message-...
+task id: shepherd-task-...
+thread id: shepherd-message-...
+reply to: shepherd-message-...
+message:
+The reply remains plain and copyable.
+```
+
+Watcher and stale-wait notifications use the same flat labels and raw blocks.
+They must not render a separate `call`, `return`, or `details` dump, and prose
+inside notification fields must not be mistaken for field labels.
 
 ## Generalization to other lifecycle tools
 
-The same two-row pattern should be applied to the remaining lifecycle tools:
+The same two-row pattern should be applied to the remaining lifecycle tools.
+The umbrella `shepherd herd` result is a special compact count. Its collapsed
+result is only `Active agents: <count>`. Agent identities and states belong in
+the expanded view, not the routine collapsed row.
+
+In expanded output, lifecycle-owned entries use their opaque ID, with their
+state fields indented beneath the identity and no list-dash noise:
+
+```text
+agents:
+  agent id: shepherd-agent-...
+    agent: worker
+    label: code review
+    state: idle
+
+  agent id: shepherd
+    state: working
+    focused: yes
+```
+
+The parent Shepherd process has no spawned-agent ID, so it uses the stable
+`agent id: shepherd` alias. Herdr pane IDs, workspace IDs, and working
+directories remain hidden.
 
 | Tool | Call row | Result row |
 |---|---|---|
@@ -296,7 +449,10 @@ protocol. Each renderer should preserve `expanded` and `isPartial` behavior.
 - The partial result is a compact `spawning…` state.
 - Failed execution renders `✗ failed · <error>` and the complete Pi tool shell
   uses the error background.
-- Expanded output retains the structured call, return, and details sections.
+- Expanded output retains semantic call and curated return sections without a
+  separate details dump.
+- Multiline values are rendered inside copy-friendly fences without per-line
+  prefixes.
 - The model still receives the opaque agent ID after a successful spawn.
 - A failed tool execution is signaled by throwing, not only by a non-zero
   `returnCode` in returned details.

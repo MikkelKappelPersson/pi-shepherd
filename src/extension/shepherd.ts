@@ -248,7 +248,52 @@ function displayAgentName(agentId: string): string {
   }
 }
 
-function formatUserFacingText(result: any): string | undefined {
+function lifecycleHandleForPane(paneId: unknown): any | undefined {
+  if (typeof paneId !== 'string' || !paneId) return undefined;
+  return lifecycleRegistry.allAgents().find(handle => handle.paneId === paneId);
+}
+
+function shepherdHerdAgents(agents: unknown[]): any[] {
+  return agents
+    .filter(agent => agent && typeof agent === 'object' && (agent as any).shepherd === true)
+    .map(agent => {
+      const record = agent as Record<string, unknown>;
+      const handle = lifecycleHandleForPane(record.paneId);
+      const visible: Record<string, unknown> = handle
+        ? {
+            agentId: handle.id,
+            agent: handle.agent,
+            ...(handle.label ? { label: handle.label } : {}),
+          }
+        : { agentId: record.focused === true ? 'shepherd' : record.name };
+      return {
+        ...visible,
+        state: record.state,
+        ...(record.focused === true ? { focused: true } : {}),
+      };
+    });
+}
+
+function formatHerdAgentList(agents: unknown[], indent = '  '): string[] {
+  return agents.flatMap((agent, index) => {
+    if (!agent || typeof agent !== 'object' || Array.isArray(agent)) {
+      return [`${indent}${formatHumanScalar(agent)}`];
+    }
+    const entries = Object.entries(agent);
+    if (entries.length === 0) return [`${indent}agent id: unknown`];
+    const [[firstKey, firstValue], ...rest] = entries;
+    const firstLines = formatHumanField(humanizeKey(firstKey), firstValue, indent);
+    return [
+      ...(index > 0 ? [''] : []),
+      ...firstLines,
+      ...rest.flatMap(([key, value]) =>
+        formatHumanField(humanizeKey(key), value, `${indent}  `)
+      ),
+    ];
+  });
+}
+
+function formatToolResultText(result: any): string | undefined {
   const body = result?.content?.[0]?.type === 'text' ? (result.content[0].text ?? '') : undefined;
   const details = result?.details && typeof result.details === 'object' ? result.details : {};
   const call = details.call;
@@ -293,13 +338,106 @@ function formatReturnValue(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function withUserFacingContent(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
-  const text = formatUserFacingText(result);
+function withToolResultText(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
+  const text = formatToolResultText(result);
   return text === undefined ? result : { ...result, content: [{ type: 'text', text }] };
 }
 
 function reusableText(lastComponent: unknown): Text {
   return lastComponent instanceof Text ? lastComponent : new Text('', 0, 0);
+}
+
+/**
+ * Render custom Shepherd notifications from their structured `details` payload.
+ * The message content intentionally remains the detailed protocol text for the
+ * model/API; this formatter is only used by the human-facing message renderer.
+ */
+function renderShepherdNotification(
+  message: any,
+  options: { outputPad?: number },
+  theme: any,
+  formatted?: string,
+): Box {
+  const content = formatted ?? notificationFallbackText(message);
+  const lines = content.split('\n');
+  const title = lines.shift() ?? 'Shepherd notification';
+  const rendered = theme.fg('toolTitle', theme.bold(title)) +
+    (lines.length ? `\n${styleExpandedToolResult(lines.join('\n'), theme)}` : '');
+  const box = new Box(0, 1, (text: string) => theme.bg('customMessageBg', text));
+  box.addChild(new Text(rendered, options.outputPad ?? 0, 0));
+  return box;
+}
+
+function notificationFallbackText(message: any): string {
+  const content = typeof message?.content === 'string' ? message.content : '';
+  const marker = content.indexOf('\n\ncall:\n');
+  return marker >= 0 ? content.slice(0, marker) : content;
+}
+
+export function formatParentMessageNotification(envelope: any, customType?: string): string | undefined {
+  if (!envelope || typeof envelope !== 'object' || !envelope.messageId) return undefined;
+  const isReply = envelope.kind === 'reply' || customType === 'shepherd.message.reply';
+  const sender = displayAgentName(String(envelope.senderId ?? envelope.from ?? 'unknown'));
+  const lines = [`Shepherd ${isReply ? 'reply' : 'message'} from ${sender}`];
+  for (const [label, value] of [
+    ['message id', envelope.messageId],
+    ['task id', envelope.taskId],
+    ['thread id', envelope.threadId],
+    ['reply to', envelope.replyTo],
+  ] as const) {
+    if (value !== undefined && value !== null && value !== '') {
+      lines.push(...formatHumanField(label, value, ''));
+    }
+  }
+  lines.push(...formatHumanField('message', String(envelope.content ?? ''), ''));
+  return lines.join('\n');
+}
+
+export function formatWatcherNotification(details: any, kind: 'task' | 'prompt'): string | undefined {
+  if (!details || typeof details !== 'object' || !Array.isArray(details.completions)) return undefined;
+  const lines = ['Shepherd watcher'];
+  const idLabel = kind === 'task' ? 'task ids' : 'prompt ids';
+  const ids = kind === 'task' ? details.taskIds : details.promptIds;
+  if (details.watcherId) lines.push(...formatHumanField('watcher id', details.watcherId, ''));
+  if (Array.isArray(ids)) lines.push(...formatHumanField(idLabel, ids, ''));
+  lines.push(...formatHumanField('completions', details.completions, ''));
+  return lines.join('\n');
+}
+
+export function formatStaleWaitNotification(info: any): string | undefined {
+  if (!info || typeof info !== 'object' || !info.taskId) return undefined;
+  const owner = info.label ? `${info.agent ?? info.agentId}: ${info.label}` : info.agent ?? info.agentId;
+  const recipient = info.recipientName
+    ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
+    : undefined;
+  const lines = ['Shepherd stale wait'];
+  if (info.elapsedMs !== undefined) {
+    lines.push(...formatHumanField(
+      'waiting',
+      `${formatElapsedMs(info.elapsedMs)} (stale after ${info.thresholdMinutes} min)`,
+      ''
+    ));
+  }
+  lines.push(...formatHumanField('task id', info.taskId, ''));
+  if (owner) lines.push(...formatHumanField('owner', owner, ''));
+  if (info.description) lines.push(...formatHumanField('description', info.description, ''));
+  if (info.question) lines.push(...formatHumanField('question', info.question, ''));
+  if (info.requestMessageId) {
+    const pending = recipient
+      ? `${info.requestMessageId} (waiting on ${recipient})`
+      : info.requestMessageId;
+    lines.push(...formatHumanField('pending request', pending, ''));
+  }
+  lines.push(...formatHumanField(
+    'actions',
+    [
+      'Reply to the recipient on the owner\'s behalf via shepherd_message (set replyTo to the pending request).',
+      `Or nudge ${recipient ?? 'the target agent'} with shepherd_message (targetId = recipient).`,
+      'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
+    ].join('\n'),
+    ''
+  ));
+  return lines.join('\n');
 }
 
 let watcherParentSessionActive = true;
@@ -317,31 +455,9 @@ export function setShepherdMessageSessionActive(active: boolean): void {
 }
 
 function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
-  pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) => {
-    const content = typeof message.content === 'string' ? message.content : '';
-    const lines = content.split('\n');
-    const firstLine = lines.shift() ?? '';
-    const summary = firstLine.startsWith('shepherd_watcher ')
-      ? firstLine.slice('shepherd_watcher '.length)
-      : firstLine.startsWith('Shepherd watcher ')
-        ? firstLine.slice('Shepherd watcher '.length)
-        : firstLine;
-    const rendered = [
-      theme.fg('toolTitle', theme.bold('shepherd_watcher')) +
-        (summary ? ` ${theme.fg('accent', summary)}` : ''),
-      ...lines.map(line =>
-        ['call:', 'return:', 'details:'].includes(line)
-          ? theme.fg('accent', line)
-          : theme.fg('toolOutput', line)
-      ),
-    ].join('\n');
-    // Custom message renderers replace Pi's default custom-message component,
-    // including its themed background. Recreate that container here while
-    // keeping the Shepherd-specific title and section styling.
-    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
-    box.addChild(new Text(rendered, options.outputPad, 0));
-    return box;
-  });
+  pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) =>
+    renderShepherdNotification(message, options, theme, formatWatcherNotification(message?.details, 'prompt'))
+  );
 }
 
 /** Enable/disable task-watcher delivery without changing the core service's state model. */
@@ -364,21 +480,9 @@ function formatElapsedMs(ms: number): string {
 }
 
 function registerStaleWaitRenderer(pi: ExtensionAPI): void {
-  pi.registerMessageRenderer('shepherd.stale.wait', (message, options, theme) => {
-    const content = typeof message.content === 'string' ? message.content : '';
-    const lines = content.split('\n');
-    const firstLine = lines.shift() ?? '';
-    const rendered = [
-      theme.fg('toolTitle', theme.bold('shepherd_stale_wait')),
-      theme.fg('accent', firstLine),
-      ...lines.map(line =>
-        ['action:'].includes(line) ? theme.fg('accent', line) : theme.fg('toolOutput', line)
-      ),
-    ].join('\n');
-    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
-    box.addChild(new Text(rendered, options.outputPad, 0));
-    return box;
-  });
+  pi.registerMessageRenderer('shepherd.stale.wait', (message, options, theme) =>
+    renderShepherdNotification(message, options, theme, formatStaleWaitNotification(message?.details))
+  );
 }
 
 function configureStaleWaitBridge(pi: ExtensionAPI): void {
@@ -403,7 +507,7 @@ function configureStaleWaitBridge(pi: ExtensionAPI): void {
       `Or nudge ${recipient} with shepherd_message (targetId = recipient).`,
       'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
     ].join('\n');
-    const content = formatUserFacingText({
+    const content = formatToolResultText({
       content: [{ type: 'text' as const, text: body }],
       details: {
         call: {
@@ -438,28 +542,9 @@ function configureStaleWaitBridge(pi: ExtensionAPI): void {
 }
 
 function registerTaskCompletionRenderer(pi: ExtensionAPI): void {
-  pi.registerMessageRenderer('shepherd.task.completion', (message, options, theme) => {
-    const content = typeof message.content === 'string' ? message.content : '';
-    const lines = content.split('\n');
-    const firstLine = lines.shift() ?? '';
-    const summary = firstLine.startsWith('shepherd_watcher ')
-      ? firstLine.slice('shepherd_watcher '.length)
-      : firstLine.startsWith('Shepherd watcher ')
-        ? firstLine.slice('Shepherd watcher '.length)
-        : firstLine;
-    const rendered = [
-      theme.fg('toolTitle', theme.bold('shepherd_watcher')) +
-        (summary ? ` ${theme.fg('accent', summary)}` : ''),
-      ...lines.map(line =>
-        ['call:', 'return:', 'details:'].includes(line)
-          ? theme.fg('accent', line)
-          : theme.fg('toolOutput', line)
-      ),
-    ].join('\n');
-    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
-    box.addChild(new Text(rendered, options.outputPad, 0));
-    return box;
-  });
+  pi.registerMessageRenderer('shepherd.task.completion', (message, options, theme) =>
+    renderShepherdNotification(message, options, theme, formatWatcherNotification(message?.details, 'task'))
+  );
 }
 
 /**
@@ -491,7 +576,7 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
       .join(', ');
     const returnCode =
       notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
-    const content = formatUserFacingText({
+    const content = formatToolResultText({
       content: [
         {
           type: 'text',
@@ -565,7 +650,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       .join(', ');
     const returnCode =
       notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
-    const content = formatUserFacingText({
+    const content = formatToolResultText({
       content: [
         {
           type: 'text',
@@ -616,7 +701,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       '',
       envelope.content ?? '',
     ].filter(Boolean).join('\n');
-    const content = formatUserFacingText({
+    const content = formatToolResultText({
       content: [{ type: 'text' as const, text: body }],
       details: {
         call: {
@@ -649,24 +734,8 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
 }
 
 function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
-  const render = (message: any, options: any, theme: any) => {
-    const content = typeof message.content === 'string' ? message.content : '';
-    const lines = content.split('\n');
-    const firstLine = lines.shift() ?? '';
-    const isReply = firstLine.startsWith('reply:') || (message.customType === 'shepherd.message.reply');
-    const rendered = [
-      theme.fg('toolTitle', theme.bold(isReply ? 'shepherd_reply' : 'shepherd_message')) +
-        ` ${theme.fg('accent', firstLine)}`,
-      ...lines.map(line =>
-        ['call:', 'return:', 'details:'].includes(line)
-          ? theme.fg('accent', line)
-          : theme.fg('toolOutput', line)
-      ),
-    ].join('\n');
-    const box = new Box(0, 1, text => theme.bg('customMessageBg', text));
-    box.addChild(new Text(rendered, options.outputPad, 0));
-    return box;
-  };
+  const render = (message: any, options: any, theme: any) =>
+    renderShepherdNotification(message, options, theme, formatParentMessageNotification(message?.details, message?.customType));
   pi.registerMessageRenderer('shepherd.message.incoming', render);
   pi.registerMessageRenderer('shepherd.message.reply', render);
 }
@@ -1053,12 +1122,12 @@ async function executeShepherd(
   // will resume polling when the runtime is reachable again.
   if (!isHerdrAvailable() && label !== 'watch') {
     const failure = unavailableResult(label, args);
-    throw new Error(formatUserFacingText(failure) ?? HERDR_SETUP_HINT);
+    throw new Error(formatToolResultText(failure) ?? HERDR_SETUP_HINT);
   }
   try {
     const result = await doAction(args, ctx, signal, onUpdate);
     const details = result.details && typeof result.details === 'object' ? result.details : {};
-    return withUserFacingContent({
+    return withToolResultText({
       ...result,
       details: { call: publicToolCall(label, args, ctx.cwd), ...(details as Record<string, unknown>) },
     });
@@ -1066,7 +1135,7 @@ async function executeShepherd(
     const message = String(error?.message ?? error);
     const returnCode = typeof error?.returnCode === 'number' ? error.returnCode : 1;
     const code = typeof error?.code === 'string' ? error.code : 'shepherd_error';
-    const failure = withUserFacingContent({
+    const failure = withToolResultText({
       content: [{ type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` }],
       details: {
         call: publicToolCall(label, args, ctx.cwd),
@@ -1225,10 +1294,8 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall('shepherd_delegate', [args.target, args.task, args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined], theme, context);
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1270,10 +1337,13 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall(
+        'shepherd_message',
+        [args.target, args.message, args.expectsReply ? 'expects reply' : undefined, args.delivery],
+        theme,
+        context
+      );
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1312,10 +1382,13 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall(
+        'shepherd_prompt',
+        [args.id, args.message, args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined],
+        theme,
+        context
+      );
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1357,10 +1430,9 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof WatchParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('watch', { action: 'watch', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      const ids = Array.isArray(args.id) ? args.id.join(', ') : args.id;
+      return renderLifecycleCall('shepherd_watch', [ids], theme, context);
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1388,10 +1460,8 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall('shepherd_status', [args.id], theme, context);
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1419,10 +1489,8 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         signal,
         onUpdate
       ),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall('shepherd_close', [args.id], theme, context);
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1447,14 +1515,41 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     prepareArguments: input => prepareForSchema<Omit<Static<typeof ReadParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeShepherd('read', { action: 'read', ...params } as ShepherdArgs, ctx, signal, onUpdate),
-    renderCall(_args, _theme, context) {
-      const component = reusableText(context.lastComponent);
-      component.setText('');
-      return component;
+    renderCall(args, theme, context) {
+      return renderLifecycleCall(
+        'shepherd_read',
+        [args.name, args.source, args.lines !== undefined ? `${args.lines} lines` : undefined],
+        theme,
+        context
+      );
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
   });
+}
+
+function compactCallValue(value: unknown, maxLength = 72): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+
+function renderLifecycleCall(
+  name: string,
+  parts: unknown[],
+  theme: any,
+  context: any,
+): Text {
+  const component = reusableText(context.lastComponent);
+  const values = parts
+    .filter(value => value !== undefined && value !== null && value !== '')
+    .map(value => compactCallValue(value));
+  component.setText(
+    theme.fg('toolTitle', theme.bold(name)) +
+      (values.length ? ` ${theme.fg('accent', values[0])}` : '') +
+      (values.length > 1 ? theme.fg('dim', ` ${values.slice(1).map(value => `· ${value}`).join(' ')}`) : '')
+  );
+  return component;
 }
 
 function renderSpawnResult(
@@ -1473,7 +1568,7 @@ function renderSpawnResult(
     return component;
   }
 
-  const rendered = formatUserFacingText(result);
+  const rendered = formatToolResultText(result);
   if (rendered === undefined) return renderToolResult(result, options, theme, context);
 
   const firstLine = rendered.split('\n')[0] ?? '';
@@ -1493,6 +1588,12 @@ function renderSpawnResult(
     return component;
   }
 
+  const expanded = formatExpandedToolResult(result);
+  if (expanded !== undefined) {
+    component.setText(`${status}\n\n${styleExpandedToolResult(expanded, theme)}`);
+    return component;
+  }
+
   const newline = rendered.indexOf('\n');
   const remainder = newline >= 0 ? rendered.slice(newline) : '';
   const styledRemainder = remainder
@@ -1509,12 +1610,29 @@ function renderSpawnResult(
 
 /** Render every Shepherd result with the same user-facing structure. */
 function renderUserFacingResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
-  const rendered = formatUserFacingText(result);
+  const rendered = formatToolResultText(result);
   if (rendered === undefined) return renderToolResult(result, options, theme, context);
   const component = reusableText(context.lastComponent);
   const callName = result?.details?.call?.name;
   if (typeof callName !== 'string') {
     component.setText(theme.fg('toolOutput', rendered));
+    return component;
+  }
+
+  if (options.expanded) {
+    const expanded = formatExpandedToolResult(result);
+    if (expanded !== undefined) {
+      // Keep the expanded result visually separate from the outer invocation
+      // row. Spawn adds its own status block; the shared result path needs one
+      // leading blank line before the `call` section.
+      component.setText(`\n${styleExpandedToolResult(expanded, theme)}`);
+      return component;
+    }
+  }
+
+  const lifecycleStatus = renderCollapsedLifecycleResult(result, callName, theme, context);
+  if (lifecycleStatus !== undefined) {
+    component.setText(lifecycleStatus);
     return component;
   }
 
@@ -1534,6 +1652,251 @@ function renderUserFacingResult(result: any, options: { expanded?: boolean }, th
     .join('\n');
   component.setText(styled + (lines.length ? `\n${remainder}` : ''));
   return component;
+}
+
+export function formatExpandedToolResult(result: any): string | undefined {
+  const details = result?.details && typeof result.details === 'object' ? result.details : {};
+  const call = details.call;
+  if (!call || typeof call.name !== 'string') return undefined;
+
+  const callArguments = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
+  const lines = ['call'];
+  // Keep top-level call arguments flat. This lets raw message blocks start at
+  // the same visual edge as their label and avoids a misleading hanging
+  // indent when Pi wraps a long single-line value. Include optional arguments
+  // whenever they were present in the invocation.
+  lines.push(...formatHumanRecord(callArguments, ''));
+
+  const body = resultTextBody(result);
+  const summary = humanReturnSummary(call.name, body, details);
+  if (lines.at(-1) !== '') lines.push('');
+  lines.push('return', `status: ${summary}`);
+  if (call.name === 'shepherd' && Array.isArray(details.agents) && details.scope === undefined) {
+    const activeCount = details.agents.filter((agent: any) => agent?.shepherd === true).length;
+    lines.push(...formatHumanField('active agents', activeCount, ''));
+  } else if (body.includes('\n')) {
+    lines.push(...formatHumanField('output', body, ''));
+  }
+
+  const returnValueKeys = ['returnValue', 'result'].filter(key =>
+    Object.prototype.hasOwnProperty.call(details, key)
+  );
+  for (const key of returnValueKeys) {
+    lines.push(...formatHumanReturnValue(
+      key === 'returnValue' ? details[key] : details[key],
+      call.name,
+      callArguments,
+      '',
+      body
+    ));
+  }
+
+  const returnValueObject = returnValueKeys.length === 1 &&
+    details[returnValueKeys[0]] && typeof details[returnValueKeys[0]] === 'object' &&
+    !Array.isArray(details[returnValueKeys[0]])
+    ? details[returnValueKeys[0]]
+    : undefined;
+  const returnedKeys = new Set(returnValueObject ? Object.keys(returnValueObject) : []);
+  const extraEntries = Object.entries(details).filter(([key]) => {
+    if (['call', 'returnValue', 'result', 'artifactSession', 'fieldnote', 'returnCode'].includes(key)) return false;
+    if (key === 'error') return true;
+    return !returnedKeys.has(key) && !['agent', 'label', 'model', 'id'].includes(key);
+  });
+  for (const [key, value] of extraEntries) {
+    if (call.name === 'shepherd' && key === 'agents' && Array.isArray(value)) {
+      lines.push('agents:', ...formatHerdAgentList(shepherdHerdAgents(value)));
+      continue;
+    }
+    lines.push(...formatHumanField(humanizeKey(key), value, ''));
+  }
+  if (typeof details.returnCode === 'number' && details.returnCode !== 0) {
+    lines.push(...formatHumanField('return code', details.returnCode, ''));
+  }
+  return lines.join('\n');
+}
+
+function humanReturnSummary(callName: string, body: string, details: Record<string, any>): string {
+  if (details.error !== undefined || /failed/i.test(body)) return 'failed';
+  if (callName === 'shepherd_spawn' && /spawned/i.test(body)) return 'spawned';
+  if (callName === 'shepherd_message' && /queued/i.test(body)) return 'queued';
+  if (callName === 'shepherd_delegate' && /delegated/i.test(body)) return 'delegated';
+  if (callName === 'shepherd_prompt' && /prompted/i.test(body)) return 'prompted';
+  if (callName === 'shepherd_watch' && /watching|already settled/i.test(body)) {
+    return /watching/i.test(body) ? 'watching…' : 'completed';
+  }
+  if (callName === 'shepherd_close' && /closed/i.test(body)) return 'closed';
+  if (body.includes('\n')) return 'output';
+  return body || 'completed';
+}
+
+export function renderCollapsedLifecycleResult(
+  result: any,
+  callName: string,
+  theme: any,
+  context: any,
+): string | undefined {
+  const details = result?.details && typeof result.details === 'object' ? result.details : {};
+  const failed = context?.isError === true || details.error !== undefined ||
+    (details.returnCode !== undefined && Number(details.returnCode) !== 0);
+  if (failed) {
+    const body = resultTextBody(result);
+    const firstLine = body.split('\n')[0] ?? '';
+    const error = typeof details.error === 'string'
+      ? details.error
+      : firstLine.replace(/^Herd \w+ failed(?: \(return code \d+\))?:\s*/, '') || 'unknown error';
+    return theme.fg('error', `✗ failed${error ? ` · ${error}` : ''}`);
+  }
+  if (callName === 'shepherd' && Array.isArray(details.agents) && details.scope === undefined) {
+    const agents = details.agents.filter((agent: any) => agent?.shepherd === true);
+    return theme.fg('toolOutput', `Active agents: ${agents.length}`);
+  }
+  if (callName === 'shepherd_delegate') return theme.fg('success', '✓ delegated');
+  if (callName === 'shepherd_message') {
+    return details.targetTaskState === 'waiting'
+      ? theme.fg('warning', 'waiting…')
+      : theme.fg('success', '✓ queued');
+  }
+  if (callName === 'shepherd_prompt') return theme.fg('success', '✓ prompted');
+  if (callName === 'shepherd_watch') {
+    const pending = Array.isArray(details.pending) ? details.pending.length : 0;
+    return pending > 0
+      ? theme.fg('warning', 'watching…')
+      : theme.fg('success', '✓ completed');
+  }
+  if (callName === 'shepherd_close') return theme.fg('success', '✓ closed');
+
+  // Status, read, and umbrella actions do not need a synthetic success icon;
+  // their first result line is already the useful collapsed summary. Never
+  // fall back to the protocol-oriented call/return/details text here.
+  const body = resultTextBody(result);
+  const firstLine = body.split('\n')[0] ?? '';
+  return theme.fg('toolOutput', firstLine || 'completed');
+}
+
+function formatHumanReturnValue(
+  value: unknown,
+  callName: string,
+  callArguments: Record<string, unknown>,
+  indent: string,
+  body: string,
+): string[] {
+  if (typeof value === 'string' && value === body) return [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return formatHumanField('value', value, indent);
+  }
+  return Object.entries(value).flatMap(([key, entry]) => {
+    if (callName === 'shepherd_spawn' && ['agent', 'label'].includes(key)) return [];
+    if (key === 'id' && callName === 'shepherd_spawn') {
+      return formatHumanField('agent id', entry, indent);
+    }
+    if (key === 'placement' && callArguments.placement === entry) return [];
+    return formatHumanField(humanizeKey(key), entry, indent);
+  });
+}
+
+function resultTextBody(result: any): string {
+  const body = result?.content?.[0]?.type === 'text' ? String(result.content[0].text ?? '') : '';
+  const protocolMarker = '\n\ncall:\n';
+  const markerIndex = body.indexOf(protocolMarker);
+  return markerIndex >= 0 ? body.slice(0, markerIndex) : body;
+}
+
+function formatHumanRecord(value: unknown, indent: string): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return formatHumanField('value', value, indent);
+  }
+  return Object.entries(value).flatMap(([key, entry]) =>
+    formatHumanField(humanizeKey(key), entry, indent)
+  );
+}
+
+function formatHumanField(label: string, value: unknown, indent: string): string[] {
+  const isTextBlock = typeof value === 'string' &&
+    (value.includes('\n') || ['message', 'task', 'question', 'description', 'output'].includes(label));
+  if (isTextBlock) {
+    return [`${indent}${label}:`, value as string, ''];
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return [
+      `${indent}${label}:`,
+      ...formatHumanRecord(value, `${indent}  `),
+    ];
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [`${indent}${label}: []`];
+    return [
+      `${indent}${label}:`,
+      ...value.flatMap(item => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const entries = Object.entries(item);
+          if (entries.length === 0) return [`${indent}  -`];
+          const [[firstKey, firstValue], ...rest] = entries;
+          const firstLines = formatHumanField(
+            humanizeKey(firstKey),
+            firstValue,
+            `${indent}    `
+          );
+          const firstLine = firstLines.shift() ?? `${indent}    ${humanizeKey(firstKey)}:`;
+          return [
+            `${indent}  - ${firstLine.trimStart()}`,
+            ...firstLines,
+            ...rest.flatMap(([key, value]) =>
+              formatHumanField(humanizeKey(key), value, `${indent}    `)
+            ),
+          ];
+        }
+        return [`${indent}  - ${formatHumanScalar(item)}`];
+      }),
+    ];
+  }
+  return [`${indent}${label}: ${formatHumanScalar(value)}`];
+}
+
+function formatHumanScalar(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  return String(value);
+}
+
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase();
+}
+
+export function styleExpandedToolResult(text: string, theme: any): string {
+  // A raw text field (notably `message`) is deliberately left untouched. In
+  // particular, lines such as `Status: pending` inside the message are data,
+  // not human-readable field labels. The formatter emits a blank separator
+  // after these blocks, which gives us an unambiguous end marker while keeping
+  // the block flat and copy-friendly.
+  let rawBlock = false;
+  return text
+    .split('\n')
+    .map(line => {
+      if (/^(call|return)$/.test(line)) {
+        rawBlock = false;
+        return theme.bold(line);
+      }
+      if (rawBlock) {
+        if (line === '') rawBlock = false;
+        return theme.fg('toolOutput', line);
+      }
+      const field = line.match(/^(\s*)(-\s+)?([A-Za-z][A-Za-z0-9 _-]*):(\s*)(.*)$/);
+      if (field) {
+        const isRawField = field[5] === '' &&
+          ['message', 'task', 'question', 'description', 'output', 'actions', 'text'].includes(field[3].toLowerCase());
+        rawBlock = isRawField;
+        return field[1] +
+          (field[2] ?? '') +
+          theme.fg('accent', `${field[3]}:`) +
+          field[4] +
+          theme.fg('toolOutput', field[5]);
+      }
+      return theme.fg('toolOutput', line);
+    })
+    .join('\n');
 }
 
 function renderToolResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
