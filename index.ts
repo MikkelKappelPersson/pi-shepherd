@@ -394,9 +394,14 @@ export default function (pi: ExtensionAPI) {
     // Fieldnotes are intentionally session-scoped. Persisted setting changes
     // are applied when the next parent pi session starts.
     initializeSessionSettings(ctx.cwd);
+    // Advance the in-memory lifecycle namespace when pi switches parent
+    // sessions. The extension module can survive a session switch, so labels
+    // and opaque lifecycle ids must not leak across the boundary.
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    lifecycleRegistry.beginSession(sessionId);
     // Bind this session's identity so the panes it creates are tagged and the
     // widget/registry views are scoped to its own sheep.
-    bindSessionOwner(ctx.sessionManager?.getSessionId?.());
+    bindSessionOwner(sessionId);
   });
   pi.on('session_shutdown', (_event, _ctx) => {
     // Watchers are parent-session scoped. Stop timers and discard delivery

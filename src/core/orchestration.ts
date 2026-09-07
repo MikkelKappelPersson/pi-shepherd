@@ -246,6 +246,8 @@ export class LifecycleError extends Error {
 }
 
 interface AgentRecord {
+  /** Internal registry generation; records from another pi session are stale. */
+  lifecycleSessionId: string;
   handle: AgentHandle;
   /** Completion sidecar emitted by the child for each completed prompt. */
   completionSignalPath?: string;
@@ -263,6 +265,8 @@ interface AgentRecord {
 }
 
 interface TaskRecordInternal extends Omit<TaskRecord, 'pendingRequestIds'> {
+  /** Internal registry generation; records from another pi session are stale. */
+  lifecycleSessionId: string;
   pendingRequestIds: Set<string>;
   settled: boolean;
   onSettled?: (result: TaskResult) => void;
@@ -270,6 +274,8 @@ interface TaskRecordInternal extends Omit<TaskRecord, 'pendingRequestIds'> {
 }
 
 interface PromptRecord {
+  /** Internal registry generation; records from another pi session are stale. */
+  lifecycleSessionId: string;
   handle: PromptHandle;
   artifactSession?: ShepherdSession;
   artifact?: ArtifactReservation;
@@ -288,8 +294,9 @@ interface PromptRecord {
 }
 
 /**
- * In-memory registry for one extension process. Public ids are opaque and
- * include a random component, so callers never need to know Herdr pane ids.
+ * In-memory registry for the extension process. Public ids are opaque and
+ * include a random component; records are additionally scoped to the active
+ * parent pi session so callers never need to know Herdr pane ids.
  */
 function handleId(input: unknown, kind: 'AgentHandle' | 'PromptHandle'): string {
   if (
@@ -324,8 +331,13 @@ function taskHandleId(input: unknown): string {
 }
 
 export class LifecycleRegistry {
-  private readonly sessionId = randomUUID().slice(0, 8);
+  /** Opaque id namespace for the currently active parent pi session. */
+  private sessionId = randomUUID().slice(0, 8);
+  /** Real pi session identity used to make repeated session_start idempotent. */
+  private parentSessionId?: string;
   private readonly agents = new Map<string, AgentRecord>();
+  /** Reserved spawn ids are tied to the generation that allocated them. */
+  private readonly allocatedAgentSessions = new Map<string, string>();
   private readonly prompts = new Map<string, PromptRecord>();
   private readonly tasks = new Map<string, TaskRecordInternal>();
   private readonly watchers = new Map<string, {
@@ -343,9 +355,34 @@ export class LifecycleRegistry {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
   }
 
+  /**
+   * Start (or re-enter) a parent pi session.
+   *
+   * The extension module can remain loaded while pi switches sessions, so the
+   * in-memory registry must advance its opaque-id namespace explicitly. Old
+   * records remain in memory so late callbacks can be recognized and ignored,
+   * but all public lookups and projections treat them as retired.
+   *
+   * A missing identity is deliberately a no-op: without a session id we
+   * cannot distinguish a repeated event for the same session from a switch.
+   */
+  beginSession(parentSessionId?: string): void {
+    const normalized = parentSessionId?.trim();
+    if (!normalized || normalized === this.parentSessionId) return;
+    this.parentSessionId = normalized;
+    this.sessionId = randomUUID().slice(0, 8);
+    this.clearWatchers();
+  }
+
+  private isCurrent(record: { lifecycleSessionId: string }): boolean {
+    return record.lifecycleSessionId === this.sessionId;
+  }
+
   /** Reserve an opaque agent id before a child process is launched. */
   allocateAgentId(): string {
-    return this.id('agent');
+    const id = this.id('agent');
+    this.allocatedAgentSessions.set(id, this.sessionId);
+    return id;
   }
 
   registerAgent(
@@ -359,17 +396,25 @@ export class LifecycleRegistry {
   ): AgentHandle {
     const label = validateAgentLabel(input.label);
     const display = formatAgentName(input.agent, label);
-    if (label && [...this.agents.values()].some(a => formatAgentName(a.handle.agent, a.handle.label) === display))
+    if (label && [...this.agents.values()].some(a => this.isCurrent(a) && formatAgentName(a.handle.agent, a.handle.label) === display))
       throw new Error(`Duplicate agent label "${display}".`);
     const requestedId = input.id;
     if (requestedId !== undefined && (typeof requestedId !== 'string' || !requestedId.trim())) {
       throw new LifecycleError('invalid_handle', 'Agent id must be a non-empty opaque string when supplied internally.');
     }
+    if (requestedId) {
+      const allocatedSession = this.allocatedAgentSessions.get(requestedId);
+      if (allocatedSession && allocatedSession !== this.sessionId) {
+        throw new LifecycleError('invalid_handle', `Agent id "${requestedId}" belongs to a retired parent session.`);
+      }
+    }
     if (requestedId && this.agents.has(requestedId)) {
       throw new LifecycleError('invalid_handle', `Agent id "${requestedId}" is already registered.`);
     }
     const handle = { ...input, label, id: requestedId ?? this.id('agent') };
+    if (requestedId) this.allocatedAgentSessions.delete(requestedId);
     this.agents.set(handle.id, {
+      lifecycleSessionId: this.sessionId,
       handle,
       completionSignalPath: metadata.completionSignalPath,
       completionResultPath: metadata.completionResultPath,
@@ -383,7 +428,7 @@ export class LifecycleRegistry {
   getAgent(input: AgentHandleInput | unknown): AgentRecord {
     const id = handleId(input, 'AgentHandle');
     const record = this.agents.get(id);
-    if (!record)
+    if (!record || !this.isCurrent(record))
       throw new LifecycleError(
         'unknown_handle',
         `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result. A Herdr pane id is not an agent id.`
@@ -425,13 +470,13 @@ export class LifecycleRegistry {
   taskStatusForAgent(record: AgentRecord): AgentTaskStatus | undefined {
     if (!record.activeTaskId) return undefined;
     const task = this.tasks.get(record.activeTaskId);
-    if (!task || task.settled) return undefined;
+    if (!task || !this.isCurrent(task) || task.settled) return undefined;
     const waiting = task.state === 'waiting' ? task.waitingSince : undefined;
     let waitingRecipient: string | undefined;
     if (task.pendingReplyTargetAgentId) {
       try {
         const recipient = this.agents.get(task.pendingReplyTargetAgentId);
-        waitingRecipient = recipient
+        waitingRecipient = recipient && this.isCurrent(recipient)
           ? formatAgentName(recipient.handle.agent, recipient.handle.label)
           : task.pendingReplyTargetAgentId;
       } catch {
@@ -507,6 +552,7 @@ export class LifecycleRegistry {
     const deadlineAt = options.deadlineAt ??
       (options.timeoutMs !== undefined ? createdAt + options.timeoutMs : undefined);
     this.tasks.set(task.id, {
+      lifecycleSessionId: this.sessionId,
       taskId: task.id,
       agentId,
       description: description.trim(),
@@ -522,7 +568,7 @@ export class LifecycleRegistry {
     if (record.deadlineAt !== undefined) {
       const delay = Math.max(0, record.deadlineAt - Date.now());
       record.timeoutId = setTimeout(() => {
-        if (!record.settled) {
+        if (!record.settled && this.isCurrent(record)) {
           this.settleTask(task.id, {
             status: 'timed_out',
             error: 'Tracked task deadline reached.',
@@ -586,7 +632,7 @@ export class LifecycleRegistry {
   private taskRecord(input: TaskHandleInput | unknown): TaskRecordInternal {
     const id = taskHandleId(input);
     const record = this.tasks.get(id);
-    if (!record) {
+    if (!record || !this.isCurrent(record)) {
       throw new LifecycleError(
         'unknown_task',
         `Unknown task id "${id}". Task ids are scoped to this parent session; use the id returned by shepherd_delegate, not an agent id or Herdr pane id.`
@@ -662,7 +708,9 @@ export class LifecycleRegistry {
   }
 
   allTasks(): TaskRecord[] {
-    return [...this.tasks.values()].map(record => this.taskSnapshot(record));
+    return [...this.tasks.values()]
+      .filter(record => this.isCurrent(record))
+      .map(record => this.taskSnapshot(record));
   }
 
   activeTaskForAgent(handle: AgentHandleInput): TaskRecord | undefined {
@@ -1003,6 +1051,7 @@ export class LifecycleRegistry {
     const promise = new Promise<PromptResult>(r => (resolve = r));
     const prompt: PromptHandle = { id: this.id('prompt'), agentId, createdAt: Date.now() };
     this.prompts.set(prompt.id, {
+      lifecycleSessionId: this.sessionId,
       handle: prompt,
       baselineStateChangeSeq,
       baselineCompletionSignalId,
@@ -1016,14 +1065,17 @@ export class LifecycleRegistry {
     // Do not arm a timeout here; waitPrompts owns the timeout and will set/extend it.
     // A very long safety net (1h) is set only if wait is never called.
     const safetyTimeoutId = setTimeout(
-      () =>
+      () => {
+        const record = this.prompts.get(prompt.id);
+        if (!record || !this.isCurrent(record)) return;
         this.settlePrompt(prompt, {
           promptId: prompt.id,
           agentId: prompt.agentId,
           status: 'timeout',
           ok: false,
           error: 'Prompt timed out (safety net: wait never called).',
-        }),
+        });
+      },
       3_600_000
     );
     this.prompts.get(prompt.id)!.timeoutId = safetyTimeoutId;
@@ -1033,7 +1085,7 @@ export class LifecycleRegistry {
   getPrompt(input: PromptHandleInput | unknown): PromptRecord {
     const id = handleId(input, 'PromptHandle');
     const record = this.prompts.get(id);
-    if (!record)
+    if (!record || !this.isCurrent(record))
       throw new LifecycleError(
         'unknown_handle',
         `Unknown prompt id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest prompt result, not an agent id or Herdr pane id.`
@@ -1100,7 +1152,8 @@ export class LifecycleRegistry {
 
   /** True when an opaque handle string is a tracked task id for this session. */
   isTaskId(id: string): boolean {
-    return this.tasks.has(id);
+    const record = this.tasks.get(id);
+    return !!record && this.isCurrent(record);
   }
 
   /** Task ids that still have at least one active watcher. */
@@ -1140,7 +1193,10 @@ export class LifecycleRegistry {
         : Array.isArray(callback)
           ? cb => { for (const one of callback) one(cb); }
           : (cb: TaskWatcherCompletion) => { callback(cb); };
-    const agentHandleOf = (agentId: string) => this.agents.get(agentId)?.handle;
+    const agentHandleOf = (agentId: string) => {
+      const agent = this.agents.get(agentId);
+      return agent && this.isCurrent(agent) ? agent.handle : undefined;
+    };
     const notify = (record: TaskRecordInternal, settledNow: boolean): void => {
       const result = record.result!;
       const completedAt = result.completedAt;
@@ -1342,7 +1398,9 @@ export class LifecycleRegistry {
   }
 
   allAgents(): AgentHandle[] {
-    return [...this.agents.values()].map(r => ({ ...r.handle }));
+    return [...this.agents.values()]
+      .filter(record => this.isCurrent(record))
+      .map(r => ({ ...r.handle }));
   }
 }
 
