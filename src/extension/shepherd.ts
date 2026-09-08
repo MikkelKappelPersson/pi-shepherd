@@ -370,8 +370,12 @@ function renderShepherdNotification(
         if (/^⚠/.test(line)) return theme.fg('warning', line);
         return theme.fg('toolOutput', line);
       }).join('\n')
-    : styleExpandedToolResult(lines.join('\n'), theme);
-  const titleParts = collapsed ? title.split(/\s+/) : [title];
+    : styleExpandedToolResult(
+      lines.join('\n'),
+      theme,
+      message?.details?.messageId ? { boldFields: ['message'] } : undefined
+    );
+  const titleParts = title.split(/\s+/);
   const titleVerb = titleParts.shift() ?? 'Shepherd';
   const titleArgs = titleParts.join(' ');
   const renderedTitle = theme.fg('toolTitle', theme.bold(titleVerb)) +
@@ -385,13 +389,19 @@ function renderShepherdNotification(
 
 /** Compact custom notifications the same way collapsed tool results show only
  * their useful summary. Ctrl+O still exposes the structured notification. */
+function compactNotificationText(value: unknown, maxLength = 160): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 export function formatCollapsedNotification(message: any, formatted: string): string {
   const lines = formatted.split('\n');
   const title = lines[0] ?? 'Shepherd notification';
   const details = message?.details;
   if (details?.messageId) {
-    const text = String(details.content ?? '').replace(/\s+/g, ' ').trim();
-    return text ? `${title}: ${text}` : title;
+    const text = compactNotificationText(details.content);
+    return text ? `${title}\n${text}` : title;
   }
   if (Array.isArray(details?.completions)) {
     const ids = details.taskIds ?? details.promptIds ?? details.completions
@@ -422,6 +432,7 @@ export function formatParentMessageNotification(envelope: any, customType?: stri
   const isReply = envelope.kind === 'reply' || customType === 'shepherd.message.reply';
   const sender = displayAgentName(String(envelope.senderId ?? envelope.from ?? 'unknown'));
   const lines = [`Shepherd ${isReply ? 'reply' : 'message'} from ${sender}`];
+  const metadata: string[] = [];
   for (const [label, value] of [
     ['message id', envelope.messageId],
     ['task id', envelope.taskId],
@@ -429,10 +440,11 @@ export function formatParentMessageNotification(envelope: any, customType?: stri
     ['reply to', envelope.replyTo],
   ] as const) {
     if (value !== undefined && value !== null && value !== '') {
-      lines.push(...formatHumanField(label, value, ''));
+      metadata.push(...formatHumanField(label, value, ''));
     }
   }
-  lines.push(...formatHumanField('message', String(envelope.content ?? ''), ''));
+  if (metadata.length) lines.push('', ...metadata);
+  lines.push('', ...formatHumanField('message', String(envelope.content ?? ''), ''));
   return lines.join('\n');
 }
 
@@ -720,7 +732,10 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
     if (envelope.kind === 'runtime') return; // task-state mirror only; never a user-facing message
     const sender = displayAgentName(envelope.senderId);
     const title = envelope.kind === 'reply' ? 'Shepherd reply' : 'Shepherd message';
-    const content = `${title} from ${sender}: ${String(envelope.content ?? '').replace(/\s+/g, ' ').trim()}`;
+    // Keep the notification fallback readable too: the custom renderer uses
+    // `details` for collapsed/expanded views, while the message content keeps
+    // the sender heading and full message on separate lines for other clients.
+    const content = `${title} from ${sender}\n${String(envelope.content ?? '')}`;
     try {
       const sendResult: any = pi.sendMessage(
         {
@@ -1905,7 +1920,11 @@ function humanizeKey(key: string): string {
     .toLowerCase();
 }
 
-export function styleExpandedToolResult(text: string, theme: any): string {
+export function styleExpandedToolResult(
+  text: string,
+  theme: any,
+  options: { boldFields?: string[] } = {},
+): string {
   // A raw text field (notably `message`) is deliberately left untouched. In
   // particular, lines such as `Status: pending` inside the message are data,
   // not human-readable field labels. The formatter emits a blank separator
@@ -1928,9 +1947,12 @@ export function styleExpandedToolResult(text: string, theme: any): string {
         const isRawField = field[5] === '' &&
           ['message', 'task', 'question', 'description', 'output', 'actions', 'text'].includes(field[3].toLowerCase());
         rawBlock = isRawField;
+        const label = options.boldFields?.some(name => name.toLowerCase() === field[3].toLowerCase())
+          ? theme.bold(`${field[3]}:`)
+          : theme.fg('accent', `${field[3]}:`);
         return field[1] +
           (field[2] ?? '') +
-          theme.fg('accent', `${field[3]}:`) +
+          label +
           field[4] +
           theme.fg('toolOutput', field[5]);
       }

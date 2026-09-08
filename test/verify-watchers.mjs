@@ -52,6 +52,7 @@ service.shutdown();
 // message, and preserves structured completion details.
 const sent = [];
 let registeredMessageRenderer;
+let registeredReplyRenderer;
 registerShepherdTools({
   registerTool() {},
   registerMessageRenderer(customType, renderer) {
@@ -66,6 +67,7 @@ registerShepherdTools({
       'unexpected custom message renderer: ' + customType
     );
     if (customType === 'shepherd.prompt.completion') registeredMessageRenderer = renderer;
+    if (customType === 'shepherd.message.reply') registeredReplyRenderer = renderer;
   },
   sendMessage(message, options) {
     sent.push({ message, options });
@@ -105,6 +107,27 @@ assert.ok(expandedLines.includes('Shepherd watcher'));
 assert.ok(expandedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`)));
 assert.ok(expandedLines.some(line => line.includes('completions:')));
 assert.equal(sent[0].message.customType, 'shepherd.prompt.completion');
+assert.equal(typeof registeredReplyRenderer, 'function');
+const expandedReply = registeredReplyRenderer(
+  {
+    customType: 'shepherd.message.reply',
+    details: {
+      kind: 'reply',
+      messageId: 'shepherd-message-rendering',
+      senderId: bridgeAgent.id,
+      content: 'Reply text',
+    },
+  },
+  { expanded: true, outputPad: 0 },
+  {
+    fg: (color, text) => `<${color}>${text}</${color}>`,
+    bold: text => `<bold>${text}</bold>`,
+    bg: (_color, text) => text,
+  },
+);
+const expandedReplyText = expandedReply.render(200).join('\n');
+assert.match(expandedReplyText, /<toolTitle><bold>Shepherd<\/bold><\/toolTitle> <accent>reply from planner: bridge<\/accent>/);
+assert.doesNotMatch(expandedReplyText, /<bold>Shepherd reply from planner/);
 assert.equal(sent[0].message.details.completions[0].promptId, bridgePrompt.id);
 assert.equal(sent[0].message.details.completions[0].agentId, bridgeAgent.id);
 const notificationFirstLine = sent[0].message.content.split('\n')[0];

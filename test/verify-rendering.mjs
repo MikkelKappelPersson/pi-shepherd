@@ -256,11 +256,13 @@ const parentMessage = formatParentMessageNotification({
   replyTo: 'shepherd-message-000',
   content: 'Reply line one\nReply line two',
 });
-assert.match(parentMessage, /^Shepherd reply from shepherd-agent-123/);
-assert.match(parentMessage, /message id: shepherd-message-123/);
-assert.match(parentMessage, /message:\nReply line one\nReply line two/);
+assert.match(parentMessage, /^Shepherd reply from shepherd-agent-123\n\nmessage id:/);
+assert.match(parentMessage, /reply to: shepherd-message-000\n\nmessage:\nReply line one\nReply line two/);
 assert.doesNotMatch(parentMessage, /\ncall:\n|\nreturn:\n|\ndetails:/);
-console.log('PASS incoming replies use a human-readable notification layout');
+const styledParentMessage = styleExpandedToolResult(parentMessage, theme, { boldFields: ['message'] });
+assert.match(styledParentMessage, /<bold>message:<\/bold>/);
+assert.match(styledParentMessage, /<accent>message id:<\/accent>/);
+console.log('PASS incoming replies use spacious metadata and a bold message label');
 const collapsedReply = formatCollapsedNotification({
   details: {
     messageId: 'shepherd-message-123',
@@ -268,8 +270,17 @@ const collapsedReply = formatCollapsedNotification({
     content: 'Reply line one\nReply line two',
   },
 }, parentMessage);
-assert.equal(collapsedReply, 'Shepherd reply from shepherd-agent-123: Reply line one Reply line two');
-console.log('PASS collapsed incoming replies show only the sender and message summary');
+assert.equal(collapsedReply, 'Shepherd reply from shepherd-agent-123\nReply line one Reply line two');
+const collapsedLongReply = formatCollapsedNotification({
+  details: {
+    messageId: 'shepherd-message-long',
+    content: 'A very long message '.repeat(20),
+  },
+}, parentMessage);
+assert.equal(collapsedLongReply.split('\n').length, 2);
+assert.ok(collapsedLongReply.split('\n')[1].endsWith('…'));
+assert.ok(collapsedLongReply.split('\n')[1].length <= 160);
+console.log('PASS collapsed incoming replies show a concise sender and message summary');
 
 const watcher = formatWatcherNotification({
   watcherId: 'shepherd-watcher-123',
