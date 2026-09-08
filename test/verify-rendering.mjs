@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatExpandedToolResult,
   formatParentMessageNotification,
+  formatCollapsedNotification,
   renderCollapsedLifecycleResult,
   formatStaleWaitNotification,
   formatWatcherNotification,
@@ -99,6 +100,30 @@ assert.equal(
   ].join('\n')
 );
 console.log('PASS expanded status results remove duplicated status metadata');
+
+const expandedCompletedWatch = formatExpandedToolResult({
+  content: [{ type: 'text', text: 'watch completed' }],
+  details: {
+    call: { name: 'shepherd_watch', arguments: { id: 'shepherd-task-123' } },
+    returnValue: {
+      watcherId: 'shepherd-watcher-123',
+      pending: [],
+      completed: [{
+        taskId: 'shepherd-task-123',
+        agentId: 'shepherd-agent-123',
+        status: 'completed',
+        returnCode: 0,
+        text: 'First line\nSecond line',
+        artifact: { id: 'large/session-note.md', task: 'omit this metadata' },
+      }],
+    },
+    returnCode: 0,
+  },
+});
+assert.match(expandedCompletedWatch, /completions:\n/);
+assert.match(expandedCompletedWatch, /text:\nFirst line\nSecond line/);
+assert.doesNotMatch(expandedCompletedWatch, /omit this metadata|artifact:/);
+console.log('PASS expanded completed watcher results omit artifact metadata and preserve text blocks');
 
 const collapsedHerd = renderCollapsedLifecycleResult(
   {
@@ -236,6 +261,15 @@ assert.match(parentMessage, /message id: shepherd-message-123/);
 assert.match(parentMessage, /message:\nReply line one\nReply line two/);
 assert.doesNotMatch(parentMessage, /\ncall:\n|\nreturn:\n|\ndetails:/);
 console.log('PASS incoming replies use a human-readable notification layout');
+const collapsedReply = formatCollapsedNotification({
+  details: {
+    messageId: 'shepherd-message-123',
+    senderId: 'shepherd-agent-123',
+    content: 'Reply line one\nReply line two',
+  },
+}, parentMessage);
+assert.equal(collapsedReply, 'Shepherd reply from shepherd-agent-123: Reply line one Reply line two');
+console.log('PASS collapsed incoming replies show only the sender and message summary');
 
 const watcher = formatWatcherNotification({
   watcherId: 'shepherd-watcher-123',
@@ -244,13 +278,16 @@ const watcher = formatWatcherNotification({
     taskId: 'shepherd-task-123',
     agentId: 'shepherd-agent-123',
     status: 'completed',
-    text: 'Finished the task.',
+    text: 'Finished the task.\nSecond line of the result.',
     returnCode: 0,
+    artifact: { id: 'session/worker-01.md', task: 'large durable metadata' },
   }],
 }, 'task');
 assert.match(watcher, /^Shepherd watcher/);
 assert.match(watcher, /watcher id: shepherd-watcher-123/);
 assert.match(watcher, /completions:/);
+assert.match(watcher, /text:\nFinished the task\.\nSecond line of the result\./);
+assert.doesNotMatch(watcher, /large durable metadata|artifact:/);
 assert.doesNotMatch(watcher, /\ncall:\n|\nreturn:\n|\ndetails:/);
 console.log('PASS watcher notifications use structured human-readable fields');
 

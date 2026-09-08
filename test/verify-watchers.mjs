@@ -90,20 +90,30 @@ const renderedNotification = registeredMessageRenderer(
   { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
 );
 const renderedLines = renderedNotification.render(200).map(line => line.trimEnd());
-assert.ok(renderedLines.includes('Shepherd watcher'));
-assert.ok(renderedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`)));
-assert.ok(renderedLines.some(line => line.includes('completions:')));
+assert.ok(renderedLines.some(line => line.includes(`shepherd_watch ${bridgePrompt.id}`)));
+assert.ok(renderedLines.some(line => line.includes('✓ success')));
+assert.equal(renderedLines.some(line => line.includes('watcher id:')), false);
+assert.equal(renderedLines.some(line => line.includes('completions:')), false);
 assert.equal(renderedLines.some(line => /^(call:|return:|details:)$/.test(line)), false);
+const expandedNotification = registeredMessageRenderer(
+  sent[0].message,
+  { expanded: true, outputPad: 0 },
+  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
+);
+const expandedLines = expandedNotification.render(200).map(line => line.trimEnd());
+assert.ok(expandedLines.includes('Shepherd watcher'));
+assert.ok(expandedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`)));
+assert.ok(expandedLines.some(line => line.includes('completions:')));
 assert.equal(sent[0].message.customType, 'shepherd.prompt.completion');
 assert.equal(sent[0].message.details.completions[0].promptId, bridgePrompt.id);
 assert.equal(sent[0].message.details.completions[0].agentId, bridgeAgent.id);
 const notificationFirstLine = sent[0].message.content.split('\n')[0];
 assert.equal(notificationFirstLine, 'shepherd_watcher completion: planner: bridge done');
 assert.doesNotMatch(notificationFirstLine, /shepherd-(?:watch|prompt)-/);
-assert.match(sent[0].message.content, /\ncall:\n    shepherd_watch \{"id":".*"\}/);
-assert.match(sent[0].message.content, /\nreturn:\n    \[\{"promptId":"/);
-assert.match(sent[0].message.content, /\ndetails:\n/);
-assert.doesNotMatch(sent[0].message.content, /Process the structured completion details/);
+assert.equal(sent[0].message.content, 'shepherd_watcher completion: planner: bridge done');
+assert.doesNotMatch(sent[0].message.content, /\nreturn:\n/);
+assert.ok(Array.isArray(sent[0].message.details.completions));
+assert.doesNotMatch(sent[0].message.content, /\ncall:\n|\nreturn:\n|\ndetails:/);
 assert.deepEqual(sent[0].options, { deliverAs: 'steer', triggerTurn: true });
 promptWatcherService.shutdown();
 console.log('All watcher assertions passed.');

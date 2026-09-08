@@ -354,18 +354,61 @@ function reusableText(lastComponent: unknown): Text {
  */
 function renderShepherdNotification(
   message: any,
-  options: { outputPad?: number },
+  options: { expanded?: boolean; outputPad?: number },
   theme: any,
   formatted?: string,
 ): Box {
   const content = formatted ?? notificationFallbackText(message);
-  const lines = content.split('\n');
+  const collapsed = options.expanded !== true;
+  const renderedContent = collapsed ? formatCollapsedNotification(message, content) : content;
+  const lines = renderedContent.split('\n');
   const title = lines.shift() ?? 'Shepherd notification';
-  const rendered = theme.fg('toolTitle', theme.bold(title)) +
-    (lines.length ? `\n${styleExpandedToolResult(lines.join('\n'), theme)}` : '');
-  const box = new Box(0, 1, (text: string) => theme.bg('customMessageBg', text));
-  box.addChild(new Text(rendered, options.outputPad ?? 0, 0));
+  const renderedRemainder = collapsed
+    ? lines.map(line => {
+        if (/^✓/.test(line)) return theme.fg('success', line);
+        if (/^✗/.test(line)) return theme.fg('error', line);
+        if (/^⚠/.test(line)) return theme.fg('warning', line);
+        return theme.fg('toolOutput', line);
+      }).join('\n')
+    : styleExpandedToolResult(lines.join('\n'), theme);
+  const titleParts = collapsed ? title.split(/\s+/) : [title];
+  const titleVerb = titleParts.shift() ?? 'Shepherd';
+  const titleArgs = titleParts.join(' ');
+  const renderedTitle = theme.fg('toolTitle', theme.bold(titleVerb)) +
+    (titleArgs ? ` ${theme.fg('accent', titleArgs)}` : '');
+  const rendered = renderedTitle +
+    (lines.length ? `\n${renderedRemainder}` : '');
+  const box = new Box(options.outputPad ?? 0, 1, (text: string) => theme.bg('customMessageBg', text));
+  box.addChild(new Text(rendered, 0, 0));
   return box;
+}
+
+/** Compact custom notifications the same way collapsed tool results show only
+ * their useful summary. Ctrl+O still exposes the structured notification. */
+export function formatCollapsedNotification(message: any, formatted: string): string {
+  const lines = formatted.split('\n');
+  const title = lines[0] ?? 'Shepherd notification';
+  const details = message?.details;
+  if (details?.messageId) {
+    const text = String(details.content ?? '').replace(/\s+/g, ' ').trim();
+    return text ? `${title}: ${text}` : title;
+  }
+  if (Array.isArray(details?.completions)) {
+    const ids = details.taskIds ?? details.promptIds ?? details.completions
+      .map((completion: any) => completion.taskId ?? completion.promptId)
+      .filter((id: unknown): id is string => typeof id === 'string');
+    const target = Array.isArray(ids) && ids.length > 0 ? ids.join(', ') : 'completion';
+    const failed = details.completions.some((completion: any) =>
+      !['completed', 'done'].includes(completion.status) ||
+      (completion.returnCode !== undefined && completion.returnCode !== 0)
+    );
+    return [
+      `shepherd_watch ${target}`,
+      `${failed ? '✗ failed' : '✓ success'}`,
+    ].join('\n');
+  }
+  if (details?.taskId) return `${title}: ${details.taskId}`;
+  return title;
 }
 
 function notificationFallbackText(message: any): string {
@@ -393,6 +436,17 @@ export function formatParentMessageNotification(envelope: any, customType?: stri
   return lines.join('\n');
 }
 
+function compactWatcherCompletion(completion: any): Record<string, unknown> {
+  if (!completion || typeof completion !== 'object') return { value: completion };
+  const keys = [
+    'taskId', 'promptId', 'agentId', 'agent', 'label', 'status', 'ok',
+    'returnCode', 'text', 'error', 'completedAt',
+  ];
+  return Object.fromEntries(keys
+    .filter(key => completion[key] !== undefined && completion[key] !== null && completion[key] !== '')
+    .map(key => [key, completion[key]]));
+}
+
 export function formatWatcherNotification(details: any, kind: 'task' | 'prompt'): string | undefined {
   if (!details || typeof details !== 'object' || !Array.isArray(details.completions)) return undefined;
   const lines = ['Shepherd watcher'];
@@ -400,7 +454,13 @@ export function formatWatcherNotification(details: any, kind: 'task' | 'prompt')
   const ids = kind === 'task' ? details.taskIds : details.promptIds;
   if (details.watcherId) lines.push(...formatHumanField('watcher id', details.watcherId, ''));
   if (Array.isArray(ids)) lines.push(...formatHumanField(idLabel, ids, ''));
-  lines.push(...formatHumanField('completions', details.completions, ''));
+  // Completion artifacts are durable storage metadata, not watcher output.
+  // Keep the expanded notification focused on operational fields.
+  lines.push(...formatHumanField(
+    'completions',
+    details.completions.map(compactWatcherCompletion),
+    ''
+  ));
   return lines.join('\n');
 }
 
@@ -565,7 +625,6 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
   registerTaskCompletionRenderer(pi);
   configureTaskWatcherNotifications(notification => {
     if (!taskWatcherParentSessionActive) return;
-    const taskIds = notification.completions.map(completion => completion.taskId);
     const summary = notification.completions
       .map(completion => {
         const identity = completion.label
@@ -576,24 +635,9 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
       .join(', ');
     const returnCode =
       notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
-    const content = formatToolResultText({
-      content: [
-        {
-          type: 'text',
-          text: `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
-        },
-      ],
-      details: {
-        call: {
-          name: 'shepherd_watch',
-          arguments: { id: taskIds.length === 1 ? taskIds[0] : taskIds },
-        },
-        watcherId: notification.watcherId,
-        taskIds,
-        returnCode,
-        returnValue: notification.completions,
-      },
-    });
+    // Keep the model-visible notification compact. The structured payload is
+    // retained in `details` for the expanded custom renderer and consumers.
+    const content = `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`;
     try {
       const sendResult: any = pi.sendMessage(
         {
@@ -639,7 +683,6 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
   registerShepherdMessageRenderer(pi);
   configurePromptWatcherNotifications(notification => {
     if (!watcherParentSessionActive) return;
-    const promptIds = notification.completions.map(completion => completion.promptId);
     const summary = notification.completions
       .map(completion => {
         const identity = completion.label
@@ -650,24 +693,9 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       .join(', ');
     const returnCode =
       notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
-    const content = formatToolResultText({
-      content: [
-        {
-          type: 'text',
-          text: `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
-        },
-      ],
-      details: {
-        call: {
-          name: 'shepherd_watch',
-          arguments: { id: promptIds.length === 1 ? promptIds[0] : promptIds },
-        },
-        watcherId: notification.watcherId,
-        promptIds,
-        returnCode,
-        returnValue: notification.completions,
-      },
-    });
+    // Keep the model-visible notification compact. The structured payload is
+    // retained in `details` for the expanded custom renderer and consumers.
+    const content = `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`;
     try {
       const sendResult: any = pi.sendMessage(
         {
@@ -692,27 +720,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
     if (envelope.kind === 'runtime') return; // task-state mirror only; never a user-facing message
     const sender = displayAgentName(envelope.senderId);
     const title = envelope.kind === 'reply' ? 'Shepherd reply' : 'Shepherd message';
-    const body = [
-      `${title} from ${sender}`,
-      `Message ID: ${envelope.messageId}`,
-      envelope.taskId ? `Task ID: ${envelope.taskId}` : undefined,
-      envelope.threadId ? `Thread ID: ${envelope.threadId}` : undefined,
-      envelope.replyTo ? `Reply to: ${envelope.replyTo}` : undefined,
-      '',
-      envelope.content ?? '',
-    ].filter(Boolean).join('\n');
-    const content = formatToolResultText({
-      content: [{ type: 'text' as const, text: body }],
-      details: {
-        call: {
-          name: 'shepherd_message',
-          arguments: { target: envelope.senderId, message: envelope.content },
-        },
-        messageId: envelope.messageId,
-        from: envelope.senderId,
-        returnValue: { messageId: envelope.messageId, from: envelope.senderId, kind: envelope.kind },
-      },
-    });
+    const content = `${title} from ${sender}: ${String(envelope.content ?? '').replace(/\s+/g, ' ').trim()}`;
     try {
       const sendResult: any = pi.sendMessage(
         {
@@ -1797,10 +1805,24 @@ function formatHumanReturnValue(
   body: string,
 ): string[] {
   if (typeof value === 'string' && value === body) return [];
+  if (callName === 'shepherd_watch' && Array.isArray(value)) {
+    return formatHumanField(
+      'completions',
+      value.map(compactWatcherCompletion),
+      indent
+    );
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return formatHumanField('value', value, indent);
   }
   return Object.entries(value).flatMap(([key, entry]) => {
+    if (callName === 'shepherd_watch' && key === 'completed' && Array.isArray(entry)) {
+      return formatHumanField(
+        'completions',
+        entry.map(compactWatcherCompletion),
+        indent
+      );
+    }
     if (callName === 'shepherd_spawn' && ['agent', 'label'].includes(key)) return [];
     if (callName === 'shepherd_status' && key === 'id' && callArguments.id === entry) return [];
     if (callName === 'shepherd_status' && key === 'state') return [];
@@ -1830,7 +1852,7 @@ function formatHumanRecord(value: unknown, indent: string): string[] {
 
 function formatHumanField(label: string, value: unknown, indent: string): string[] {
   const isTextBlock = typeof value === 'string' &&
-    (value.includes('\n') || ['message', 'task', 'question', 'description', 'output'].includes(label));
+    (value.includes('\n') || ['message', 'task', 'question', 'description', 'output', 'text'].includes(label));
   if (isTextBlock) {
     return [`${indent}${label}:`, value as string, ''];
   }
