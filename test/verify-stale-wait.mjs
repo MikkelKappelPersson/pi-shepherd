@@ -209,6 +209,34 @@ await withFakeDateNow(0, async clock => {
 }
 
 {
+  // Workspace-specific threshold must use the waiting task's cwd rather than
+  // the parent process cwd or a different registry's global state.
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const workspace = path.join(isolatedAgentDir, 'workspace-with-settings');
+  fs.mkdirSync(path.join(workspace, '.shepherd'), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspace, '.shepherd', 'config.json'),
+    JSON.stringify({ projectScope: true, staleWaitThreshold: 0 }),
+  );
+  const registry = new LifecycleRegistry();
+  const scout = registry.registerAgent({ agent: 'scout', label: 'cwd-specific', cwd: workspace });
+  const planner = registry.registerAgent({ agent: 'planner', label: 'cwd-target', cwd: workspace });
+  const { monitor, infos } = makeMonitor(registry);
+  const task = registry.createTask(scout, 'Workspace-specific stale wait.');
+  registry.setTaskRunning(task.id);
+  await withFakeDateNow(0, async clock => {
+    registry.openPendingRequest(task.id, { messageId: 'cwd-msg', targetAgentId: planner.id, text: 'q?' });
+    clock.advance(60 * ONE_MIN);
+    await monitor.poll();
+  });
+  assert.equal(infos.length, 0, 'task cwd threshold disables the reminder');
+  assert.equal(registry.getTask(task.id).cwd, workspace, 'task snapshot retains its workspace cwd');
+  monitor.shutdown();
+  console.log('PASS stale-wait resolves settings from the waiting task cwd');
+}
+
+{
   // Bridge delivery + suppression once the parent session is inactive.
   const { staleWaitMonitor } = await import('../src/core/lifecycle.ts');
   const sent = [];

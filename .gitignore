@@ -11,8 +11,9 @@ node_modules/
 # Logs / temp
 *.log
 
-# Runtime artifact-backed delegation sessions
-.shepherd/
+# Runtime artifact-backed delegation sessions (project config may be committed)
+.shepherd/*
+!.shepherd/config.json
 
 # Locally installed project skills
 .agents/skills/

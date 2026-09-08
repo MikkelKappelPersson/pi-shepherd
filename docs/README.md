@@ -18,5 +18,6 @@ Implementation plans and design notes are kept separately from stable user docum
 
 - [Architecture](plans/architecture.md)
 - [Agent labels](plans/agent-labels.md)
-- [Settings scope](plans/settings-scope.md)
+- [Settings scope (historical)](plans/settings-scope.md)
+- [Per-workspace settings specification](../specs/005-per-workspace-settings/spec.md)
 - [Tool surface split](plans/tool-surface-split.md)

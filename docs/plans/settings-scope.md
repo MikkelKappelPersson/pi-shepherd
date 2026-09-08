@@ -1,7 +1,13 @@
-# Plan: Scoped Settings — user config + project config override
+# Historical Plan: Scoped Settings — user config + project config override
 
-Status: implemented (
-`src/extension/config.ts` replaces the old single-file settings store).
+Status: superseded by [Per-workspace self-contained Shepherd settings](../../specs/005-per-workspace-settings/spec.md).
+
+This document records the implemented delta-based design that preceded the
+current per-workspace model. Do not use its `settingsScope` or project-delta
+semantics for new work. The active design uses a project-owned boolean
+`projectScope`, self-contained project files, and a user-owned
+`confirmProjectAgents` security setting.
+
 Implementation note: the user file lives in the pi agent dir as resolved by
 `getAgentDir()` (`~/.pi/agent` by default, `PI_CODING_AGENT_DIR` overridable)
 rather than a hard-coded home path.

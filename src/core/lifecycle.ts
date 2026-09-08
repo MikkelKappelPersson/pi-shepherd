@@ -215,7 +215,7 @@ export async function startAgent(
       );
     }
     return lifecycleRegistry.registerAgent(
-      { id: reservedAgentId, agent: name, label, model: delegatedModel, paneId, tabId, workspaceId },
+      { id: reservedAgentId, agent: name, label, model: delegatedModel, paneId, tabId, workspaceId, cwd },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         completionResultPath: files.sessionFile,
@@ -454,7 +454,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
   if (agent.state === 'closed') {
     throw new LifecycleError('closed_handle', `Agent "${input.target}" is closed.`);
   }
-  const replyDeadline = input.expectsReply ? Date.now() + loadSettings(process.cwd()).timeout * 60_000 : undefined;
+  const replyDeadline = input.expectsReply ? Date.now() + loadSettings(agent.handle.cwd ?? process.cwd()).timeout * 60_000 : undefined;
   if (input.expectsReply && input.taskId) {
     // Open the request before publishing so the task never waits on a
     // question the broker refused to queue. The question envelope id becomes
@@ -1258,20 +1258,17 @@ export class StaleWaitMonitor {
       this.maybeStop();
       return;
     }
-    const thresholdMinutes = (() => {
-      try {
-        return loadSettings(process.cwd()).staleWaitThreshold;
-      } catch {
-        return 5;
-      }
-    })();
-    // A threshold below 1 minute disables stale-wait reminders entirely.
-    if (thresholdMinutes < 1) {
-      this.maybeStop();
-      return;
-    }
-    const thresholdMs = thresholdMinutes * 60_000;
     for (const task of waiting) {
+      const thresholdMinutes = (() => {
+        try {
+          return loadSettings(task.cwd ?? this.registry.getAgent({ id: task.agentId }).handle.cwd ?? process.cwd()).staleWaitThreshold;
+        } catch {
+          return 5;
+        }
+      })();
+      // A threshold below 1 minute disables stale-wait reminders entirely.
+      if (thresholdMinutes < 1) continue;
+      const thresholdMs = thresholdMinutes * 60_000;
       const waitingSince = task.waitingSince ?? now;
       const elapsedMs = now - waitingSince;
       if (elapsedMs < thresholdMs) continue;

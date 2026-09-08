@@ -16,10 +16,12 @@ agent invocation receives its own note.
 
 Config is two files: the user layer (`pi-shepherd/config.json` inside the
 active pi agent dir — `~/.pi/agent` by default, `PI_CODING_AGENT_DIR`
-overridable; owns `settingsScope` and the base defaults) plus an optional
-project delta (`.shepherd/config.json`, anchored at cwd, overridable
-field-by-field, written only for fields that differ). `settingsScope` is
-user-file-only.
+overridable; stores personal values only) plus an optional self-contained
+project config (`.shepherd/config.json`, anchored at cwd). A project config is
+active only with `projectScope: true`, and its project-owned values fall back to
+built-in defaults rather than private user values. `confirmProjectAgents` is
+user-owned and cannot be disabled by a repository config. `.shepherd/config.json`
+may be committed explicitly; runtime fieldnote sessions remain ignored.
 
 ## Runtime and architecture
 

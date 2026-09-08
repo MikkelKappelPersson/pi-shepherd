@@ -217,14 +217,16 @@ For one-shot delegation, prompting, waiting, parallel work, and opaque-ID lifecy
 
 ## Settings
 
-Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu shows the effective values currently in use; use the arrow keys and Enter to cycle values, and `Esc` to close it. The following options are available:
+Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu
+shows the effective values for the current workspace; use the arrow keys and
+Enter to cycle values, `/` to fuzzy-search, and `Esc` to close it.
 
 | Option | Values | Default | Description |
 | --- | --- | --- | --- |
-| **Settings scope** (`settingsScope`) | `user`, `project` | `user` | Select whether values come from the user configuration or the project delta. This pointer is always stored in the user configuration. |
-| **Agent scope** (`agentScope`) | `user`, `project`, `both` | `user` | Select which agent definition directories are searched. Project agents are repo-controlled. |
+| **Settings scope** (`projectScope`) | `user`, `project` | `user` | Select the settings source for this workspace. A dormant project file is shown as `user (project file dormant)`. |
+| **Agent scope** (`agentScope`) | `user`, `project`, `both` | `user` | Select which agent definition directories are searched. Project agents are repository-controlled. |
 | **Include bundled agents** (`includeBundledAgents`) | on, off | on | Include the built-in `scout`, `planner`, `worker`, and `reviewer` definitions in discovery. |
-| **Confirm project agents** (`confirmProjectAgents`) | on, off | on | Prompt before running project-local agent definitions. Disable only for projects and definitions you trust. |
+| **Confirm project agents** (`confirmProjectAgents`) | on, off | on | User-only security setting. A project config cannot disable confirmation for project-local agents. |
 | **Keep tab open after done** (`keepOpen`) | on, off | on | Leave the Herdr tab open after an agent completes so its output can be inspected. |
 | **Keep agent alive after done** (`stayOpen`) | on, off | off | Keep the agent's pi process alive after completion so you can continue driving it in its tab. |
 | **Enable fieldnotes** (`fieldnotes`) | on, off | on | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts. |
@@ -232,19 +234,24 @@ Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu show
 | **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `20` minutes | Set the default time limit before a Herdr run is reported as timed out. |
 | **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
 
-The settings menu also supports fuzzy search with `/`. Configuration is validated when read; invalid or missing values fall back to the next layer or the defaults above.
+The user layer is stored in `pi-shepherd/config.json` inside the active pi
+agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). It stores
+personal values only. The project layer is `.shepherd/config.json` in the
+current working directory, with no walk-up. A project file is active only when
+it contains `"projectScope": true`; when active, it is self-contained and
+missing project-owned fields fall back to built-in defaults rather than private
+user values. A project file with `projectScope: false` or no flag is dormant.
 
-### Stale-wait reminders
+`confirmProjectAgents` is intentionally user-owned. A committed project file
+may select repository-controlled agent definitions through `agentScope`, but it
+cannot disable the confirmation gate. An explicit user-level opt-out remains
+the user's responsibility.
 
-When a delegated task is **waiting** on a required reply (set with `shepherd_message` + `expectsReply`, or set by the child asking another participant), it can sit there for a while if the target is busy. `staleWaitThreshold` controls how long a task may wait before the parent receives a **single** stale-wait reminder naming the task, the question, the target, and how long it has been waiting. The reminder is informational: it never cancels, times out, or blocks the task. The task's own reply deadline (`timeout`) remains the authoritative bound and settles the task as `blocked` if the reply never comes. A reply (or the task resuming/completing) clears the episode, so the same wait never re-notifies while open.
+For example:
 
-User settings are stored in `pi-shepherd/config.json` inside the active pi agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). Project overrides are stored in `.shepherd/config.json` in the current working directory. Project configuration is a field-by-field delta over the user configuration: only values different from the user layer are written, and unset fields continue to inherit from it. The settings scope itself is always stored in the user file. A project configuration therefore requires selecting the `project` settings scope; project files are not searched by default.
-
-For example, a user configuration can contain:
-
-```json
+```jsonc
+// ~/.pi/agent/pi-shepherd/config.json — personal values
 {
-  "settingsScope": "user",
   "agentScope": "both",
   "includeBundledAgents": true,
   "confirmProjectAgents": true,
@@ -255,7 +262,40 @@ For example, a user configuration can contain:
   "timeout": 20,
   "staleWaitThreshold": 5
 }
+
+// .shepherd/config.json — optional, self-contained project values
+{
+  "agentScope": "project",
+  "includeBundledAgents": true,
+  "keepOpen": true,
+  "stayOpen": false,
+  "fieldnotes": true,
+  "emojiSheep": true,
+  "timeout": 30,
+  "staleWaitThreshold": 5,
+  "projectScope": true
+}
 ```
+
+Project settings are intended to be optionally committed. Since `.shepherd/`
+also contains runtime fieldnote sessions, use this pattern when sharing only
+the config:
+
+```gitignore
+.shepherd/*
+!.shepherd/config.json
+```
+
+When a delegated task is **waiting** on a required reply (set with
+`shepherd_message` + `expectsReply`, or set by the child asking another
+participant), it can sit there for a while if the target is busy.
+`staleWaitThreshold` controls how long a task may wait before the parent
+receives a **single** stale-wait reminder naming the task, the question, the
+target, and how long it has been waiting. The reminder is informational: it
+never cancels, times out, or blocks the task. The task's own reply deadline
+(`timeout`) remains the authoritative bound and settles the task as `blocked`
+if the reply never comes. A reply (or the task resuming/completing) clears the
+episode, so the same wait never re-notifies while open.
 
 ## Diagnostic tools
 

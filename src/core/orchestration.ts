@@ -23,6 +23,8 @@ export interface AgentHandle {
   paneId?: string;
   tabId?: string;
   workspaceId?: string;
+  /** Workspace cwd owning this agent; used for settings resolution. */
+  cwd?: string;
 }
 
 /**
@@ -119,6 +121,8 @@ export interface TaskRecord {
   pendingRequestIds: string[];
   staleNotifiedAt?: number;
   artifactSession?: ShepherdSession;
+  /** Workspace cwd owning this task. */
+  cwd?: string;
   artifact?: ArtifactReservation;
   result?: TaskResult;
 }
@@ -559,6 +563,7 @@ export class LifecycleRegistry {
       state: 'created',
       createdAt,
       deadlineAt,
+      cwd: agent.handle.cwd,
       pendingRequestIds: new Set(),
       artifactSession: options.artifactSession,
       settled: false,
@@ -648,6 +653,7 @@ export class LifecycleRegistry {
       description: record.description,
       state: record.state,
       createdAt: record.createdAt,
+      ...(record.cwd !== undefined ? { cwd: record.cwd } : {}),
       ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
       ...(record.waitingSince !== undefined ? { waitingSince: record.waitingSince } : {}),
       ...(record.deadlineAt !== undefined ? { deadlineAt: record.deadlineAt } : {}),

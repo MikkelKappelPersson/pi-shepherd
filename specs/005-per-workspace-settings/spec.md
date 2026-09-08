@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed. This specification supersedes the current Shepherd settings-scope
-model; it has not been implemented yet.
+Implemented. The per-workspace configuration model, security boundary,
+lifecycle cwd fixes, documentation, and automated tests are complete. Live
+interactive `/shepherd settings` verification remains an operational follow-up.
 
 ## Confirmed decisions
 

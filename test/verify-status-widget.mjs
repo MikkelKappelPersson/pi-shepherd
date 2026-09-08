@@ -45,17 +45,19 @@ for (const dir of [agentDir, path.join(agentDir, "pi-shepherd"), homeCwd, otherC
 	mkdirSync(dir, { recursive: true });
 }
 
-// Sandbox user layer: routes the effective values through the project delta
-// (.shepherd/config.json), which is the repo's only way the session cwd picks
-// per-project emojiSheep.
+// Sandbox user layer: the default emojiSheep=true applies to the first
+// session. Project scope is activated by the project file itself.
 writeFileSync(
 	path.join(agentDir, "pi-shepherd", "config.json"),
-	JSON.stringify({ settingsScope: "project" }, null, 2),
+	JSON.stringify({ emojiSheep: true }, null, 2),
 );
 
 // Project layer for the second session cwd: emojiSheep=false is observable in
 // the rendered rows (the walking sheep glyph switches from 🐑 to "o").
-writeFileSync(path.join(otherCwd, ".shepherd", "config.json"), JSON.stringify({ emojiSheep: false }, null, 2));
+writeFileSync(
+	path.join(otherCwd, ".shepherd", "config.json"),
+	JSON.stringify({ projectScope: true, emojiSheep: false }, null, 2),
+);
 
 // Sandboxed created-panes registry: three of this probe session's panes —
 // PANE_ID (working process, no task), PANE_ID_TASK (working process with a
