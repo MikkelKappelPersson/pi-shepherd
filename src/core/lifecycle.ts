@@ -166,7 +166,8 @@ export async function startAgent(
   const reservedAgentId = lifecycleRegistry.allocateAgentId();
   const childCapability = registerChild(broker, reservedAgentId);
   const placement = options.placement ?? 'tab';
-  const herdrPlacement = placement === 'pane_right' || placement === 'pane_down' ? 'pane' : placement;
+  const herdrPlacement =
+    placement === 'pane_right' || placement === 'pane_down' ? 'pane' : placement;
   const direction = placement === 'pane_down' ? 'down' : 'right';
   let paneId = '';
   let tabId = '';
@@ -208,14 +209,24 @@ export async function startAgent(
       const returnCode = ready.exitCode ?? (await readLaunchExitCode(paneId));
       const output = (await readPaneTail(paneId)).trim();
       const suffix = returnCode === null ? '' : ` (return code ${returnCode})`;
-      const wording = returnCode !== null && returnCode !== 0 ? 'failed to start' : 'did not become ready';
+      const wording =
+        returnCode !== null && returnCode !== 0 ? 'failed to start' : 'did not become ready';
       throw Object.assign(
         new Error(`Agent "${name}" ${wording}${suffix}.${output ? `\n${output}` : ''}`),
         { returnCode: returnCode ?? 1, code: 'agent_not_ready' }
       );
     }
     return lifecycleRegistry.registerAgent(
-      { id: reservedAgentId, agent: name, label, model: delegatedModel, paneId, tabId, workspaceId, cwd },
+      {
+        id: reservedAgentId,
+        agent: name,
+        label,
+        model: delegatedModel,
+        paneId,
+        tabId,
+        workspaceId,
+        cwd,
+      },
       {
         completionSignalPath: `${files.sessionFile}.exit`,
         completionResultPath: files.sessionFile,
@@ -224,7 +235,9 @@ export async function startAgent(
       }
     );
   } catch (error) {
-    try { unregisterChild(broker, reservedAgentId); } catch {}
+    try {
+      unregisterChild(broker, reservedAgentId);
+    } catch {}
     if (paneId) {
       try {
         herdrExecSync(['pane', 'close', paneId]);
@@ -294,7 +307,8 @@ export async function delegateAgent(
   description: string,
   options: DelegateOptions = {}
 ): Promise<TaskHandle> {
-  if (typeof description !== 'string' || !description.trim()) throw new Error('Delegated task description must not be empty.');
+  if (typeof description !== 'string' || !description.trim())
+    throw new Error('Delegated task description must not be empty.');
   const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
   const record = lifecycleRegistry.getAgent(canonical);
   if (!record.handle.paneId) throw new Error('Agent handle has no pane.');
@@ -369,11 +383,15 @@ function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | 
     return undefined;
   }
   try {
-    return lifecycleRegistry.settleTaskForAgent(envelope.taskId, { id: envelope.senderId }, {
-      status: envelope.status,
-      text: envelope.summary ?? envelope.content,
-      error: envelope.error,
-    });
+    return lifecycleRegistry.settleTaskForAgent(
+      envelope.taskId,
+      { id: envelope.senderId },
+      {
+        status: envelope.status,
+        text: envelope.summary ?? envelope.content,
+        error: envelope.error,
+      }
+    );
   } catch {
     // Ownership and lifecycle failures are rejected at the registry boundary;
     // malformed/late control messages must not stop broker polling.
@@ -427,7 +445,7 @@ export interface ParentMessageResult {
 function messageTargetError(target: string): LifecycleError {
   return new LifecycleError(
     'invalid_target',
-    `Unknown message target "${target}". shepherd_message requires the exact opaque agent id returned by shepherd_spawn (for example "shepherd-agent-..."); do not use an agent name such as "planner", a display label, a Herdr pane id, or a placeholder such as "<planner agent ID>".`,
+    `Unknown message target "${target}". shepherd_message requires the exact opaque agent id returned by shepherd_spawn (for example "shepherd-agent-..."); do not use an agent name such as "planner", a display label, a Herdr pane id, or a placeholder such as "<planner agent ID>".`
   );
 }
 
@@ -446,7 +464,10 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
     // display labels. Resolve strictly by the exact id returned by spawn.
     agent = lifecycleRegistry.getAgent({ id: input.target });
   } catch (error) {
-    if (error instanceof LifecycleError && ['unknown_handle', 'invalid_handle'].includes(error.code)) {
+    if (
+      error instanceof LifecycleError &&
+      ['unknown_handle', 'invalid_handle'].includes(error.code)
+    ) {
       throw messageTargetError(input.target);
     }
     throw error;
@@ -454,7 +475,9 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
   if (agent.state === 'closed') {
     throw new LifecycleError('closed_handle', `Agent "${input.target}" is closed.`);
   }
-  const replyDeadline = input.expectsReply ? Date.now() + loadSettings(agent.handle.cwd ?? process.cwd()).timeout * 60_000 : undefined;
+  const replyDeadline = input.expectsReply
+    ? Date.now() + loadSettings(agent.handle.cwd ?? process.cwd()).timeout * 60_000
+    : undefined;
   if (input.expectsReply && input.taskId) {
     // Open the request before publishing so the task never waits on a
     // question the broker refused to queue. The question envelope id becomes
@@ -478,7 +501,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
         delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
         content: input.message,
         createdAt: Date.now(),
-      },
+      }
     );
     lifecycleRegistry.openPendingRequest(input.taskId, {
       messageId: provisional.messageId,
@@ -515,7 +538,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
       ...(replyDeadline !== undefined ? { deadlineAt: replyDeadline } : {}),
       delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
       content: input.message,
-    },
+    }
   );
   const accepted = publishFromParent(broker, envelope);
   // The parent is also the owner of child-originated request state. When the
@@ -545,12 +568,17 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
 }
 
 export type ParentMessageKind = 'message' | 'reply' | 'runtime';
-export type ParentMessageNotifier = (notification: { kind: ParentMessageKind; envelope: ShepherdMessageEnvelope }) => void;
+export type ParentMessageNotifier = (notification: {
+  kind: ParentMessageKind;
+  envelope: ShepherdMessageEnvelope;
+}) => void;
 
 let parentMessageNotifier: ParentMessageNotifier | undefined;
 
 /** Bridge child-originated messages and runtime events into the parent session. */
-export function configureParentMessageNotifications(notifier: ParentMessageNotifier | undefined): void {
+export function configureParentMessageNotifications(
+  notifier: ParentMessageNotifier | undefined
+): void {
   parentMessageNotifier = notifier;
 }
 
@@ -576,9 +604,10 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
   const settled: TaskResult[] = [];
   try {
     for (const envelope of pollParentInbox(broker)) {
-      const result = envelope.kind === 'task_done'
-        ? applyTaskDoneEnvelope(envelope)
-        : applyMessageEnvelope(broker, envelope);
+      const result =
+        envelope.kind === 'task_done'
+          ? applyTaskDoneEnvelope(envelope)
+          : applyMessageEnvelope(broker, envelope);
       if (result) settled.push(result);
     }
     const now = Date.now();
@@ -601,9 +630,11 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
           settled.push(result);
           continue;
         }
-        if (task.state === 'waiting' &&
-            task.pendingReplyDeadlineAt !== undefined &&
-            now >= task.pendingReplyDeadlineAt) {
+        if (
+          task.state === 'waiting' &&
+          task.pendingReplyDeadlineAt !== undefined &&
+          now >= task.pendingReplyDeadlineAt
+        ) {
           const result = lifecycleRegistry.settleTask(task.taskId, {
             status: 'blocked',
             ok: false,
@@ -635,7 +666,10 @@ export async function processParentBrokerMessages(): Promise<TaskResult[]> {
  * task result when the envelope is an explicit completion; everything else
  * updates correlation state and surfaces to the parent delivery bridge.
  */
-function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnvelope): TaskResult | undefined {
+function applyMessageEnvelope(
+  broker: ParentBroker,
+  envelope: ShepherdMessageEnvelope
+): TaskResult | undefined {
   switch (envelope.kind) {
     case 'runtime': {
       if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
@@ -652,7 +686,10 @@ function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnv
       if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
         try {
           const task = lifecycleRegistry.getTask(envelope.taskId);
-          if (['running', 'waiting'].includes(task.state) && task.pendingReplyMessageId !== envelope.replyTo) {
+          if (
+            ['running', 'waiting'].includes(task.state) &&
+            task.pendingReplyMessageId !== envelope.replyTo
+          ) {
             try {
               lifecycleRegistry.openPendingRequest(envelope.taskId, {
                 messageId: envelope.replyTo,
@@ -675,7 +712,10 @@ function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnv
     case 'reply': {
       if (envelope.replyTo && envelope.taskId) {
         try {
-          const resolution = lifecycleRegistry.resolveReplyForTask(envelope.taskId, envelope.replyTo);
+          const resolution = lifecycleRegistry.resolveReplyForTask(
+            envelope.taskId,
+            envelope.replyTo
+          );
           // Relay the answer to the task owner, but only when the answer came
           // from a different participant: the parent already holds answers to
           // its own questions, and echoing them back to the owner's inbox
@@ -694,7 +734,7 @@ function applyMessageEnvelope(broker: ParentBroker, envelope: ShepherdMessageEnv
                 originSenderId: envelope.senderId,
                 delivery: envelope.delivery,
                 content: envelope.content,
-              },
+              }
             );
             publishFromParent(broker, relayed);
           }
@@ -900,9 +940,10 @@ export class PromptWatcherService {
     // delaying an individual completion until earlier prompts finish.
     const order = this.promptOrder.get(watcherId);
     if (order) {
-      completions.sort((left, right) =>
-        (order.get(left.promptId) ?? Number.MAX_SAFE_INTEGER) -
-        (order.get(right.promptId) ?? Number.MAX_SAFE_INTEGER)
+      completions.sort(
+        (left, right) =>
+          (order.get(left.promptId) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.promptId) ?? Number.MAX_SAFE_INTEGER)
       );
     }
     const notification = { watcherId, completions };
@@ -1002,7 +1043,10 @@ export class PromptWatcherService {
       const sequenceAdvanced =
         tracking.baselineStateChangeSeq === undefined ||
         (typeof seq === 'number' && seq !== tracking.baselineStateChangeSeq);
-      if (['idle', 'done', 'blocked'].includes(state) && (tracking.observedWorking || sequenceAdvanced)) {
+      if (
+        ['idle', 'done', 'blocked'].includes(state) &&
+        (tracking.observedWorking || sequenceAdvanced)
+      ) {
         this.registry.settlePrompt(record.handle, {
           promptId,
           agentId: record.handle.agentId,
@@ -1059,11 +1103,7 @@ export class TaskWatcherService {
   private readonly remaining = new Map<string, number>();
   private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(
-    registry = lifecycleRegistry,
-    notifier?: TaskWatcherNotifier,
-    coalesceMs = 25
-  ) {
+  constructor(registry = lifecycleRegistry, notifier?: TaskWatcherNotifier, coalesceMs = 25) {
     this.registry = registry;
     this.notifier = notifier;
     this.coalesceMs = coalesceMs;
@@ -1129,9 +1169,10 @@ export class TaskWatcherService {
     // delaying an individual completion until earlier tasks finish.
     const order = this.taskOrder.get(watcherId);
     if (order) {
-      completions.sort((left, right) =>
-        (order.get(left.taskId) ?? Number.MAX_SAFE_INTEGER) -
-        (order.get(right.taskId) ?? Number.MAX_SAFE_INTEGER)
+      completions.sort(
+        (left, right) =>
+          (order.get(left.taskId) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.taskId) ?? Number.MAX_SAFE_INTEGER)
       );
     }
     const notification: TaskWatcherNotification = {
@@ -1245,9 +1286,9 @@ export class StaleWaitMonitor {
   }
 
   private waitingTasks() {
-    return this.registry.allTasks().filter(
-      t => t.state === 'waiting' && t.pendingReplyMessageId !== undefined
-    );
+    return this.registry
+      .allTasks()
+      .filter(t => t.state === 'waiting' && t.pendingReplyMessageId !== undefined);
   }
 
   /** Scan waiting tasks and emit at most one reminder per episode. */
@@ -1261,7 +1302,9 @@ export class StaleWaitMonitor {
     for (const task of waiting) {
       const thresholdMinutes = (() => {
         try {
-          return loadSettings(task.cwd ?? this.registry.getAgent({ id: task.agentId }).handle.cwd ?? process.cwd()).staleWaitThreshold;
+          return loadSettings(
+            task.cwd ?? this.registry.getAgent({ id: task.agentId }).handle.cwd ?? process.cwd()
+          ).staleWaitThreshold;
         } catch {
           return 5;
         }
@@ -1291,7 +1334,11 @@ export class StaleWaitMonitor {
     this.maybeStop();
   }
 
-  private async buildInfo(task: any, elapsedMs: number, thresholdMinutes: number): Promise<StaleWaitInfo> {
+  private async buildInfo(
+    task: any,
+    elapsedMs: number,
+    thresholdMinutes: number
+  ): Promise<StaleWaitInfo> {
     let ownerHandle: AgentHandle | undefined;
     try {
       ownerHandle = this.registry.getAgent({ id: task.agentId }).handle;

@@ -53,7 +53,10 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
   ].join('\n');
   fs.writeFileSync(fakePath, stateBody);
   fs.chmodSync(fakePath, 0o755);
-  writeState(stateFile, { panes: ['pane-provider', 'pane-exited', 'pane-healthy'], errorPanes: [] });
+  writeState(stateFile, {
+    panes: ['pane-provider', 'pane-exited', 'pane-healthy'],
+    errorPanes: [],
+  });
 
   const oldPath = process.env.PATH;
   const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -65,10 +68,25 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
     assert.ok(broker);
 
     // ── Provider failure + unexpected pane exit ────────────────────────────
-    const providerAgent = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'provider failure', paneId: 'pane-provider' });
-    const exitedAgent = lifecycleRegistry.registerAgent({ agent: 'scout', label: 'exited pane', paneId: 'pane-exited' });
-    const healthyAgent = lifecycleRegistry.registerAgent({ agent: 'planner', label: 'healthy pane', paneId: 'pane-healthy' });
-    const providerTask = lifecycleRegistry.createTask(providerAgent, 'Task that meets a provider error.');
+    const providerAgent = lifecycleRegistry.registerAgent({
+      agent: 'worker',
+      label: 'provider failure',
+      paneId: 'pane-provider',
+    });
+    const exitedAgent = lifecycleRegistry.registerAgent({
+      agent: 'scout',
+      label: 'exited pane',
+      paneId: 'pane-exited',
+    });
+    const healthyAgent = lifecycleRegistry.registerAgent({
+      agent: 'planner',
+      label: 'healthy pane',
+      paneId: 'pane-healthy',
+    });
+    const providerTask = lifecycleRegistry.createTask(
+      providerAgent,
+      'Task that meets a provider error.'
+    );
     const exitedTask = lifecycleRegistry.createTask(exitedAgent, 'Task whose pane exits.');
     const healthyTask = lifecycleRegistry.createTask(healthyAgent, 'Task on a healthy pane.');
     for (const id of [providerTask.id, exitedTask.id, healthyTask.id]) {
@@ -85,7 +103,10 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
     // The 250ms monitor (or the explicit drain below, whichever wins)
     // performs the runtime observation; task registry state is the
     // authoritative assertion either way.
-    writeState(stateFile, { panes: ['pane-provider', 'pane-healthy'], errorPanes: ['pane-provider'] });
+    writeState(stateFile, {
+      panes: ['pane-provider', 'pane-healthy'],
+      errorPanes: ['pane-provider'],
+    });
     let sawFailure = false;
     for (let i = 0; i < 8 && !sawFailure; i++) {
       await processParentBrokerMessages();
@@ -114,14 +135,28 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
     lifecycleRegistry.settleTask(healthyTask.id, { status: 'cancelled', error: 'test cleanup' });
 
     // ── Close maps to task cancellation ────────────────────────────────────
-    writeState(stateFile, { panes: ['pane-provider', 'pane-healthy', 'pane-closed'], errorPanes: [] });
-
-    const closedAgent = lifecycleRegistry.registerAgent({ agent: 'planner', label: 'close target', paneId: 'pane-closed' });
-    recordCreatedPane({
-      paneId: 'pane-closed', tabId: 'tab-closed', name: 'close-target', cwd: root,
-      createdAt: Date.now(), ownerSession: 'task-failure-test-session',
+    writeState(stateFile, {
+      panes: ['pane-provider', 'pane-healthy', 'pane-closed'],
+      errorPanes: [],
     });
-    const closedTask = lifecycleRegistry.createTask(closedAgent, 'Task that gets closed mid-flight.');
+
+    const closedAgent = lifecycleRegistry.registerAgent({
+      agent: 'planner',
+      label: 'close target',
+      paneId: 'pane-closed',
+    });
+    recordCreatedPane({
+      paneId: 'pane-closed',
+      tabId: 'tab-closed',
+      name: 'close-target',
+      cwd: root,
+      createdAt: Date.now(),
+      ownerSession: 'task-failure-test-session',
+    });
+    const closedTask = lifecycleRegistry.createTask(
+      closedAgent,
+      'Task that gets closed mid-flight.'
+    );
 
     closeAgent(closedAgent);
 
@@ -134,8 +169,14 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
     console.log('PASS closing an agent cancels its active tracked task');
 
     // ── Deadline expiry maps to task timeout ───────────────────────────────
-    const timeoutAgent = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'deadline target', paneId: 'pane-healthy' });
-    const deadlineTask = lifecycleRegistry.createTask(timeoutAgent, 'Task that must time out.', { timeoutMs: 300 });
+    const timeoutAgent = lifecycleRegistry.registerAgent({
+      agent: 'worker',
+      label: 'deadline target',
+      paneId: 'pane-healthy',
+    });
+    const deadlineTask = lifecycleRegistry.createTask(timeoutAgent, 'Task that must time out.', {
+      timeoutMs: 300,
+    });
     assert.equal(lifecycleRegistry.getTask(deadlineTask.id).state, 'created');
     assert.ok(lifecycleRegistry.getTask(deadlineTask.id).deadlineAt !== undefined);
 
@@ -146,7 +187,10 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
     assert.match(timedOutResult?.error ?? '', /deadline/i);
     console.log('PASS deadline expiry settles the task as timed_out through the real timer');
 
-    assert.strictEqual(shutdownParentBroker(() => true), true);
+    assert.strictEqual(
+      shutdownParentBroker(() => true),
+      true
+    );
   } finally {
     process.env.PATH = oldPath;
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

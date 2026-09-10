@@ -18,9 +18,21 @@ import { LifecycleRegistry, lifecycleRegistry } from '../src/core/orchestration.
 // Use the exported process-global registry because the lifecycle broker
 // monitor consumes the same registry as the parent extension.
 const broker = ensureParentBroker('completion-test-session');
-const scout = lifecycleRegistry.registerAgent({ agent: 'scout', label: 'completion', paneId: undefined });
-const planner = lifecycleRegistry.registerAgent({ agent: 'planner', label: 'completion', paneId: undefined });
-const foreign = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'completion', paneId: undefined });
+const scout = lifecycleRegistry.registerAgent({
+  agent: 'scout',
+  label: 'completion',
+  paneId: undefined,
+});
+const planner = lifecycleRegistry.registerAgent({
+  agent: 'planner',
+  label: 'completion',
+  paneId: undefined,
+});
+const foreign = lifecycleRegistry.registerAgent({
+  agent: 'worker',
+  label: 'completion',
+  paneId: undefined,
+});
 const scoutCap = registerChild(broker, scout.id);
 const plannerCap = registerChild(broker, planner.id);
 const foreignCap = registerChild(broker, foreign.id);
@@ -34,7 +46,11 @@ try {
   lifecycleRegistry.setAgentState(scout, 'idle');
   assert.equal(lifecycleRegistry.getTask(task.id).state, 'running');
   const completion = createEnvelope(
-    { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+    {
+      sessionId: scoutChild.sessionId,
+      brokerId: scoutChild.brokerId,
+      senderId: scoutChild.agentId,
+    },
     {
       kind: 'task_done',
       targetId: 'shepherd',
@@ -42,7 +58,7 @@ try {
       status: 'completed',
       summary: 'The explicit task is complete.',
       delivery: 'followUp',
-    },
+    }
   );
   publishFromChild(scoutChild, completion);
   const results = await processParentBrokerMessages();
@@ -61,7 +77,11 @@ try {
   lifecycleRegistry.addPendingRequest(waitingTask.id, 'request-required');
   lifecycleRegistry.setTaskWaiting(waitingTask.id);
   const premature = createEnvelope(
-    { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+    {
+      sessionId: plannerChild.sessionId,
+      brokerId: plannerChild.brokerId,
+      senderId: plannerChild.agentId,
+    },
     {
       kind: 'task_done',
       targetId: 'shepherd',
@@ -69,7 +89,7 @@ try {
       status: 'completed',
       summary: 'This is premature.',
       delivery: 'followUp',
-    },
+    }
   );
   publishFromChild(plannerChild, premature);
   assert.deepEqual(await processParentBrokerMessages(), []);
@@ -77,7 +97,11 @@ try {
   console.log('PASS successful completion is rejected while required requests remain pending');
 
   const blocked = createEnvelope(
-    { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+    {
+      sessionId: plannerChild.sessionId,
+      brokerId: plannerChild.brokerId,
+      senderId: plannerChild.agentId,
+    },
     {
       kind: 'task_done',
       targetId: 'shepherd',
@@ -85,7 +109,7 @@ try {
       status: 'blocked',
       summary: 'The required reply never arrived.',
       delivery: 'followUp',
-    },
+    }
   );
   publishFromChild(plannerChild, blocked);
   const blockedResult = await processParentBrokerMessages();
@@ -96,7 +120,11 @@ try {
   const foreignTask = lifecycleRegistry.createTask(scout, 'Reject foreign completion.');
   lifecycleRegistry.setTaskRunning(foreignTask.id);
   const foreignCompletion = createEnvelope(
-    { sessionId: foreignChild.sessionId, brokerId: foreignChild.brokerId, senderId: foreignChild.agentId },
+    {
+      sessionId: foreignChild.sessionId,
+      brokerId: foreignChild.brokerId,
+      senderId: foreignChild.agentId,
+    },
     {
       kind: 'task_done',
       targetId: 'shepherd',
@@ -104,7 +132,7 @@ try {
       status: 'completed',
       summary: 'Wrong owner.',
       delivery: 'followUp',
-    },
+    }
   );
   publishFromChild(foreignChild, foreignCompletion);
   assert.deepEqual(await processParentBrokerMessages(), []);
@@ -116,7 +144,8 @@ try {
 } finally {
   for (const agent of [scout, planner, foreign]) {
     const active = lifecycleRegistry.activeTaskForAgent(agent);
-    if (active) lifecycleRegistry.settleTask(active.taskId, { status: 'cancelled', error: 'test cleanup' });
+    if (active)
+      lifecycleRegistry.settleTask(active.taskId, { status: 'cancelled', error: 'test cleanup' });
   }
   shutdownParentBroker(() => true);
 }

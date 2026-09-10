@@ -4,13 +4,7 @@ import type { ArtifactReservation, ShepherdSession } from './artifact-sessions.t
 import type { ChildCapability } from './messaging.ts';
 
 export type AgentLifecycleState =
-  | 'idle'
-  | 'working'
-  | 'blocked'
-  | 'done'
-  | 'unknown'
-  | 'failed'
-  | 'closed';
+  'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'failed' | 'closed';
 
 export type PromptResultStatus = 'idle' | 'done' | 'blocked' | 'failed' | 'timeout' | 'cancelled';
 
@@ -47,7 +41,9 @@ export function validateAgentLabel(value: unknown): string {
   if (!label) return '';
   if (label.length > 64) throw new Error('Agent label must be at most 64 characters.');
   if (!/^[\p{L}\p{N} _.-]+$/u.test(label) || label.includes(':'))
-    throw new Error('Agent label may contain only letters, numbers, spaces, _, -, and .; colons and control characters are not allowed.');
+    throw new Error(
+      'Agent label may contain only letters, numbers, spaces, _, -, and .; colons and control characters are not allowed.'
+    );
   return label;
 }
 
@@ -305,7 +301,10 @@ interface PromptRecord {
 function handleId(input: unknown, kind: 'AgentHandle' | 'PromptHandle'): string {
   if (
     (typeof input !== 'string' &&
-      (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as { id?: unknown }).id !== 'string')) ||
+      (!input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        typeof (input as { id?: unknown }).id !== 'string')) ||
     (typeof input === 'string' && input.trim().length === 0)
   ) {
     const syntax =
@@ -323,7 +322,10 @@ function handleId(input: unknown, kind: 'AgentHandle' | 'PromptHandle'): string 
 function taskHandleId(input: unknown): string {
   if (
     (typeof input !== 'string' &&
-      (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as { id?: unknown }).id !== 'string')) ||
+      (!input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        typeof (input as { id?: unknown }).id !== 'string')) ||
     (typeof input === 'string' && input.trim().length === 0)
   ) {
     throw new LifecycleError(
@@ -344,14 +346,17 @@ export class LifecycleRegistry {
   private readonly allocatedAgentSessions = new Map<string, string>();
   private readonly prompts = new Map<string, PromptRecord>();
   private readonly tasks = new Map<string, TaskRecordInternal>();
-  private readonly watchers = new Map<string, {
-    kind: 'prompt' | 'task';
-    promptIds: string[];
-    taskIds: string[];
-    pending: Set<string>;
-    callback?: PromptWatcherCallback;
-    delivered: Set<string>;
-  }>();
+  private readonly watchers = new Map<
+    string,
+    {
+      kind: 'prompt' | 'task';
+      promptIds: string[];
+      taskIds: string[];
+      pending: Set<string>;
+      callback?: PromptWatcherCallback;
+      delivered: Set<string>;
+    }
+  >();
   private readonly promptWatchers = new Map<string, Set<string>>();
   private readonly taskWatchers = new Map<string, Set<string>>();
 
@@ -400,20 +405,34 @@ export class LifecycleRegistry {
   ): AgentHandle {
     const label = validateAgentLabel(input.label);
     const display = formatAgentName(input.agent, label);
-    if (label && [...this.agents.values()].some(a => this.isCurrent(a) && formatAgentName(a.handle.agent, a.handle.label) === display))
+    if (
+      label &&
+      [...this.agents.values()].some(
+        a => this.isCurrent(a) && formatAgentName(a.handle.agent, a.handle.label) === display
+      )
+    )
       throw new Error(`Duplicate agent label "${display}".`);
     const requestedId = input.id;
     if (requestedId !== undefined && (typeof requestedId !== 'string' || !requestedId.trim())) {
-      throw new LifecycleError('invalid_handle', 'Agent id must be a non-empty opaque string when supplied internally.');
+      throw new LifecycleError(
+        'invalid_handle',
+        'Agent id must be a non-empty opaque string when supplied internally.'
+      );
     }
     if (requestedId) {
       const allocatedSession = this.allocatedAgentSessions.get(requestedId);
       if (allocatedSession && allocatedSession !== this.sessionId) {
-        throw new LifecycleError('invalid_handle', `Agent id "${requestedId}" belongs to a retired parent session.`);
+        throw new LifecycleError(
+          'invalid_handle',
+          `Agent id "${requestedId}" belongs to a retired parent session.`
+        );
       }
     }
     if (requestedId && this.agents.has(requestedId)) {
-      throw new LifecycleError('invalid_handle', `Agent id "${requestedId}" is already registered.`);
+      throw new LifecycleError(
+        'invalid_handle',
+        `Agent id "${requestedId}" is already registered.`
+      );
     }
     const handle = { ...input, label, id: requestedId ?? this.id('agent') };
     if (requestedId) this.allocatedAgentSessions.delete(requestedId);
@@ -480,9 +499,10 @@ export class LifecycleRegistry {
     if (task.pendingReplyTargetAgentId) {
       try {
         const recipient = this.agents.get(task.pendingReplyTargetAgentId);
-        waitingRecipient = recipient && this.isCurrent(recipient)
-          ? formatAgentName(recipient.handle.agent, recipient.handle.label)
-          : task.pendingReplyTargetAgentId;
+        waitingRecipient =
+          recipient && this.isCurrent(recipient)
+            ? formatAgentName(recipient.handle.agent, recipient.handle.label)
+            : task.pendingReplyTargetAgentId;
       } catch {
         waitingRecipient = task.pendingReplyTargetAgentId;
       }
@@ -494,7 +514,9 @@ export class LifecycleRegistry {
       ...(waiting !== undefined
         ? { waitingSince: waiting, waitingMs: Math.max(0, Date.now() - waiting) }
         : {}),
-      ...(task.pendingReplyMessageId ? { pendingRequestMessageId: task.pendingReplyMessageId } : {}),
+      ...(task.pendingReplyMessageId
+        ? { pendingRequestMessageId: task.pendingReplyMessageId }
+        : {}),
       ...(waitingRecipient ? { waitingRecipient } : {}),
       ...(task.staleNotifiedAt !== undefined ? { stale: true } : {}),
     };
@@ -539,11 +561,19 @@ export class LifecycleRegistry {
       throw new LifecycleError('invalid_task', 'Task description must not be empty.');
     }
     if (description.length > 100_000) {
-      throw new LifecycleError('invalid_task', 'Task description must be at most 100000 characters.');
+      throw new LifecycleError(
+        'invalid_task',
+        'Task description must be at most 100000 characters.'
+      );
     }
-    if (options.timeoutMs !== undefined &&
-      (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
-      throw new LifecycleError('invalid_task', 'Task timeout must be a non-negative finite number.');
+    if (
+      options.timeoutMs !== undefined &&
+      (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)
+    ) {
+      throw new LifecycleError(
+        'invalid_task',
+        'Task timeout must be a non-negative finite number.'
+      );
     }
     if (options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt)) {
       throw new LifecycleError('invalid_task', 'Task deadline must be a finite timestamp.');
@@ -553,7 +583,8 @@ export class LifecycleRegistry {
     }
     const createdAt = Date.now();
     const task: TaskHandle = { id: this.id('task'), agentId, createdAt };
-    const deadlineAt = options.deadlineAt ??
+    const deadlineAt =
+      options.deadlineAt ??
       (options.timeoutMs !== undefined ? createdAt + options.timeoutMs : undefined);
     this.tasks.set(task.id, {
       lifecycleSessionId: this.sessionId,
@@ -592,9 +623,16 @@ export class LifecycleRegistry {
    * without touching the tasks themselves (their own deadlines remain
    * authoritative).
    */
-  waitForTasks(handles: TaskHandleInput | TaskHandleInput[], timeoutMs = 1_200_000): Promise<TaskResult[]> {
+  waitForTasks(
+    handles: TaskHandleInput | TaskHandleInput[],
+    timeoutMs = 1_200_000
+  ): Promise<TaskResult[]> {
     const values = Array.isArray(handles) ? handles : [handles];
-    if (values.length === 0) throw new LifecycleError('invalid_handle', 'Expected one or more opaque task ids to wait for.');
+    if (values.length === 0)
+      throw new LifecycleError(
+        'invalid_handle',
+        'Expected one or more opaque task ids to wait for.'
+      );
     const taskIds = values.map(value => this.taskRecord(value).taskId);
     if (new Set(taskIds).size !== taskIds.length) {
       throw new LifecycleError('invalid_handle', 'A wait cannot contain duplicate task ids.');
@@ -608,26 +646,29 @@ export class LifecycleRegistry {
       };
       // watchTasks delivers already-settled tasks synchronously (in input
       // order) through the Set callback, and registers the watch for the rest.
-      const registration = this.watchTasks(taskIds, [completion => {
-        results.add(completion);
-        if (results.size >= taskIds.length) settle();
-      }]);
+      const registration = this.watchTasks(taskIds, [
+        completion => {
+          results.add(completion);
+          if (results.size >= taskIds.length) settle();
+        },
+      ]);
       if (results.size >= taskIds.length) {
         settle();
         return;
       }
       const minutes = Math.round(timeoutMs / 60000);
       const seconds = Math.round(timeoutMs / 1000);
-      const span = minutes >= 1
-        ? `${minutes} minute${minutes === 1 ? '' : 's'}`
-        : `${seconds} second${seconds === 1 ? '' : 's'}`;
+      const span =
+        minutes >= 1
+          ? `${minutes} minute${minutes === 1 ? '' : 's'}`
+          : `${seconds} second${seconds === 1 ? '' : 's'}`;
       timer = setTimeout(() => {
         this.removeWatcher(registration.watcherId);
         reject(
           new LifecycleError(
             'timeout',
-            `Timed out after ${span} waiting for ${registration.pending.length} unsettled task${registration.pending.length === 1 ? '' : 's'}. The tasks keep running; watch them later with shepherd_watch.`,
-          ),
+            `Timed out after ${span} waiting for ${registration.pending.length} unsettled task${registration.pending.length === 1 ? '' : 's'}. The tasks keep running; watch them later with shepherd_watch.`
+          )
         );
       }, timeoutMs);
       (timer as any).unref?.();
@@ -657,10 +698,18 @@ export class LifecycleRegistry {
       ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
       ...(record.waitingSince !== undefined ? { waitingSince: record.waitingSince } : {}),
       ...(record.deadlineAt !== undefined ? { deadlineAt: record.deadlineAt } : {}),
-      ...(record.pendingReplyMessageId !== undefined ? { pendingReplyMessageId: record.pendingReplyMessageId } : {}),
-      ...(record.pendingReplyTargetAgentId !== undefined ? { pendingReplyTargetAgentId: record.pendingReplyTargetAgentId } : {}),
-      ...(record.pendingReplyDeadlineAt !== undefined ? { pendingReplyDeadlineAt: record.pendingReplyDeadlineAt } : {}),
-      ...(record.pendingReplyText !== undefined ? { pendingReplyText: record.pendingReplyText } : {}),
+      ...(record.pendingReplyMessageId !== undefined
+        ? { pendingReplyMessageId: record.pendingReplyMessageId }
+        : {}),
+      ...(record.pendingReplyTargetAgentId !== undefined
+        ? { pendingReplyTargetAgentId: record.pendingReplyTargetAgentId }
+        : {}),
+      ...(record.pendingReplyDeadlineAt !== undefined
+        ? { pendingReplyDeadlineAt: record.pendingReplyDeadlineAt }
+        : {}),
+      ...(record.pendingReplyText !== undefined
+        ? { pendingReplyText: record.pendingReplyText }
+        : {}),
       pendingRequestIds: [...record.pendingRequestIds],
       ...(record.staleNotifiedAt !== undefined ? { staleNotifiedAt: record.staleNotifiedAt } : {}),
       ...(record.artifactSession ? { artifactSession: record.artifactSession } : {}),
@@ -727,10 +776,16 @@ export class LifecycleRegistry {
   setTaskRunning(input: TaskHandleInput | unknown): TaskRecord {
     const record = this.taskRecord(input);
     if (record.settled) {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" is already ${record.state}.`
+      );
     }
     if (record.state !== 'created' && record.state !== 'waiting' && record.state !== 'running') {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" cannot become running from ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" cannot become running from ${record.state}.`
+      );
     }
     if (record.state === 'waiting' && record.pendingRequestIds.size > 0) {
       throw new LifecycleError(
@@ -748,10 +803,16 @@ export class LifecycleRegistry {
   setTaskWaiting(input: TaskHandleInput | unknown): TaskRecord {
     const record = this.taskRecord(input);
     if (record.settled) {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" is already ${record.state}.`
+      );
     }
     if (record.state !== 'running' && record.state !== 'waiting') {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" cannot become waiting from ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" cannot become waiting from ${record.state}.`
+      );
     }
     if (record.pendingRequestIds.size === 0) {
       throw new LifecycleError(
@@ -779,7 +840,10 @@ export class LifecycleRegistry {
   addPendingRequest(input: TaskHandleInput | unknown, requestId: string): TaskRecord {
     const record = this.taskRecord(input);
     if (record.settled) {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" is already ${record.state}.`
+      );
     }
     if (typeof requestId !== 'string' || !requestId.trim()) {
       throw new LifecycleError('invalid_task', 'Pending request id must not be empty.');
@@ -823,7 +887,10 @@ export class LifecycleRegistry {
   ): TaskRecord {
     const record = this.taskRecord(input);
     if (record.settled) {
-      throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is already ${record.state}.`);
+      throw new LifecycleError(
+        'invalid_transition',
+        `Task "${record.taskId}" is already ${record.state}.`
+      );
     }
     if (record.pendingReplyMessageId !== undefined) {
       throw new LifecycleError(
@@ -905,7 +972,8 @@ export class LifecycleRegistry {
     if (record.state !== 'waiting') {
       throw new LifecycleError('invalid_transition', `Task "${record.taskId}" is not waiting.`);
     }
-    if (!Number.isFinite(at)) throw new LifecycleError('invalid_task', 'Stale notification time must be finite.');
+    if (!Number.isFinite(at))
+      throw new LifecycleError('invalid_task', 'Stale notification time must be finite.');
     record.staleNotifiedAt = at;
     return this.taskSnapshot(record);
   }
@@ -940,7 +1008,10 @@ export class LifecycleRegistry {
     const record = this.taskRecord(input);
     if (record.settled) return { ...record.result! };
     if (!['completed', 'blocked', 'failed', 'cancelled', 'timed_out'].includes(settlement.status)) {
-      throw new LifecycleError('invalid_task', `Unknown task result status "${settlement.status}".`);
+      throw new LifecycleError(
+        'invalid_task',
+        `Unknown task result status "${settlement.status}".`
+      );
     }
     const completedAt = settlement.completedAt ?? Date.now();
     if (!Number.isFinite(completedAt)) {
@@ -948,10 +1019,15 @@ export class LifecycleRegistry {
     }
     const ok = settlement.status === 'completed' && settlement.ok !== false;
     const defaultReturnCode =
-      settlement.status === 'cancelled' ? 130 :
-      settlement.status === 'timed_out' ? 124 :
-      settlement.status === 'blocked' ? 2 :
-      ok ? 0 : 1;
+      settlement.status === 'cancelled'
+        ? 130
+        : settlement.status === 'timed_out'
+          ? 124
+          : settlement.status === 'blocked'
+            ? 2
+            : ok
+              ? 0
+              : 1;
     const result: TaskResult = {
       taskId: record.taskId,
       agentId: record.agentId,
@@ -987,11 +1063,12 @@ export class LifecycleRegistry {
     if (agent?.activeTaskId === record.taskId) {
       agent.activeTaskId = undefined;
       if (agent.state !== 'closed') {
-        agent.state = settlement.status === 'completed'
-          ? 'done'
-          : settlement.status === 'blocked'
-            ? 'blocked'
-            : 'failed';
+        agent.state =
+          settlement.status === 'completed'
+            ? 'done'
+            : settlement.status === 'blocked'
+              ? 'blocked'
+              : 'failed';
       }
     }
     // Notify each task watcher exactly once, using the task id as the primary
@@ -1002,15 +1079,20 @@ export class LifecycleRegistry {
     const watcherIds = [...(this.taskWatchers.get(record.taskId) ?? [])];
     this.taskWatchers.delete(record.taskId);
     const agentHandle = this.agents.get(record.agentId)?.handle;
-    const notifyTaskWatcher = (watcher: WatcherRegistration, result: TaskResult, agentHandle: AgentHandle | undefined): void => {
+    const notifyTaskWatcher = (
+      watcher: WatcherRegistration,
+      result: TaskResult,
+      agentHandle: AgentHandle | undefined
+    ): void => {
       const cb = watcher.callback as TaskWatcherCallback | TaskWatcherCallback[] | undefined;
       const delivery = {
         ...result,
         ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
       };
       try {
-        if (Array.isArray(cb)) { for (const one of cb) one(delivery); }
-        else cb?.(delivery);
+        if (Array.isArray(cb)) {
+          for (const one of cb) one(delivery);
+        } else cb?.(delivery);
       } catch {
         /* notification delivery must not break lifecycle settlement */
       }
@@ -1070,20 +1152,17 @@ export class LifecycleRegistry {
     agent.state = 'working';
     // Do not arm a timeout here; waitPrompts owns the timeout and will set/extend it.
     // A very long safety net (1h) is set only if wait is never called.
-    const safetyTimeoutId = setTimeout(
-      () => {
-        const record = this.prompts.get(prompt.id);
-        if (!record || !this.isCurrent(record)) return;
-        this.settlePrompt(prompt, {
-          promptId: prompt.id,
-          agentId: prompt.agentId,
-          status: 'timeout',
-          ok: false,
-          error: 'Prompt timed out (safety net: wait never called).',
-        });
-      },
-      3_600_000
-    );
+    const safetyTimeoutId = setTimeout(() => {
+      const record = this.prompts.get(prompt.id);
+      if (!record || !this.isCurrent(record)) return;
+      this.settlePrompt(prompt, {
+        promptId: prompt.id,
+        agentId: prompt.agentId,
+        status: 'timeout',
+        ok: false,
+        error: 'Prompt timed out (safety net: wait never called).',
+      });
+    }, 3_600_000);
     this.prompts.get(prompt.id)!.timeoutId = safetyTimeoutId;
     return { ...prompt };
   }
@@ -1119,7 +1198,10 @@ export class LifecycleRegistry {
   ): WatcherRegistration {
     const values = Array.isArray(handles) ? handles : [handles];
     if (values.length === 0) {
-      throw new LifecycleError('invalid_handle', 'Expected one or more opaque prompt ids to watch.');
+      throw new LifecycleError(
+        'invalid_handle',
+        'Expected one or more opaque prompt ids to watch.'
+      );
     }
     const promptIds = values.map(value => this.canonicalPromptHandle(value).id);
     if (new Set(promptIds).size !== promptIds.length) {
@@ -1197,8 +1279,12 @@ export class LifecycleRegistry {
       callback === undefined
         ? () => undefined
         : Array.isArray(callback)
-          ? cb => { for (const one of callback) one(cb); }
-          : (cb: TaskWatcherCompletion) => { callback(cb); };
+          ? cb => {
+              for (const one of callback) one(cb);
+            }
+          : (cb: TaskWatcherCompletion) => {
+              callback(cb);
+            };
     const agentHandleOf = (agentId: string) => {
       const agent = this.agents.get(agentId);
       return agent && this.isCurrent(agent) ? agent.handle : undefined;
@@ -1209,7 +1295,12 @@ export class LifecycleRegistry {
       try {
         invoker({
           ...result,
-          ...(agentHandleOf(record.agentId) ? { agent: agentHandleOf(record.agentId)!.agent, label: agentHandleOf(record.agentId)!.label } : {}),
+          ...(agentHandleOf(record.agentId)
+            ? {
+                agent: agentHandleOf(record.agentId)!.agent,
+                label: agentHandleOf(record.agentId)!.label,
+              }
+            : {}),
         });
       } catch {
         /* notification delivery must not break lifecycle settlement */
@@ -1246,7 +1337,8 @@ export class LifecycleRegistry {
 
   /** Remove all watchers during parent session teardown. */
   clearWatchers(): void {
-    for (const [watcherId, watcher] of this.watchers) this.removeWatcherInternal(watcherId, watcher);
+    for (const [watcherId, watcher] of this.watchers)
+      this.removeWatcherInternal(watcherId, watcher);
     this.watchers.clear();
     this.promptWatchers.clear();
     this.taskWatchers.clear();
@@ -1258,7 +1350,10 @@ export class LifecycleRegistry {
     if (watcher) this.removeWatcherInternal(watcherId, watcher);
   }
 
-  private removeWatcherInternal(watcherId: string, watcher: { kind: 'prompt' | 'task'; pending: Set<string> }): void {
+  private removeWatcherInternal(
+    watcherId: string,
+    watcher: { kind: 'prompt' | 'task'; pending: Set<string> }
+  ): void {
     const index = watcher.kind === 'task' ? this.taskWatchers : this.promptWatchers;
     for (const id of watcher.pending) {
       const watchers = index.get(id);
@@ -1324,12 +1419,17 @@ export class LifecycleRegistry {
   settlePrompt(handle: PromptHandle, result: PromptResult): PromptResult {
     const prompt = this.getPrompt(handle);
     if (prompt.settled) return { ...prompt.result! };
-    const returnCode = result.returnCode ?? (
-      result.status === 'cancelled' ? 130 :
-      result.status === 'timeout' ? 124 :
-      result.status === 'blocked' ? 2 :
-      result.ok ? 0 : 1
-    );
+    const returnCode =
+      result.returnCode ??
+      (result.status === 'cancelled'
+        ? 130
+        : result.status === 'timeout'
+          ? 124
+          : result.status === 'blocked'
+            ? 2
+            : result.ok
+              ? 0
+              : 1);
     prompt.result = {
       ...result,
       returnCode,
@@ -1363,7 +1463,9 @@ export class LifecycleRegistry {
       try {
         watcher.callback?.({
           ...prompt.result,
-          ...(agentForWatcher ? { agent: agentForWatcher.agent, label: agentForWatcher.label } : {}),
+          ...(agentForWatcher
+            ? { agent: agentForWatcher.agent, label: agentForWatcher.label }
+            : {}),
         });
       } catch {
         /* notification delivery must not break lifecycle settlement */

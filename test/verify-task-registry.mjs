@@ -1,10 +1,7 @@
 #!/usr/bin/env node
 /** Phase 1 verification for tracked task records and state transitions. */
 import assert from 'node:assert/strict';
-import {
-  LifecycleError,
-  LifecycleRegistry,
-} from '../src/core/orchestration.ts';
+import { LifecycleError, LifecycleRegistry } from '../src/core/orchestration.ts';
 import { createManualClock, withFakeDateNow } from './helpers/fake-clock.mjs';
 
 const registry = new LifecycleRegistry();
@@ -52,13 +49,14 @@ expectLifecycleError(
 
 const taskWithDeadline = registry.createTask(planner, 'Deadline task', { timeoutMs: 30_000 });
 assert.equal(taskWithDeadline.agentId, planner.id);
-assert.equal(
-  registry.getTask(taskWithDeadline.id).deadlineAt,
-  taskWithDeadline.createdAt + 30_000
-);
+assert.equal(registry.getTask(taskWithDeadline.id).deadlineAt, taskWithDeadline.createdAt + 30_000);
 console.log('PASS task deadlines are recorded at creation');
 const artifactSession = { sessionPath: '/tmp/session', mocPath: '/tmp/shepherd.md' };
-const artifact = { id: 'artifact-1', filePath: '/tmp/session/worker.md', relativePath: '.shepherd/worker.md' };
+const artifact = {
+  id: 'artifact-1',
+  filePath: '/tmp/session/worker.md',
+  relativePath: '.shepherd/worker.md',
+};
 registry.attachTaskArtifact(taskWithDeadline.id, artifactSession, artifact);
 assert.equal(registry.taskArtifact(taskWithDeadline.id).artifact.id, 'artifact-1');
 assert.equal(registry.getTask(taskWithDeadline.id).artifactSession.sessionPath, '/tmp/session');

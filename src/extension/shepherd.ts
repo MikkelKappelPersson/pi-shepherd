@@ -46,7 +46,10 @@ import {
 import { fieldnotesEnabled, loadSettings } from './config.ts';
 import { lifecycleRegistry, LifecycleError } from '../core/orchestration.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
-import { resolveOrCreateParentArtifactSession, type ShepherdSession } from '../core/artifact-sessions.ts';
+import {
+  resolveOrCreateParentArtifactSession,
+  type ShepherdSession,
+} from '../core/artifact-sessions.ts';
 import type { DelegatorModel } from '../core/discovery.ts';
 import { discoverAgents, formatAgentList } from '../core/discovery.ts';
 import {
@@ -286,9 +289,7 @@ function formatHerdAgentList(agents: unknown[], indent = '  '): string[] {
     return [
       ...(index > 0 ? [''] : []),
       ...firstLines,
-      ...rest.flatMap(([key, value]) =>
-        formatHumanField(humanizeKey(key), value, `${indent}  `)
-      ),
+      ...rest.flatMap(([key, value]) => formatHumanField(humanizeKey(key), value, `${indent}  `)),
     ];
   });
 }
@@ -304,15 +305,30 @@ function formatToolResultText(result: any): string | undefined {
 
   const returnValue = details.returnValue ?? details.result;
   const visibleDetails = Object.entries(details)
-    .filter(([key]) => !['call', 'agent', 'label', 'model', 'status', 'artifactSession', 'returnValue', 'result'].includes(key))
+    .filter(
+      ([key]) =>
+        ![
+          'call',
+          'agent',
+          'label',
+          'model',
+          'status',
+          'artifactSession',
+          'returnValue',
+          'result',
+        ].includes(key)
+    )
     .sort(([left], [right]) => Number(left === 'returnCode') - Number(right === 'returnCode'))
     .map(([key, value]) => {
       let displayKey = key.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`);
       if (key === 'id' && call.name === 'shepherd_spawn') displayKey = 'agent id';
       if (key === 'fieldnote' && call.name === 'shepherd_spawn') displayKey = 'agent fieldnote';
-      const displayValue = value === null && key === 'fieldnote'
-        ? 'none'
-        : typeof value === 'string' ? value : JSON.stringify(value);
+      const displayValue =
+        value === null && key === 'fieldnote'
+          ? 'none'
+          : typeof value === 'string'
+            ? value
+            : JSON.stringify(value);
       return `   ${displayKey}: ${displayValue ?? 'null'}`;
     });
   const callText = `${call.name} ${JSON.stringify(call.arguments ?? {})}`;
@@ -338,7 +354,9 @@ function formatReturnValue(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function withToolResultText(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
+function withToolResultText(
+  result: AgentToolResult<Record<string, unknown>>
+): AgentToolResult<Record<string, unknown>> {
   const text = formatToolResultText(result);
   return text === undefined ? result : { ...result, content: [{ type: 'text', text }] };
 }
@@ -356,7 +374,7 @@ function renderShepherdNotification(
   message: any,
   options: { expanded?: boolean; outputPad?: number },
   theme: any,
-  formatted?: string,
+  formatted?: string
 ): Box {
   const content = formatted ?? notificationFallbackText(message);
   const collapsed = options.expanded !== true;
@@ -364,25 +382,29 @@ function renderShepherdNotification(
   const lines = renderedContent.split('\n');
   const title = lines.shift() ?? 'Shepherd notification';
   const renderedRemainder = collapsed
-    ? lines.map(line => {
-        if (/^✓/.test(line)) return theme.fg('success', line);
-        if (/^✗/.test(line)) return theme.fg('error', line);
-        if (/^⚠/.test(line)) return theme.fg('warning', line);
-        return theme.fg('toolOutput', line);
-      }).join('\n')
+    ? lines
+        .map(line => {
+          if (/^✓/.test(line)) return theme.fg('success', line);
+          if (/^✗/.test(line)) return theme.fg('error', line);
+          if (/^⚠/.test(line)) return theme.fg('warning', line);
+          return theme.fg('toolOutput', line);
+        })
+        .join('\n')
     : styleExpandedToolResult(
-      lines.join('\n'),
-      theme,
-      message?.details?.messageId ? { boldFields: ['message'] } : undefined
-    );
+        lines.join('\n'),
+        theme,
+        message?.details?.messageId ? { boldFields: ['message'] } : undefined
+      );
   const titleParts = title.split(/\s+/);
   const titleVerb = titleParts.shift() ?? 'Shepherd';
   const titleArgs = titleParts.join(' ');
-  const renderedTitle = theme.fg('toolTitle', theme.bold(titleVerb)) +
+  const renderedTitle =
+    theme.fg('toolTitle', theme.bold(titleVerb)) +
     (titleArgs ? ` ${theme.fg('accent', titleArgs)}` : '');
-  const rendered = renderedTitle +
-    (lines.length ? `\n${renderedRemainder}` : '');
-  const box = new Box(options.outputPad ?? 0, 1, (text: string) => theme.bg('customMessageBg', text));
+  const rendered = renderedTitle + (lines.length ? `\n${renderedRemainder}` : '');
+  const box = new Box(options.outputPad ?? 0, 1, (text: string) =>
+    theme.bg('customMessageBg', text)
+  );
   box.addChild(new Text(rendered, 0, 0));
   return box;
 }
@@ -390,7 +412,9 @@ function renderShepherdNotification(
 /** Compact custom notifications the same way collapsed tool results show only
  * their useful summary. Ctrl+O still exposes the structured notification. */
 function compactNotificationText(value: unknown, maxLength = 160): string {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const text = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
@@ -404,18 +428,19 @@ export function formatCollapsedNotification(message: any, formatted: string): st
     return text ? `${title}\n${text}` : title;
   }
   if (Array.isArray(details?.completions)) {
-    const ids = details.taskIds ?? details.promptIds ?? details.completions
-      .map((completion: any) => completion.taskId ?? completion.promptId)
-      .filter((id: unknown): id is string => typeof id === 'string');
+    const ids =
+      details.taskIds ??
+      details.promptIds ??
+      details.completions
+        .map((completion: any) => completion.taskId ?? completion.promptId)
+        .filter((id: unknown): id is string => typeof id === 'string');
     const target = Array.isArray(ids) && ids.length > 0 ? ids.join(', ') : 'completion';
-    const failed = details.completions.some((completion: any) =>
-      !['completed', 'done'].includes(completion.status) ||
-      (completion.returnCode !== undefined && completion.returnCode !== 0)
+    const failed = details.completions.some(
+      (completion: any) =>
+        !['completed', 'done'].includes(completion.status) ||
+        (completion.returnCode !== undefined && completion.returnCode !== 0)
     );
-    return [
-      `shepherd_watch ${target}`,
-      `${failed ? '✗ failed' : '✓ success'}`,
-    ].join('\n');
+    return [`shepherd_watch ${target}`, `${failed ? '✗ failed' : '✓ success'}`].join('\n');
   }
   if (details?.taskId) return `${title}: ${details.taskId}`;
   return title;
@@ -427,7 +452,10 @@ function notificationFallbackText(message: any): string {
   return marker >= 0 ? content.slice(0, marker) : content;
 }
 
-export function formatParentMessageNotification(envelope: any, customType?: string): string | undefined {
+export function formatParentMessageNotification(
+  envelope: any,
+  customType?: string
+): string | undefined {
   if (!envelope || typeof envelope !== 'object' || !envelope.messageId) return undefined;
   const isReply = envelope.kind === 'reply' || customType === 'shepherd.message.reply';
   const sender = displayAgentName(String(envelope.senderId ?? envelope.from ?? 'unknown'));
@@ -451,16 +479,33 @@ export function formatParentMessageNotification(envelope: any, customType?: stri
 function compactWatcherCompletion(completion: any): Record<string, unknown> {
   if (!completion || typeof completion !== 'object') return { value: completion };
   const keys = [
-    'taskId', 'promptId', 'agentId', 'agent', 'label', 'status', 'ok',
-    'returnCode', 'text', 'error', 'completedAt',
+    'taskId',
+    'promptId',
+    'agentId',
+    'agent',
+    'label',
+    'status',
+    'ok',
+    'returnCode',
+    'text',
+    'error',
+    'completedAt',
   ];
-  return Object.fromEntries(keys
-    .filter(key => completion[key] !== undefined && completion[key] !== null && completion[key] !== '')
-    .map(key => [key, completion[key]]));
+  return Object.fromEntries(
+    keys
+      .filter(
+        key => completion[key] !== undefined && completion[key] !== null && completion[key] !== ''
+      )
+      .map(key => [key, completion[key]])
+  );
 }
 
-export function formatWatcherNotification(details: any, kind: 'task' | 'prompt'): string | undefined {
-  if (!details || typeof details !== 'object' || !Array.isArray(details.completions)) return undefined;
+export function formatWatcherNotification(
+  details: any,
+  kind: 'task' | 'prompt'
+): string | undefined {
+  if (!details || typeof details !== 'object' || !Array.isArray(details.completions))
+    return undefined;
   const lines = ['Shepherd watcher'];
   const idLabel = kind === 'task' ? 'task ids' : 'prompt ids';
   const ids = kind === 'task' ? details.taskIds : details.promptIds;
@@ -468,27 +513,29 @@ export function formatWatcherNotification(details: any, kind: 'task' | 'prompt')
   if (Array.isArray(ids)) lines.push(...formatHumanField(idLabel, ids, ''));
   // Completion artifacts are durable storage metadata, not watcher output.
   // Keep the expanded notification focused on operational fields.
-  lines.push(...formatHumanField(
-    'completions',
-    details.completions.map(compactWatcherCompletion),
-    ''
-  ));
+  lines.push(
+    ...formatHumanField('completions', details.completions.map(compactWatcherCompletion), '')
+  );
   return lines.join('\n');
 }
 
 export function formatStaleWaitNotification(info: any): string | undefined {
   if (!info || typeof info !== 'object' || !info.taskId) return undefined;
-  const owner = info.label ? `${info.agent ?? info.agentId}: ${info.label}` : info.agent ?? info.agentId;
+  const owner = info.label
+    ? `${info.agent ?? info.agentId}: ${info.label}`
+    : (info.agent ?? info.agentId);
   const recipient = info.recipientName
     ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
     : undefined;
   const lines = ['Shepherd stale wait'];
   if (info.elapsedMs !== undefined) {
-    lines.push(...formatHumanField(
-      'waiting',
-      `${formatElapsedMs(info.elapsedMs)} (stale after ${info.thresholdMinutes} min)`,
-      ''
-    ));
+    lines.push(
+      ...formatHumanField(
+        'waiting',
+        `${formatElapsedMs(info.elapsedMs)} (stale after ${info.thresholdMinutes} min)`,
+        ''
+      )
+    );
   }
   lines.push(...formatHumanField('task id', info.taskId, ''));
   if (owner) lines.push(...formatHumanField('owner', owner, ''));
@@ -500,15 +547,17 @@ export function formatStaleWaitNotification(info: any): string | undefined {
       : info.requestMessageId;
     lines.push(...formatHumanField('pending request', pending, ''));
   }
-  lines.push(...formatHumanField(
-    'actions',
-    [
-      'Reply to the recipient on the owner\'s behalf via shepherd_message (set replyTo to the pending request).',
-      `Or nudge ${recipient ?? 'the target agent'} with shepherd_message (targetId = recipient).`,
-      'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
-    ].join('\n'),
-    ''
-  ));
+  lines.push(
+    ...formatHumanField(
+      'actions',
+      [
+        "Reply to the recipient on the owner's behalf via shepherd_message (set replyTo to the pending request).",
+        `Or nudge ${recipient ?? 'the target agent'} with shepherd_message (targetId = recipient).`,
+        "Or let the task's reply deadline settle it as blocked (shepherd_delegate timeout).",
+      ].join('\n'),
+      ''
+    )
+  );
   return lines.join('\n');
 }
 
@@ -528,7 +577,12 @@ export function setShepherdMessageSessionActive(active: boolean): void {
 
 function registerPromptCompletionRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer('shepherd.prompt.completion', (message, options, theme) =>
-    renderShepherdNotification(message, options, theme, formatWatcherNotification(message?.details, 'prompt'))
+    renderShepherdNotification(
+      message,
+      options,
+      theme,
+      formatWatcherNotification(message?.details, 'prompt')
+    )
   );
 }
 
@@ -553,7 +607,12 @@ function formatElapsedMs(ms: number): string {
 
 function registerStaleWaitRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer('shepherd.stale.wait', (message, options, theme) =>
-    renderShepherdNotification(message, options, theme, formatStaleWaitNotification(message?.details))
+    renderShepherdNotification(
+      message,
+      options,
+      theme,
+      formatStaleWaitNotification(message?.details)
+    )
   );
 }
 
@@ -563,7 +622,7 @@ function configureStaleWaitBridge(pi: ExtensionAPI): void {
     if (!staleWaitParentSessionActive) return;
     const owner = info.label
       ? `${info.agent ?? info.agentId}: ${info.label}`
-      : info.agent ?? info.agentId;
+      : (info.agent ?? info.agentId);
     const recipient = info.recipientName
       ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
       : 'the target agent';
@@ -573,11 +632,13 @@ function configureStaleWaitBridge(pi: ExtensionAPI): void {
       `Owner: ${owner} - ${info.description}`,
       `Question: ${info.question}`,
       `Pending request: ${info.requestMessageId} (waiting on ${recipient})`,
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
     const actions = [
-      'Reply to the recipient on the owner\'s behalf via shepherd_message (set replyTo to the pending request).',
+      "Reply to the recipient on the owner's behalf via shepherd_message (set replyTo to the pending request).",
       `Or nudge ${recipient} with shepherd_message (targetId = recipient).`,
-      'Or let the task\'s reply deadline settle it as blocked (shepherd_delegate timeout).',
+      "Or let the task's reply deadline settle it as blocked (shepherd_delegate timeout).",
     ].join('\n');
     const content = formatToolResultText({
       content: [{ type: 'text' as const, text: body }],
@@ -615,7 +676,12 @@ function configureStaleWaitBridge(pi: ExtensionAPI): void {
 
 function registerTaskCompletionRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer('shepherd.task.completion', (message, options, theme) =>
-    renderShepherdNotification(message, options, theme, formatWatcherNotification(message?.details, 'task'))
+    renderShepherdNotification(
+      message,
+      options,
+      theme,
+      formatWatcherNotification(message?.details, 'task')
+    )
   );
 }
 
@@ -641,7 +707,7 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
       .map(completion => {
         const identity = completion.label
           ? `${completion.agent ?? completion.agentId}: ${completion.label}`
-          : completion.agent ?? completion.agentId;
+          : (completion.agent ?? completion.agentId);
         return `${identity} ${completion.status}`;
       })
       .join(', ');
@@ -673,10 +739,10 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
 /** Narrow extension-owned bridge from core watcher completions to pi.
  * Also wires child-originated messages (Phase 6) into the parent session.
  */
-export function parentMessageDeliveryOptions(message: {
-  kind: string;
-  expectsReply?: boolean;
-}): { deliverAs: 'followUp' | 'steer'; triggerTurn: boolean } {
+export function parentMessageDeliveryOptions(message: { kind: string; expectsReply?: boolean }): {
+  deliverAs: 'followUp' | 'steer';
+  triggerTurn: boolean;
+} {
   // Ordinary child notifications remain passive, but a request or reply is a
   // decision point: the parent must get a turn to answer or resume waiting
   // work. Wake-ups use `steer` so pi surfaces them between tool rounds while
@@ -699,7 +765,7 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
       .map(completion => {
         const identity = completion.label
           ? `${completion.agent ?? completion.agentId}: ${completion.label}`
-          : completion.agent ?? completion.agentId;
+          : (completion.agent ?? completion.agentId);
         return `${identity} ${completion.status}`;
       })
       .join(', ');
@@ -739,7 +805,8 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
     try {
       const sendResult: any = pi.sendMessage(
         {
-          customType: envelope.kind === 'reply' ? 'shepherd.message.reply' : 'shepherd.message.incoming',
+          customType:
+            envelope.kind === 'reply' ? 'shepherd.message.reply' : 'shepherd.message.incoming',
           content,
           display: true,
           details: envelope,
@@ -758,7 +825,12 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
 
 function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
   const render = (message: any, options: any, theme: any) =>
-    renderShepherdNotification(message, options, theme, formatParentMessageNotification(message?.details, message?.customType));
+    renderShepherdNotification(
+      message,
+      options,
+      theme,
+      formatParentMessageNotification(message?.details, message?.customType)
+    );
   pi.registerMessageRenderer('shepherd.message.incoming', render);
   pi.registerMessageRenderer('shepherd.message.reply', render);
 }
@@ -903,24 +975,24 @@ export async function doAction(
       const handle = await promptAgent(a.id ?? a.handle, a.message, { timeout: timeoutMs });
       const agent = lifecycleRegistry.getAgent(handle.agentId).handle;
       const artifact = lifecycleRegistry.promptArtifact(handle);
-      return textResult(
-        `Prompted ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
-        {
+      return textResult(`Prompted ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`, {
+        id: handle.id,
+        returnValue: {
           id: handle.id,
-          returnValue: {
-            id: handle.id,
-            ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
-          },
           ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
-          ...(artifact.session ? { artifactSession: artifact.session } : {}),
-        }
-      );
+        },
+        ...(artifact.artifact ? { artifact: artifact.artifact } : {}),
+        ...(artifact.session ? { artifactSession: artifact.session } : {}),
+      });
     }
     case 'watch': {
       const a: any = args;
       const ids: string[] = Array.isArray(a.id) ? a.id : [a.id];
       if (ids.length === 0) {
-        throw new LifecycleError('invalid_handle', 'Expected one or more task (or legacy prompt) ids to watch.');
+        throw new LifecycleError(
+          'invalid_handle',
+          'Expected one or more task (or legacy prompt) ids to watch.'
+        );
       }
       // A tracker id is a task first; anything else must be a known prompt id.
       // Agent ids and Herdr pane ids are rejected with a clear error here so
@@ -947,9 +1019,10 @@ export async function doAction(
       }
       if (taskIds.length > 0) {
         const registration = taskWatcherService.watch(taskIds);
-        const summary = registration.pending.length > 0
-          ? `watching ${registration.pending.length} task${registration.pending.length === 1 ? '' : 's'} asynchronously`
-          : 'watch registered; all tasks were already settled';
+        const summary =
+          registration.pending.length > 0
+            ? `watching ${registration.pending.length} task${registration.pending.length === 1 ? '' : 's'} asynchronously`
+            : 'watch registered; all tasks were already settled';
         return textResult(summary, {
           watcherId: registration.watcherId,
           taskIds: registration.taskIds,
@@ -959,9 +1032,10 @@ export async function doAction(
         });
       }
       const registration = promptWatcherService.watch(promptIds);
-      const summary = registration.pending.length > 0
-        ? `watching ${registration.pending.length} prompt${registration.pending.length === 1 ? '' : 's'} asynchronously`
-        : 'watch registered; all prompts were already settled';
+      const summary =
+        registration.pending.length > 0
+          ? `watching ${registration.pending.length} prompt${registration.pending.length === 1 ? '' : 's'} asynchronously`
+          : 'watch registered; all prompts were already settled';
       return textResult(summary, {
         watcherId: registration.watcherId,
         promptIds: registration.promptIds,
@@ -981,11 +1055,15 @@ export async function doAction(
               task: {
                 id: result.task.id,
                 state: result.task.state,
-                ...(result.task.waitingMs !== undefined ? { waitingMs: result.task.waitingMs } : {}),
+                ...(result.task.waitingMs !== undefined
+                  ? { waitingMs: result.task.waitingMs }
+                  : {}),
                 ...(result.task.pendingRequestMessageId
                   ? { pendingRequest: result.task.pendingRequestMessageId }
                   : {}),
-                ...(result.task.waitingRecipient ? { waitingOn: result.task.waitingRecipient } : {}),
+                ...(result.task.waitingRecipient
+                  ? { waitingOn: result.task.waitingRecipient }
+                  : {}),
                 ...(result.task.stale ? { stale: true } : {}),
               },
             }
@@ -1001,10 +1079,13 @@ export async function doAction(
     case 'close': {
       const a: any = args;
       const handle = closeAgent(a.id ?? a.handle);
-      return textResult(`closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`, {
-        id: handle.id,
-        returnValue: { id: handle.id },
-      });
+      return textResult(
+        `closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
+        {
+          id: handle.id,
+          returnValue: { id: handle.id },
+        }
+      );
     }
     case 'agents': {
       // List available agent definitions for the shepherd's herd.
@@ -1152,14 +1233,19 @@ async function executeShepherd(
     const details = result.details && typeof result.details === 'object' ? result.details : {};
     return withToolResultText({
       ...result,
-      details: { call: publicToolCall(label, args, ctx.cwd), ...(details as Record<string, unknown>) },
+      details: {
+        call: publicToolCall(label, args, ctx.cwd),
+        ...(details as Record<string, unknown>),
+      },
     });
   } catch (error: any) {
     const message = String(error?.message ?? error);
     const returnCode = typeof error?.returnCode === 'number' ? error.returnCode : 1;
     const code = typeof error?.code === 'string' ? error.code : 'shepherd_error';
     const failure = withToolResultText({
-      content: [{ type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` }],
+      content: [
+        { type: 'text', text: `Herd ${label} failed (return code ${returnCode}): ${message}` },
+      ],
       details: {
         call: publicToolCall(label, args, ctx.cwd),
         action: label,
@@ -1191,8 +1277,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       'Lifecycle references are opaque session-scoped ids. Tool results print the id in their text and expose it as details.id; pass it as the top-level id argument, never as a Herdr pane id.',
       'Requires a running Herdr session (HERDR_ENV=1 or headless server).',
     ].join(' '),
-    promptSnippet:
-      'Subagent orchestration tool for herdr.',
+    promptSnippet: 'Subagent orchestration tool for herdr.',
     promptGuidelines: [
       'Use the Shepherd tool family as one lifecycle: discover an agent definition with shepherd/agents, create it with shepherd_spawn, submit tracked work with shepherd_delegate, collect results with shepherd_watch, inspect with shepherd_status or shepherd_read, and explicitly finish with shepherd_close.',
       'Use shepherd_watch after shepherd_delegate when the parent should continue without blocking; it accepts task ids and sends custom completion follow-ups. Waiting is non-blocking; close each agent explicitly when finished.',
@@ -1241,11 +1326,10 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     description:
       'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
       'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model, and a new tab. Use placement pane_right or pane_down to split the current pane.',
-    promptSnippet:
-      'Spawn a new agent in a Herdr pane.',
+    promptSnippet: 'Spawn a new agent in a Herdr pane.',
     promptGuidelines: [
-            'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.'
-            ],
+      'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.',
+    ],
     parameters: Type.Object({
       agent: Type.String({
         description:
@@ -1258,7 +1342,9 @@ export function registerShepherdTools(pi: ExtensionAPI) {
             'Optional placement: pane_right or pane_down splits the current pane, tab creates a new tab, and workspace creates a new workspace. If omitted, uses a background tab.',
         })
       ),
-      cwd: Type.Optional(Type.String({ description: 'Working directory for the child; defaults to the parent cwd.' })),
+      cwd: Type.Optional(
+        Type.String({ description: 'Working directory for the child; defaults to the parent cwd.' })
+      ),
     }),
     prepareArguments: input => prepareForSchema<Omit<Static<typeof SpawnParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
@@ -1292,8 +1378,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: delegate task',
     description:
       'Start tracked asynchronous work on a spawned agent and return a task id immediately. The task can span multiple Pi turns; use shepherd_watch to observe terminal completion. Do not treat an idle child or ended turn as task completion.',
-    promptSnippet:
-      'Delegate tracked asynchronous work without blocking the parent.',
+    promptSnippet: 'Delegate tracked asynchronous work without blocking the parent.',
     promptGuidelines: [
       'Use shepherd_delegate for work that may span multiple child turns or wait for another agent. The returned task id, not a prompt id or pane id, is the completion handle.',
       'Use shepherd_watch after delegation when the parent should continue without blocking. A child must explicitly call shepherd_done before a successful task result is reported.',
@@ -1318,7 +1403,16 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         onUpdate
       ),
     renderCall(args, theme, context) {
-      return renderLifecycleCall('shepherd_delegate', [args.target, args.task, args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined], theme, context);
+      return renderLifecycleCall(
+        'shepherd_delegate',
+        [
+          args.target,
+          args.task,
+          args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined,
+        ],
+        theme,
+        context
+      );
     },
     renderResult: (result, options, theme, context) =>
       renderUserFacingResult(result, options, theme, context),
@@ -1334,20 +1428,26 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     promptGuidelines: [
       'Before calling shepherd_message, copy target from the id field in shepherd_spawn output. Do not infer or substitute the agent definition name, display label, pane id, or any angle-bracket placeholder; invalid targets fail instead of being resolved by name.',
       'Use shepherd_message for questions to an agent while it is busy or idle; the recipient receives it as a queued follow-up. Do not use it to submit tracked work — that is shepherd_delegate.',
-      'When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. For peer replies, use the requester\'s task ID—the task whose request is being answered—not the responder\'s task ID. A plain message never alters task state.',
+      "When expectsReply is set with a taskId, the task waits for the reply; a matching reply (replyTo = the returned message id) returns it to running. For peer replies, use the requester's task ID—the task whose request is being answered—not the responder's task ID. A plain message never alters task state.",
     ],
     parameters: Type.Object({
-      target: Type.String({ description: 'Exact opaque agent id returned by shepherd_spawn; copy it verbatim. Agent names (for example "planner"), labels, Herdr pane ids, and placeholders are rejected.' }),
+      target: Type.String({
+        description:
+          'Exact opaque agent id returned by shepherd_spawn; copy it verbatim. Agent names (for example "planner"), labels, Herdr pane ids, and placeholders are rejected.',
+      }),
       message: Type.String({ description: 'Non-empty message content.' }),
       taskId: Type.Optional(TaskIdSchema),
       threadId: Type.Optional(Type.String({ description: 'Conversation/thread correlation id.' })),
-      replyTo: Type.Optional(Type.String({ description: 'Message id of the request being answered.' })),
-      expectsReply: Type.Optional(Type.Boolean({ description: 'Track this message as a request that expects a reply.' })),
+      replyTo: Type.Optional(
+        Type.String({ description: 'Message id of the request being answered.' })
+      ),
+      expectsReply: Type.Optional(
+        Type.Boolean({ description: 'Track this message as a request that expects a reply.' })
+      ),
       delivery: Type.Optional(
-        Type.Union(
-          [Type.Literal('followUp'), Type.Literal('steer')],
-          { description: 'Delivery mode; followUp is the default, steer is for urgent input.' }
-        )
+        Type.Union([Type.Literal('followUp'), Type.Literal('steer')], {
+          description: 'Delivery mode; followUp is the default, steer is for urgent input.',
+        })
       ),
     }),
     prepareArguments: input =>
@@ -1408,7 +1508,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     renderCall(args, theme, context) {
       return renderLifecycleCall(
         'shepherd_prompt',
-        [args.id, args.message, args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined],
+        [
+          args.id,
+          args.message,
+          args.timeout !== undefined ? `timeout ${args.timeout}m` : undefined,
+        ],
         theme,
         context
       );
@@ -1422,8 +1526,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: watch task',
     description:
       'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Legacy prompt ids from shepherd_prompt are still accepted.',
-    promptSnippet:
-      'Watch task completion asynchronously without blocking the parent turn.',
+    promptSnippet: 'Watch task completion asynchronously without blocking the parent turn.',
     promptGuidelines: [
       'Pass task ids returned by shepherd_delegate; legacy prompt ids from shepherd_prompt are also accepted. Never pass agent ids or Herdr pane ids.',
       'Array watchers report each task as it settles and may coalesce close-together completions into one notification.',
@@ -1433,26 +1536,36 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       id: Type.Union(
         [
           Type.String({
-            description: 'Opaque task id returned by shepherd_delegate. A legacy prompt id from shepherd_prompt is also accepted. Do not use an agent id or pane id.',
+            description:
+              'Opaque task id returned by shepherd_delegate. A legacy prompt id from shepherd_prompt is also accepted. Do not use an agent id or pane id.',
           }),
           Type.Array(
             Type.String({
-              description: 'Opaque task id returned by shepherd_delegate; a legacy prompt id from shepherd_prompt is also accepted.',
+              description:
+                'Opaque task id returned by shepherd_delegate; a legacy prompt id from shepherd_prompt is also accepted.',
             }),
             {
               minItems: 1,
-              description: 'Array of opaque task ids; completions are reported independently as each task settles.',
+              description:
+                'Array of opaque task ids; completions are reported independently as each task settles.',
             }
           ),
         ],
         {
-          description: 'One opaque task id or a non-empty array of task ids returned by shepherd_delegate; legacy prompt ids are also accepted.',
+          description:
+            'One opaque task id or a non-empty array of task ids returned by shepherd_delegate; legacy prompt ids are also accepted.',
         }
       ),
     }),
     prepareArguments: input => prepareForSchema<Omit<Static<typeof WatchParams>, 'action'>>(input),
     execute: (_id, params, signal, onUpdate, ctx) =>
-      executeShepherd('watch', { action: 'watch', ...params } as ShepherdArgs, ctx, signal, onUpdate),
+      executeShepherd(
+        'watch',
+        { action: 'watch', ...params } as ShepherdArgs,
+        ctx,
+        signal,
+        onUpdate
+      ),
     renderCall(args, theme, context) {
       const ids = Array.isArray(args.id) ? args.id.join(', ') : args.id;
       return renderLifecycleCall('shepherd_watch', [ids], theme, context);
@@ -1466,8 +1579,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: status of agent',
     description:
       "Inspect an agent's current state without focusing or mutating its Herdr pane. Pass the agent id printed by shepherd_spawn; do not pass a prompt id or Herdr pane id.",
-    promptSnippet:
-      'Check the current state of a spawned agent.',
+    promptSnippet: 'Check the current state of a spawned agent.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
@@ -1495,8 +1607,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: close agent',
     description:
       'Close an owned agent and cancel any unresolved prompt. Pass the agent id printed by shepherd_spawn, not a Herdr pane id. Waiting does not close agents, so close each agent when finished.',
-    promptSnippet:
-      'Close an owned agent and cancel any unresolved prompt.',
+    promptSnippet: 'Close an owned agent and cancel any unresolved prompt.',
     parameters: Type.Object({
       id: Type.String({
         description: 'Opaque agent id returned by shepherd_spawn. Do not use a Herdr pane id.',
@@ -1524,8 +1635,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: read terminal output',
     description:
       'Read recent terminal output for diagnostics. Pass an agent name, Herdr pane id, or an agent id; unlike lifecycle tools, this diagnostic tool intentionally accepts several target forms.',
-    promptSnippet:
-      'Read recent terminal output for diagnostics.',
+    promptSnippet: 'Read recent terminal output for diagnostics.',
     parameters: Type.Object({
       name: Type.String({
         description: 'Agent name, Herdr pane id, or opaque agent id of the target.',
@@ -1552,17 +1662,14 @@ export function registerShepherdTools(pi: ExtensionAPI) {
 }
 
 function compactCallValue(value: unknown, maxLength = 72): string {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const text = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(1, maxLength - 1))}…`;
 }
 
-function renderLifecycleCall(
-  name: string,
-  parts: unknown[],
-  theme: any,
-  context: any,
-): Text {
+function renderLifecycleCall(name: string, parts: unknown[], theme: any, context: any): Text {
   const component = reusableText(context.lastComponent);
   const values = parts
     .filter(value => value !== undefined && value !== null && value !== '')
@@ -1570,7 +1677,15 @@ function renderLifecycleCall(
   component.setText(
     theme.fg('toolTitle', theme.bold(name)) +
       (values.length ? ` ${theme.fg('accent', values[0])}` : '') +
-      (values.length > 1 ? theme.fg('dim', ` ${values.slice(1).map(value => `· ${value}`).join(' ')}`) : '')
+      (values.length > 1
+        ? theme.fg(
+            'dim',
+            ` ${values
+              .slice(1)
+              .map(value => `· ${value}`)
+              .join(' ')}`
+          )
+        : '')
   );
   return component;
 }
@@ -1579,11 +1694,13 @@ function renderSpawnResult(
   result: any,
   options: { expanded?: boolean; isPartial?: boolean },
   theme: any,
-  context: any,
+  context: any
 ) {
   const component = reusableText(context.lastComponent);
   const details = result?.details && typeof result.details === 'object' ? result.details : {};
-  const failed = context?.isError === true || details.error !== undefined ||
+  const failed =
+    context?.isError === true ||
+    details.error !== undefined ||
     (details.returnCode !== undefined && Number(details.returnCode) !== 0);
 
   if (options.isPartial) {
@@ -1632,7 +1749,12 @@ function renderSpawnResult(
 }
 
 /** Render every Shepherd result with the same user-facing structure. */
-function renderUserFacingResult(result: any, options: { expanded?: boolean }, theme: any, context: any) {
+function renderUserFacingResult(
+  result: any,
+  options: { expanded?: boolean },
+  theme: any,
+  context: any
+) {
   const rendered = formatToolResultText(result);
   if (rendered === undefined) return renderToolResult(result, options, theme, context);
   const component = reusableText(context.lastComponent);
@@ -1705,23 +1827,30 @@ export function formatExpandedToolResult(result: any): string | undefined {
     Object.prototype.hasOwnProperty.call(details, key)
   );
   for (const key of returnValueKeys) {
-    lines.push(...formatHumanReturnValue(
-      key === 'returnValue' ? details[key] : details[key],
-      call.name,
-      callArguments,
-      '',
-      body
-    ));
+    lines.push(
+      ...formatHumanReturnValue(
+        key === 'returnValue' ? details[key] : details[key],
+        call.name,
+        callArguments,
+        '',
+        body
+      )
+    );
   }
 
-  const returnValueObject = returnValueKeys.length === 1 &&
-    details[returnValueKeys[0]] && typeof details[returnValueKeys[0]] === 'object' &&
+  const returnValueObject =
+    returnValueKeys.length === 1 &&
+    details[returnValueKeys[0]] &&
+    typeof details[returnValueKeys[0]] === 'object' &&
     !Array.isArray(details[returnValueKeys[0]])
-    ? details[returnValueKeys[0]]
-    : undefined;
+      ? details[returnValueKeys[0]]
+      : undefined;
   const returnedKeys = new Set(returnValueObject ? Object.keys(returnValueObject) : []);
   const extraEntries = Object.entries(details).filter(([key]) => {
-    if (['call', 'returnValue', 'result', 'artifactSession', 'fieldnote', 'returnCode'].includes(key)) return false;
+    if (
+      ['call', 'returnValue', 'result', 'artifactSession', 'fieldnote', 'returnCode'].includes(key)
+    )
+      return false;
     if (call.name === 'shepherd_status' && key === 'status') return false;
     if (key === 'error') return true;
     return !returnedKeys.has(key) && !['agent', 'label', 'model', 'id'].includes(key);
@@ -1749,9 +1878,12 @@ function humanReturnSummary(callName: string, body: string, details: Record<stri
     return /watching/i.test(body) ? 'watching…' : 'completed';
   }
   if (callName === 'shepherd_status') {
-    const returned = details.returnValue && typeof details.returnValue === 'object'
-      ? details.returnValue
-      : details.result && typeof details.result === 'object' ? details.result : undefined;
+    const returned =
+      details.returnValue && typeof details.returnValue === 'object'
+        ? details.returnValue
+        : details.result && typeof details.result === 'object'
+          ? details.result
+          : undefined;
     if (typeof returned?.state === 'string') return returned.state;
     const state = body.match(/\bagent\s+([a-z-]+)/i)?.[1];
     return (state ?? body) || 'completed';
@@ -1765,17 +1897,20 @@ export function renderCollapsedLifecycleResult(
   result: any,
   callName: string,
   theme: any,
-  context: any,
+  context: any
 ): string | undefined {
   const details = result?.details && typeof result.details === 'object' ? result.details : {};
-  const failed = context?.isError === true || details.error !== undefined ||
+  const failed =
+    context?.isError === true ||
+    details.error !== undefined ||
     (details.returnCode !== undefined && Number(details.returnCode) !== 0);
   if (failed) {
     const body = resultTextBody(result);
     const firstLine = body.split('\n')[0] ?? '';
-    const error = typeof details.error === 'string'
-      ? details.error
-      : firstLine.replace(/^Herd \w+ failed(?: \(return code \d+\))?:\s*/, '') || 'unknown error';
+    const error =
+      typeof details.error === 'string'
+        ? details.error
+        : firstLine.replace(/^Herd \w+ failed(?: \(return code \d+\))?:\s*/, '') || 'unknown error';
     return theme.fg('error', `✗ failed${error ? ` · ${error}` : ''}`);
   }
   if (callName === 'shepherd' && Array.isArray(details.agents)) {
@@ -1784,10 +1919,12 @@ export function renderCollapsedLifecycleResult(
       return theme.fg('toolOutput', `Active agents: ${agents.length}`);
     }
     const names = details.agents
-      .map((agent: any) => agent && typeof agent.name === 'string' ? agent.name : undefined)
+      .map((agent: any) => (agent && typeof agent.name === 'string' ? agent.name : undefined))
       .filter((name: string | undefined): name is string => name !== undefined);
-    return theme.fg('accent', 'Available agents:') +
-      (names.length > 0 ? ` ${theme.fg('toolOutput', names.join(', '))}` : '');
+    return (
+      theme.fg('accent', 'Available agents:') +
+      (names.length > 0 ? ` ${theme.fg('toolOutput', names.join(', '))}` : '')
+    );
   }
   if (callName === 'shepherd_delegate') return theme.fg('success', '✓ delegated');
   if (callName === 'shepherd_message') {
@@ -1798,9 +1935,7 @@ export function renderCollapsedLifecycleResult(
   if (callName === 'shepherd_prompt') return theme.fg('success', '✓ prompted');
   if (callName === 'shepherd_watch') {
     const pending = Array.isArray(details.pending) ? details.pending.length : 0;
-    return pending > 0
-      ? theme.fg('warning', 'watching…')
-      : theme.fg('success', '✓ completed');
+    return pending > 0 ? theme.fg('warning', 'watching…') : theme.fg('success', '✓ completed');
   }
   if (callName === 'shepherd_close') return theme.fg('success', '✓ closed');
 
@@ -1817,26 +1952,18 @@ function formatHumanReturnValue(
   callName: string,
   callArguments: Record<string, unknown>,
   indent: string,
-  body: string,
+  body: string
 ): string[] {
   if (typeof value === 'string' && value === body) return [];
   if (callName === 'shepherd_watch' && Array.isArray(value)) {
-    return formatHumanField(
-      'completions',
-      value.map(compactWatcherCompletion),
-      indent
-    );
+    return formatHumanField('completions', value.map(compactWatcherCompletion), indent);
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return formatHumanField('value', value, indent);
   }
   return Object.entries(value).flatMap(([key, entry]) => {
     if (callName === 'shepherd_watch' && key === 'completed' && Array.isArray(entry)) {
-      return formatHumanField(
-        'completions',
-        entry.map(compactWatcherCompletion),
-        indent
-      );
+      return formatHumanField('completions', entry.map(compactWatcherCompletion), indent);
     }
     if (callName === 'shepherd_spawn' && ['agent', 'label'].includes(key)) return [];
     if (callName === 'shepherd_status' && key === 'id' && callArguments.id === entry) return [];
@@ -1866,16 +1993,15 @@ function formatHumanRecord(value: unknown, indent: string): string[] {
 }
 
 function formatHumanField(label: string, value: unknown, indent: string): string[] {
-  const isTextBlock = typeof value === 'string' &&
-    (value.includes('\n') || ['message', 'task', 'question', 'description', 'output', 'text'].includes(label));
+  const isTextBlock =
+    typeof value === 'string' &&
+    (value.includes('\n') ||
+      ['message', 'task', 'question', 'description', 'output', 'text'].includes(label));
   if (isTextBlock) {
     return [`${indent}${label}:`, value as string, ''];
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return [
-      `${indent}${label}:`,
-      ...formatHumanRecord(value, `${indent}  `),
-    ];
+    return [`${indent}${label}:`, ...formatHumanRecord(value, `${indent}  `)];
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return [`${indent}${label}: []`];
@@ -1886,11 +2012,7 @@ function formatHumanField(label: string, value: unknown, indent: string): string
           const entries = Object.entries(item);
           if (entries.length === 0) return [`${indent}  -`];
           const [[firstKey, firstValue], ...rest] = entries;
-          const firstLines = formatHumanField(
-            humanizeKey(firstKey),
-            firstValue,
-            `${indent}    `
-          );
+          const firstLines = formatHumanField(humanizeKey(firstKey), firstValue, `${indent}    `);
           const firstLine = firstLines.shift() ?? `${indent}    ${humanizeKey(firstKey)}:`;
           return [
             `${indent}  - ${firstLine.trimStart()}`,
@@ -1923,7 +2045,7 @@ function humanizeKey(key: string): string {
 export function styleExpandedToolResult(
   text: string,
   theme: any,
-  options: { boldFields?: string[] } = {},
+  options: { boldFields?: string[] } = {}
 ): string {
   // A raw text field (notably `message`) is deliberately left untouched. In
   // particular, lines such as `Status: pending` inside the message are data,
@@ -1944,17 +2066,18 @@ export function styleExpandedToolResult(
       }
       const field = line.match(/^(\s*)(-\s+)?([A-Za-z][A-Za-z0-9 _-]*):(\s*)(.*)$/);
       if (field) {
-        const isRawField = field[5] === '' &&
-          ['message', 'task', 'question', 'description', 'output', 'actions', 'text'].includes(field[3].toLowerCase());
+        const isRawField =
+          field[5] === '' &&
+          ['message', 'task', 'question', 'description', 'output', 'actions', 'text'].includes(
+            field[3].toLowerCase()
+          );
         rawBlock = isRawField;
-        const label = options.boldFields?.some(name => name.toLowerCase() === field[3].toLowerCase())
+        const label = options.boldFields?.some(
+          name => name.toLowerCase() === field[3].toLowerCase()
+        )
           ? theme.bold(`${field[3]}:`)
           : theme.fg('accent', `${field[3]}:`);
-        return field[1] +
-          (field[2] ?? '') +
-          label +
-          field[4] +
-          theme.fg('toolOutput', field[5]);
+        return field[1] + (field[2] ?? '') + label + field[4] + theme.fg('toolOutput', field[5]);
       }
       return theme.fg('toolOutput', line);
     })

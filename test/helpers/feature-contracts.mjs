@@ -39,11 +39,6 @@ export const plannedTaskStates = Object.freeze([
   'timed_out',
 ]);
 
-export const plannedParentOnlyTools = Object.freeze([
-  'shepherd_delegate',
-  'shepherd_watch',
-]);
+export const plannedParentOnlyTools = Object.freeze(['shepherd_delegate', 'shepherd_watch']);
 
-export const plannedChildOnlyTools = Object.freeze([
-  'shepherd_done',
-]);
+export const plannedChildOnlyTools = Object.freeze(['shepherd_done']);

@@ -9,7 +9,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { discoverAgents } from './src/core/discovery.ts';
-import { fieldnotesEnabled, initializeSessionSettings, loadSettings } from './src/extension/config.ts';
+import {
+  fieldnotesEnabled,
+  initializeSessionSettings,
+  loadSettings,
+} from './src/extension/config.ts';
 import { openSettings } from './src/extension/settings-ui.ts';
 import {
   doAction,
@@ -22,7 +26,11 @@ import {
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
-import { shutdownPromptWatchers, shutdownTaskWatchers, shutdownStaleWaitMonitor } from './src/core/lifecycle.ts';
+import {
+  shutdownPromptWatchers,
+  shutdownTaskWatchers,
+  shutdownStaleWaitMonitor,
+} from './src/core/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
@@ -69,10 +77,10 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
       // The created-panes registry is shared across all shepherd sessions;
       // only the panes owned by THIS session belong in this widget.
       const panes = loadCreatedPanes().filter(paneOwnedByCurrentSession);
-      const createdAtById = new Map(panes.map((p) => [p.paneId, p.createdAt]));
+      const createdAtById = new Map(panes.map(p => [p.paneId, p.createdAt]));
       const agents = workingOrWaitingSubagents();
       const tasksByPane = activeTasksByPane();
-      const workingNow = new Set(agents.filter((s) => s.state === 'working').map((s) => s.paneId));
+      const workingNow = new Set(agents.filter(s => s.state === 'working').map(s => s.paneId));
       const now = Date.now();
       for (const paneId of walkStarts.keys()) {
         if (!workingNow.has(paneId)) walkStarts.delete(paneId);
@@ -80,7 +88,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
       for (const paneId of workingNow) {
         if (!walkStarts.has(paneId)) walkStarts.set(paneId, now);
       }
-      snapshot = agents.map((s) => ({
+      snapshot = agents.map(s => ({
         ...s,
         createdAt: createdAtById.get(s.paneId),
         walkStartMs: walkStarts.get(s.paneId),
@@ -96,7 +104,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
         tick(tui);
         const timer = setInterval(() => tick(tui), POLL_MS);
         const animationTimer = setInterval(() => {
-          if (!snapshot.some((agent) => agent.state === 'working')) return;
+          if (!snapshot.some(agent => agent.state === 'working')) return;
           // Keeps the spinner and the sheep (a pure function of wall-clock
           // age) re-rendering; the counter only feeds the spinner now.
           sheepFrame += 1;
@@ -105,7 +113,13 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
         return {
           render: (width: number) =>
             snapshot.length > 0
-              ? renderWorkingAgents(snapshot, theme, width, sheepFrame, loadSettings(currentCwd()).emojiSheep)
+              ? renderWorkingAgents(
+                  snapshot,
+                  theme,
+                  width,
+                  sheepFrame,
+                  loadSettings(currentCwd()).emojiSheep
+                )
               : [],
           invalidate: () => {
             // Theme changed: rows are re-derived from the live snapshot,
@@ -118,7 +132,7 @@ function registerSubagentStatusWidget(pi: ExtensionAPI): void {
           },
         };
       },
-      { placement: 'belowEditor' },
+      { placement: 'belowEditor' }
     );
   });
 }
@@ -202,7 +216,9 @@ function animatedSheep(
 ): string {
   const glyph = useEmoji ? '🐑' : 'o';
   const cycleWidth = trackSpan + 1;
-  const position = trackSpan - (((Math.floor(ageMs / SHEEP_FRAME_MS) * SHEEP_SPEED) % cycleWidth + cycleWidth) % cycleWidth);
+  const position =
+    trackSpan -
+    ((((Math.floor(ageMs / SHEEP_FRAME_MS) * SHEEP_SPEED) % cycleWidth) + cycleWidth) % cycleWidth);
   return `${' '.repeat(position + 1)}${theme.fg('text', glyph)}`;
 }
 
@@ -230,8 +246,8 @@ function renderWorkingAgents(
   const title = 'shepherd';
   // Process and task state are shown independently: a pane may be working
   // with a running task, or idle while its task waits on a required reply.
-  const workingCount = agents.filter((agent) => agent.state === 'working').length;
-  const waitingCount = agents.filter((agent) => agent.task?.state === 'waiting').length;
+  const workingCount = agents.filter(agent => agent.state === 'working').length;
+  const waitingCount = agents.filter(agent => agent.task?.state === 'waiting').length;
   const infoParts: string[] = [];
   if (workingCount > 0) infoParts.push(`${workingCount} working`);
   if (waitingCount > 0) infoParts.push(`${waitingCount} waiting`);

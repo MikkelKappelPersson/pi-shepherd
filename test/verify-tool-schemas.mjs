@@ -47,12 +47,18 @@ for (const tool of registered) {
       schema.properties && typeof schema.properties === 'object',
       'root schema must declare properties'
     );
-    if (['shepherd_prompt', 'shepherd_watch', 'shepherd_status', 'shepherd_close'].includes(tool.name)) {
+    if (
+      ['shepherd_prompt', 'shepherd_watch', 'shepherd_status', 'shepherd_close'].includes(tool.name)
+    ) {
       assert.ok('id' in schema.properties, `${tool.name} must expose a top-level id`);
       assert.ok(!('handle' in schema.properties), `${tool.name} must not expose a public handle`);
     }
     if (tool.name === 'shepherd_delegate') {
-      assert.deepEqual(schema.required, ['target', 'task'], 'shepherd_delegate requires target and task');
+      assert.deepEqual(
+        schema.required,
+        ['target', 'task'],
+        'shepherd_delegate requires target and task'
+      );
       assert.deepEqual(
         Object.keys(schema.properties).sort(),
         ['target', 'task', 'timeout'],
@@ -60,7 +66,11 @@ for (const tool of registered) {
       );
     }
     if (tool.name === 'shepherd_message') {
-      assert.deepEqual(schema.required, ['target', 'message'], 'shepherd_message requires target and message');
+      assert.deepEqual(
+        schema.required,
+        ['target', 'message'],
+        'shepherd_message requires target and message'
+      );
       assert.deepEqual(
         Object.keys(schema.properties).sort(),
         ['delivery', 'expectsReply', 'message', 'replyTo', 'target', 'taskId', 'threadId'],
@@ -68,21 +78,38 @@ for (const tool of registered) {
       );
     }
     if (tool.name === 'shepherd_spawn') {
-      assert.deepEqual(schema.required, ['agent', 'label'], 'shepherd_spawn requires only agent and label');
+      assert.deepEqual(
+        schema.required,
+        ['agent', 'label'],
+        'shepherd_spawn requires only agent and label'
+      );
       assert.deepEqual(
         Object.keys(schema.properties).sort(),
         ['agent', 'cwd', 'label', 'placement'],
         'shepherd_spawn exposes only the public spawn arguments'
       );
-      for (const removed of ['agentScope', 'direction', 'confirmProjectAgents', 'omitSystemPrompt', 'model']) {
+      for (const removed of [
+        'agentScope',
+        'direction',
+        'confirmProjectAgents',
+        'omitSystemPrompt',
+        'model',
+      ]) {
         assert.ok(!(removed in schema.properties), `shepherd_spawn must not expose ${removed}`);
       }
-      assert.deepEqual(schema.properties.placement.enum, ['pane_right', 'pane_down', 'tab', 'workspace']);
+      assert.deepEqual(schema.properties.placement.enum, [
+        'pane_right',
+        'pane_down',
+        'tab',
+        'workspace',
+      ]);
     }
     console.log(`PASS ${tool.name}: root is a flat object with the intended fields`);
   } catch (error) {
     failed++;
-    console.log(`FAIL ${tool.name}: ${error.message} (keys: ${Object.keys(schema ?? {}).join(', ')})`);
+    console.log(
+      `FAIL ${tool.name}: ${error.message} (keys: ${Object.keys(schema ?? {}).join(', ')})`
+    );
   }
 }
 

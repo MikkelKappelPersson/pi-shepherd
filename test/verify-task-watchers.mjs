@@ -2,10 +2,7 @@
 /** Phase 7 verification for task-aware, non-blocking one-shot watchers. */
 import assert from 'node:assert/strict';
 import { LifecycleRegistry, LifecycleError } from '../src/core/orchestration.ts';
-import {
-  TaskWatcherService,
-  taskWatcherService,
-} from '../src/core/lifecycle.ts';
+import { TaskWatcherService, taskWatcherService } from '../src/core/lifecycle.ts';
 import { lifecycleRegistry } from '../src/core/orchestration.ts';
 import { registerShepherdTools, setTaskWatcherSessionActive } from '../src/extension/shepherd.ts';
 
@@ -34,8 +31,10 @@ registry.setTaskRunning(taskA.id);
 registry.addPendingRequest(taskA.id, 'request-x');
 registry.setTaskWaiting(taskA.id);
 await new Promise(resolve => setTimeout(resolve, 15));
-assert.ok(!events.some(e => e.completions.some(c => c.taskId === taskA.id)),
-  'waiting state is not a watcher completion');
+assert.ok(
+  !events.some(e => e.completions.some(c => c.taskId === taskA.id)),
+  'waiting state is not a watcher completion'
+);
 console.log('PASS a task entering waiting does not complete its watcher');
 
 // No watcher delivery until an explicit settlement.
@@ -71,7 +70,10 @@ console.log('PASS an already-completed task returns immediately and is not dupli
 
 // Multiple task ids in one watcher; coalesced completions preserve input order.
 const regAB = service.watch([taskB.id, taskC.id]);
-assert.deepEqual(regAB.pending.map(id => id), [taskB.id, taskC.id]);
+assert.deepEqual(
+  regAB.pending.map(id => id),
+  [taskB.id, taskC.id]
+);
 registry.setTaskRunning(taskB.id);
 registry.setTaskRunning(taskC.id);
 registry.settleTask(taskC.id, { status: 'failed', error: 'boom', ok: false });
@@ -91,7 +93,9 @@ assert.equal(bCompletion.returnCode, 2);
 assert.equal(cCompletion.status, 'failed');
 assert.equal(cCompletion.returnCode, 1);
 assert.equal(cCompletion.error, 'boom');
-console.log('PASS multiple task ids settle independently, in watch input order, with correct codes');
+console.log(
+  'PASS multiple task ids settle independently, in watch input order, with correct codes'
+);
 
 // Terminal outcomes carry the right status + return code.
 const cancelledAgent = registry.registerAgent({ agent: 'worker', label: 'watcher-cancelled' });
@@ -126,8 +130,10 @@ const regShared2 = service.watch(shared.id);
 registry.setTaskRunning(shared.id);
 registry.settleTask(shared.id, { status: 'completed', text: 'shared done', ok: true });
 await new Promise(resolve => setTimeout(resolve, 20));
-const perWatcher = [regShared1.watcherId, regShared2.watcherId].map(watcherId =>
-  events.filter(e => e.watcherId === watcherId && e.completions.some(c => c.taskId === shared.id)).length
+const perWatcher = [regShared1.watcherId, regShared2.watcherId].map(
+  watcherId =>
+    events.filter(e => e.watcherId === watcherId && e.completions.some(c => c.taskId === shared.id))
+      .length
 );
 assert.deepEqual(perWatcher, [1, 1], 'each independent watcher observes exactly one completion');
 service.shutdown();
@@ -135,7 +141,10 @@ console.log('PASS independent watchers each observe the same task exactly once')
 
 // Reject agent ids / pane ids / unknown ids as watcher targets; no duplicates.
 expectRejectTaskWatcher(() => service.watch('shepherd-agent-unknown'), 'unknown task is rejected');
-expectRejectTaskWatcher(() => service.watch([taskA.id, taskA.id]), 'duplicate task ids are rejected');
+expectRejectTaskWatcher(
+  () => service.watch([taskA.id, taskA.id]),
+  'duplicate task ids are rejected'
+);
 function expectRejectTaskWatcher(fn, label) {
   assert.throws(fn, e => e instanceof LifecycleError, label);
   console.log(`PASS ${label}`);
@@ -161,18 +170,27 @@ const bridgeTask = lifecycleRegistry.createTask(bridgeAgent, 'Bridge task.');
 lifecycleRegistry.setTaskRunning(bridgeTask.id);
 setTaskWatcherSessionActive(true);
 taskWatcherService.watch(bridgeTask.id);
-lifecycleRegistry.settleTask(bridgeTask.id, { status: 'completed', text: 'bridge task done', ok: true });
+lifecycleRegistry.settleTask(bridgeTask.id, {
+  status: 'completed',
+  text: 'bridge task done',
+  ok: true,
+});
 await new Promise(resolve => setTimeout(resolve, 40));
 assert.equal(sentTask.length, 1, 'task bridge sends one custom completion message');
 assert.equal(typeof taskMessageRenderer, 'function');
 assert.equal(sentTask[0].message.customType, 'shepherd.task.completion');
 assert.equal(sentTask[0].message.details.completions[0].taskId, bridgeTask.id);
 assert.equal(sentTask[0].message.details.completions[0].agentId, bridgeAgent.id);
-assert.equal(sentTask[0].message.content, 'shepherd_watcher completion: worker: task-bridge completed');
+assert.equal(
+  sentTask[0].message.content,
+  'shepherd_watcher completion: worker: task-bridge completed'
+);
 assert.ok(Array.isArray(sentTask[0].message.details.completions));
 assert.doesNotMatch(sentTask[0].message.content, /\n(?:call|return|details):/);
 assert.deepEqual(sentTask[0].options, { deliverAs: 'steer', triggerTurn: true });
-console.log('PASS the parent bridge delivers task completions as a turn-triggering follow-up with the task id');
+console.log(
+  'PASS the parent bridge delivers task completions as a turn-triggering follow-up with the task id'
+);
 
 // A completion is not re-sent after the shutdown path releases state.
 const bridgeAgent2 = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'task-bridge-2' });
@@ -180,7 +198,11 @@ const bridgeTask2 = lifecycleRegistry.createTask(bridgeAgent2, 'Bridge task 2.')
 lifecycleRegistry.setTaskRunning(bridgeTask2.id);
 taskWatcherService.watch(bridgeTask2.id);
 setTaskWatcherSessionActive(false);
-lifecycleRegistry.settleTask(bridgeTask2.id, { status: 'completed', text: 'should not be sent', ok: true });
+lifecycleRegistry.settleTask(bridgeTask2.id, {
+  status: 'completed',
+  text: 'should not be sent',
+  ok: true,
+});
 await new Promise(resolve => setTimeout(resolve, 40));
 assert.equal(
   sentTask.length,

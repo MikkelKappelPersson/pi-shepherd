@@ -44,14 +44,23 @@ try {
     const handlers = new Map();
     const sentUserMessages = [];
     const pi = {
-      registerTool(tool) { registered.push(tool); },
-      on(event, handler) { handlers.set(event, handler); },
-      sendUserMessage(content, options) { sentUserMessages.push({ content, options }); },
+      registerTool(tool) {
+        registered.push(tool);
+      },
+      on(event, handler) {
+        handlers.set(event, handler);
+      },
+      sendUserMessage(content, options) {
+        sentUserMessages.push({ content, options });
+      },
     };
     const { default: registerChildExtension } = await import('../src/extension/shepherd-done.ts');
     registerChildExtension(pi);
 
-    assert.deepEqual(registered.map(tool => tool.name), ['shepherd_message', 'shepherd_done']);
+    assert.deepEqual(
+      registered.map(tool => tool.name),
+      ['shepherd_message', 'shepherd_done']
+    );
     for (const tool of registered) {
       assert.equal(tool.parameters.type, 'object');
       assert.equal(typeof tool.name, 'string');
@@ -100,10 +109,19 @@ try {
     });
     assert.equal(invalidTargetResult.details.returnCode, 1);
     assert.equal(invalidTargetResult.details.code, 'invalid_target');
-    assert.match(invalidTargetResult.content[0].text, /exact opaque agent id returned by shepherd_spawn/);
+    assert.match(
+      invalidTargetResult.content[0].text,
+      /exact opaque agent id returned by shepherd_spawn/
+    );
     assert.match(invalidTargetResult.content[0].text, /agent name such as "planner"/);
-    assert.deepEqual(pollParentInbox(broker), [], 'invalid peer target is rejected before any message is queued');
-    console.log('PASS child shepherd_message rejects agent names instead of treating them as peer ids');
+    assert.deepEqual(
+      pollParentInbox(broker),
+      [],
+      'invalid peer target is rejected before any message is queued'
+    );
+    console.log(
+      'PASS child shepherd_message rejects agent names instead of treating them as peer ids'
+    );
 
     const doneResult = await doneTool.execute('done-call', {
       taskId: 'shepherd-task-child-surface',
@@ -127,12 +145,18 @@ try {
     const retryCompletion = pollParentInbox(broker)[0];
     assert.equal(retryCompletion.kind, 'task_done');
     assert.equal(retryCompletion.taskId, 'shepherd-task-child-surface');
-    console.log('PASS repeated child shepherd_done calls remain safe for parent idempotent settlement');
+    console.log(
+      'PASS repeated child shepherd_done calls remain safe for parent idempotent settlement'
+    );
 
     let shutdowns = 0;
     await handlers.get('agent_end')(
       { messages: [{ role: 'assistant', stopReason: 'stop' }] },
-      { shutdown() { shutdowns += 1; } },
+      {
+        shutdown() {
+          shutdowns += 1;
+        },
+      }
     );
     assert.equal(shutdowns, 0);
     assert.equal(fs.existsSync(`${root}/child-session.jsonl.exit`), false);
@@ -148,7 +172,7 @@ try {
         replyTo: 'request-123',
         delivery: 'steer',
         content: 'The middleware is in src/auth/session.ts.',
-      },
+      }
     );
     publishFromParent(broker, incoming);
     await handlers.get('session_start')({}, {});
@@ -158,8 +182,10 @@ try {
     assert.equal(sentUserMessages[0].options.deliverAs, 'steer');
     assert.equal(sentUserMessages[0].options.triggerTurn, true);
     assert.ok(
-      messageTool.promptGuidelines.some(guideline => guideline.includes("request, not your own task ID")),
-      'child guidance explains requester task id for replies',
+      messageTool.promptGuidelines.some(guideline =>
+        guideline.includes('request, not your own task ID')
+      ),
+      'child guidance explains requester task id for replies'
     );
     await new Promise(resolve => setTimeout(resolve, 300));
     const mismatchedReply = await messageTool.execute('mismatched-reply', {
@@ -191,7 +217,7 @@ try {
         expectsReply: true,
         delivery: 'followUp',
         content: 'Reply directly to this peer request.',
-      },
+      }
     );
     publishFromChild(peerChild, peerRequest);
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -202,7 +228,10 @@ try {
     });
     assert.equal(directPeerReply.details.returnCode, 0);
     const replyMirror = pollParentInbox(broker).find(
-      message => message.kind === 'runtime' && message.replyReceived === true && message.replyTo === peerRequest.messageId,
+      message =>
+        message.kind === 'runtime' &&
+        message.replyReceived === true &&
+        message.replyTo === peerRequest.messageId
     );
     assert.ok(replyMirror, 'direct peer replies mirror correlation to the parent');
     assert.equal(replyMirror.taskId, 'shepherd-task-child-surface');
@@ -232,10 +261,16 @@ try {
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.equal(deliverFailures, 1);
     const diagnostics = pollParentInbox(broker);
-    const diagnostic = diagnostics.find(m => m.kind === 'runtime' && String(m.content).includes(failingEnvelope.messageId));
+    const diagnostic = diagnostics.find(
+      m => m.kind === 'runtime' && String(m.content).includes(failingEnvelope.messageId)
+    );
     assert.ok(diagnostic, 'failed delivery produces a runtime diagnostic in the parent inbox');
     assert.equal(diagnostic.error, 'renderer unavailable');
-    assert.equal(diagnostic.summary, undefined || diagnostic.summary, 'diagnostic carries the failure detail');
+    assert.equal(
+      diagnostic.summary,
+      undefined || diagnostic.summary,
+      'diagnostic carries the failure detail'
+    );
     pi.sendUserMessage = realSend;
     await handlers.get('session_shutdown')({}, {});
     console.log('PASS failed local message delivery is reported to the parent with the message id');
@@ -248,9 +283,13 @@ try {
   for (const name of envNames) delete process.env[name];
   const registered = [];
   const pi = {
-    registerTool(tool) { registered.push(tool); },
+    registerTool(tool) {
+      registered.push(tool);
+    },
     on() {},
-    sendUserMessage() { throw new Error('must not deliver without broker'); },
+    sendUserMessage() {
+      throw new Error('must not deliver without broker');
+    },
   };
   const { default: registerChildExtension } = await import('../src/extension/shepherd-done.ts');
   registerChildExtension(pi);

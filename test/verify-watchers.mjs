@@ -15,7 +15,13 @@ const registration = service.watch(first.id);
 assert.equal(registration.promptIds.length, 1);
 assert.deepEqual(registration.pending, [first.id]);
 assert.deepEqual(registration.completed, []);
-registry.settlePrompt(first, { promptId: first.id, agentId: first.agentId, status: 'done', ok: true, text: 'finished' });
+registry.settlePrompt(first, {
+  promptId: first.id,
+  agentId: first.agentId,
+  status: 'done',
+  ok: true,
+  text: 'finished',
+});
 await new Promise(resolve => setTimeout(resolve, 20));
 assert.equal(events.length, 1, 'settlement produces one notification');
 assert.equal(events[0].watcherId, registration.watcherId);
@@ -28,7 +34,10 @@ assert.equal(events[0].completions[0].returnCode, 0);
 // A completion that predates registration is returned immediately, not sent
 // again as an asynchronous duplicate.
 const completedRegistration = service.watch(first.id);
-assert.deepEqual(completedRegistration.completed.map(result => result.promptId), [first.id]);
+assert.deepEqual(
+  completedRegistration.completed.map(result => result.promptId),
+  [first.id]
+);
 await new Promise(resolve => setTimeout(resolve, 10));
 assert.equal(events.length, 1, 'already-settled prompt is not duplicated');
 
@@ -37,12 +46,27 @@ const thirdAgent = registry.registerAgent({ agent: 'scout' });
 const third = registry.createPrompt(thirdAgent);
 const arrayRegistration = service.watch([second.id, third.id]);
 assert.deepEqual(arrayRegistration.pending, [second.id, third.id]);
-registry.settlePrompt(third, { promptId: third.id, agentId: third.agentId, status: 'failed', ok: false, error: 'nope' });
-registry.settlePrompt(second, { promptId: second.id, agentId: second.agentId, status: 'blocked', ok: false });
+registry.settlePrompt(third, {
+  promptId: third.id,
+  agentId: third.agentId,
+  status: 'failed',
+  ok: false,
+  error: 'nope',
+});
+registry.settlePrompt(second, {
+  promptId: second.id,
+  agentId: second.agentId,
+  status: 'blocked',
+  ok: false,
+});
 await new Promise(resolve => setTimeout(resolve, 20));
 const arrayEvent = events.find(event => event.watcherId === arrayRegistration.watcherId);
 assert.ok(arrayEvent, 'array watcher receives a completion notification');
-assert.deepEqual(arrayEvent.completions.map(result => result.promptId), [second.id, third.id], 'coalesced completions preserve watch input order');
+assert.deepEqual(
+  arrayEvent.completions.map(result => result.promptId),
+  [second.id, third.id],
+  'coalesced completions preserve watch input order'
+);
 assert.equal(arrayEvent.completions[0].returnCode, 2);
 assert.equal(arrayEvent.completions[1].returnCode, 1);
 
@@ -89,22 +113,33 @@ assert.equal(typeof registeredMessageRenderer, 'function');
 const renderedNotification = registeredMessageRenderer(
   sent[0].message,
   { expanded: false, outputPad: 0 },
-  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
+  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text }
 );
 const renderedLines = renderedNotification.render(200).map(line => line.trimEnd());
 assert.ok(renderedLines.some(line => line.includes(`shepherd_watch ${bridgePrompt.id}`)));
 assert.ok(renderedLines.some(line => line.includes('✓ success')));
-assert.equal(renderedLines.some(line => line.includes('watcher id:')), false);
-assert.equal(renderedLines.some(line => line.includes('completions:')), false);
-assert.equal(renderedLines.some(line => /^(call:|return:|details:)$/.test(line)), false);
+assert.equal(
+  renderedLines.some(line => line.includes('watcher id:')),
+  false
+);
+assert.equal(
+  renderedLines.some(line => line.includes('completions:')),
+  false
+);
+assert.equal(
+  renderedLines.some(line => /^(call:|return:|details:)$/.test(line)),
+  false
+);
 const expandedNotification = registeredMessageRenderer(
   sent[0].message,
   { expanded: true, outputPad: 0 },
-  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text },
+  { fg: (_color, text) => text, bold: text => text, bg: (_color, text) => text }
 );
 const expandedLines = expandedNotification.render(200).map(line => line.trimEnd());
 assert.ok(expandedLines.includes('Shepherd watcher'));
-assert.ok(expandedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`)));
+assert.ok(
+  expandedLines.some(line => line.includes(`watcher id: ${sent[0].message.details.watcherId}`))
+);
 assert.ok(expandedLines.some(line => line.includes('completions:')));
 assert.equal(sent[0].message.customType, 'shepherd.prompt.completion');
 assert.equal(typeof registeredReplyRenderer, 'function');
@@ -123,10 +158,13 @@ const expandedReply = registeredReplyRenderer(
     fg: (color, text) => `<${color}>${text}</${color}>`,
     bold: text => `<bold>${text}</bold>`,
     bg: (_color, text) => text,
-  },
+  }
 );
 const expandedReplyText = expandedReply.render(200).join('\n');
-assert.match(expandedReplyText, /<toolTitle><bold>Shepherd<\/bold><\/toolTitle> <accent>reply from planner: bridge<\/accent>/);
+assert.match(
+  expandedReplyText,
+  /<toolTitle><bold>Shepherd<\/bold><\/toolTitle> <accent>reply from planner: bridge<\/accent>/
+);
 assert.doesNotMatch(expandedReplyText, /<bold>Shepherd reply from planner/);
 assert.equal(sent[0].message.details.completions[0].promptId, bridgePrompt.id);
 assert.equal(sent[0].message.details.completions[0].agentId, bridgeAgent.id);

@@ -21,7 +21,13 @@ import {
   sendParentMessage,
   shutdownParentBroker,
 } from '../src/core/lifecycle.ts';
-import { createChildBroker, pollChildInbox, publishFromChild, registerChild, createEnvelope } from '../src/core/messaging.ts';
+import {
+  createChildBroker,
+  pollChildInbox,
+  publishFromChild,
+  registerChild,
+  createEnvelope,
+} from '../src/core/messaging.ts';
 import { lifecycleRegistry, LifecycleError } from '../src/core/orchestration.ts';
 import { withTempDirectory } from './helpers/test-utils.mjs';
 
@@ -67,8 +73,14 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     const capability = registerChild(broker, agent.id);
     lifecycleRegistry.attachAgentChildCapability(agent, capability);
   }
-  const scoutChild = createChildBroker({ rootDir: broker.rootDir, ...lifecycleRegistry.agentChildCapability(scout) });
-  const plannerChild = createChildBroker({ rootDir: broker.rootDir, ...lifecycleRegistry.agentChildCapability(planner) });
+  const scoutChild = createChildBroker({
+    rootDir: broker.rootDir,
+    ...lifecycleRegistry.agentChildCapability(scout),
+  });
+  const plannerChild = createChildBroker({
+    rootDir: broker.rootDir,
+    ...lifecycleRegistry.agentChildCapability(planner),
+  });
 
   const scoutTask = lifecycleRegistry.createTask(scout, 'Investigate the authentication flow.');
   lifecycleRegistry.setTaskRunning(scoutTask.id);
@@ -79,21 +91,32 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
 
   try {
     // ── Message to an idle recipient (no active task) ────────────────────
-    const idleAgent = lifecycleRegistry.registerAgent({ agent: 'reviewer', label: 'idle recipient' });
+    const idleAgent = lifecycleRegistry.registerAgent({
+      agent: 'reviewer',
+      label: 'idle recipient',
+    });
     const idleCapability = registerChild(broker, idleAgent.id);
     lifecycleRegistry.attachAgentChildCapability(idleAgent, idleCapability);
     const idleChild = createChildBroker({ rootDir: broker.rootDir, ...idleCapability });
-    const idleMessage = sendParentMessage({ target: idleAgent.id, message: 'Are you free to review?' });
+    const idleMessage = sendParentMessage({
+      target: idleAgent.id,
+      message: 'Are you free to review?',
+    });
     assert.equal(idleMessage.accepted, true);
     assert.equal('requestId' in idleMessage, false, 'no reply tracking without expectsReply');
     const idleInbox = pollChildInbox(idleChild);
     assert.equal(idleInbox.length, 1);
     assert.equal(idleInbox[0].content, 'Are you free to review?');
-    assert.equal(lifecycleRegistry.activeTaskForAgent(idleAgent), undefined, 'a message never creates a task');
+    assert.equal(
+      lifecycleRegistry.activeTaskForAgent(idleAgent),
+      undefined,
+      'a message never creates a task'
+    );
     console.log('PASS a message to an idle recipient is queued without creating task state');
 
     assert.throws(
-      () => sendParentMessage({ target: 'planner', message: 'This must not resolve by agent name.' }),
+      () =>
+        sendParentMessage({ target: 'planner', message: 'This must not resolve by agent name.' }),
       error => {
         assert.ok(error instanceof LifecycleError);
         assert.equal(error.code, 'invalid_target');
@@ -101,12 +124,15 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         assert.match(error.message, /agent name such as "planner"/);
         return true;
       },
-      'parent shepherd_message rejects agent definition names with actionable target guidance',
+      'parent shepherd_message rejects agent definition names with actionable target guidance'
     );
     console.log('PASS parent shepherd_message rejects agent names instead of resolving them');
 
     // ── Parent reply settles a child-originated request locally ────────────
-    const parentReplyTask = lifecycleRegistry.createTask(idleAgent, 'Complete the parent reply handshake.');
+    const parentReplyTask = lifecycleRegistry.createTask(
+      idleAgent,
+      'Complete the parent reply handshake.'
+    );
     lifecycleRegistry.setTaskRunning(parentReplyTask.id);
     const childQuestion = createEnvelope(
       { sessionId: idleChild.sessionId, brokerId: idleChild.brokerId, senderId: idleChild.agentId },
@@ -117,7 +143,7 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         expectsReply: true,
         delivery: 'followUp',
         content: 'CHILD_REQUEST: please answer directly.',
-      },
+      }
     );
     assert.equal(publishFromChild(idleChild, childQuestion).accepted, true);
     const childRequestMirror = createEnvelope(
@@ -131,7 +157,7 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         requestTargetId: broker.parentId,
         summary: childQuestion.content,
         delivery: 'followUp',
-      },
+      }
     );
     assert.equal(publishFromChild(idleChild, childRequestMirror).accepted, true);
     await processParentBrokerMessages();
@@ -146,7 +172,7 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.equal(directAnswer.targetTaskState, 'running');
     assert.equal(lifecycleRegistry.getTask(parentReplyTask.id).state, 'running');
     const directAnswerEnvelope = pollChildInbox(idleChild).find(
-      message => message.replyTo === childQuestion.messageId,
+      message => message.replyTo === childQuestion.messageId
     );
     assert.ok(directAnswerEnvelope, 'the direct parent reply reaches the child');
     const directCompletion = lifecycleRegistry.settleTask(parentReplyTask.id, {
@@ -154,10 +180,16 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
       text: 'Completed after the direct parent reply.',
     });
     assert.equal(directCompletion.status, 'completed');
-    console.log('PASS parent reply resolves a child-originated request without a redundant child acknowledgment');
+    console.log(
+      'PASS parent reply resolves a child-originated request without a redundant child acknowledgment'
+    );
 
     // ── Parent -> child: plain message leaves task state unchanged ────────
-    const plain = sendParentMessage({ target: scout.id, message: 'Any progress so far?', taskId: scoutTask.id });
+    const plain = sendParentMessage({
+      target: scout.id,
+      message: 'Any progress so far?',
+      taskId: scoutTask.id,
+    });
     assert.match(plain.messageId, /^shepherd-message-/);
     assert.equal(plain.accepted, true);
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
@@ -181,11 +213,17 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.equal(waitingTask.state, 'waiting');
     assert.equal(waitingTask.pendingReplyMessageId, question.messageId);
     assert.ok(waitingTask.pendingReplyDeadlineAt > Date.now());
-    console.log('PASS parent expectsReply message creates a tracked request and sets the task waiting');
+    console.log(
+      'PASS parent expectsReply message creates a tracked request and sets the task waiting'
+    );
 
     // The child answers the parent question through the parent mailbox.
     const parentReply = createEnvelope(
-      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        sessionId: scoutChild.sessionId,
+        brokerId: scoutChild.brokerId,
+        senderId: scoutChild.agentId,
+      },
       {
         kind: 'reply',
         targetId: 'shepherd',
@@ -193,18 +231,28 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyTo: question.messageId,
         delivery: 'followUp',
         content: 'The middleware is in src/auth/session.ts.',
-      },
+      }
     );
     assert.equal(publishFromChild(scoutChild, parentReply).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
-    const selfRelays = pollChildInbox(scoutChild).filter(m => m.kind === 'reply' && m.replyTo === question.messageId);
-    assert.equal(selfRelays.length, 0, 'the owner answering its own tracked request is not echoed back to its own inbox');
+    const selfRelays = pollChildInbox(scoutChild).filter(
+      m => m.kind === 'reply' && m.replyTo === question.messageId
+    );
+    assert.equal(
+      selfRelays.length,
+      0,
+      'the owner answering its own tracked request is not echoed back to its own inbox'
+    );
     console.log('PASS a matching reply clears the request and returns the task to running');
 
     // ── Canonical scenario: worker asks a busy planner ────────────────────
     const busyQuestion = createEnvelope(
-      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        sessionId: scoutChild.sessionId,
+        brokerId: scoutChild.brokerId,
+        senderId: scoutChild.agentId,
+      },
       {
         kind: 'message',
         targetId: planner.id,
@@ -213,13 +261,17 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         expectsReply: true,
         delivery: 'followUp',
         content: 'What have you found about the authentication flow?',
-      },
+      }
     );
     // The question goes directly to the busy planner inbox...
     assert.equal(publishFromChild(scoutChild, busyQuestion).delivery, 'queued');
     // ...and the child mirrors the tracked request to the parent mailbox.
     const mirror = createEnvelope(
-      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        sessionId: scoutChild.sessionId,
+        brokerId: scoutChild.brokerId,
+        senderId: scoutChild.agentId,
+      },
       {
         kind: 'runtime',
         targetId: 'shepherd',
@@ -230,22 +282,40 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         requestTargetId: planner.id,
         summary: 'What have you found about the authentication flow?',
         delivery: 'followUp',
-      },
+      }
     );
     assert.equal(publishFromChild(scoutChild, mirror).accepted, true);
     await processParentBrokerMessages();
 
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'waiting');
-    assert.equal(lifecycleRegistry.getTask(scoutTask.id).pendingReplyMessageId, busyQuestion.messageId);
-    const queuedForPlanner = pollChildInbox(plannerChild).find(m => m.messageId === busyQuestion.messageId);
-    assert.ok(queuedForPlanner, 'the question is delivered to the busy planner inbox as a follow-up');
+    assert.equal(
+      lifecycleRegistry.getTask(scoutTask.id).pendingReplyMessageId,
+      busyQuestion.messageId
+    );
+    const queuedForPlanner = pollChildInbox(plannerChild).find(
+      m => m.messageId === busyQuestion.messageId
+    );
+    assert.ok(
+      queuedForPlanner,
+      'the question is delivered to the busy planner inbox as a follow-up'
+    );
     assert.equal(queuedForPlanner.expectsReply, true);
-    assert.equal(lifecycleRegistry.getTask(plannerTask.id).state, 'running', 'planner busy-task is untouched by the incoming question');
-    console.log('PASS worker asking a busy planner queues a follow-up and keeps the worker task waiting');
+    assert.equal(
+      lifecycleRegistry.getTask(plannerTask.id).state,
+      'running',
+      'planner busy-task is untouched by the incoming question'
+    );
+    console.log(
+      'PASS worker asking a busy planner queues a follow-up and keeps the worker task waiting'
+    );
 
     // ── Invalid reply: mismatched replyTo leaves the request pending ──────
     const mismatchedReply = createEnvelope(
-      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        sessionId: plannerChild.sessionId,
+        brokerId: plannerChild.brokerId,
+        senderId: plannerChild.agentId,
+      },
       {
         kind: 'reply',
         targetId: 'shepherd',
@@ -253,17 +323,24 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyTo: 'shepherd-message-not-the-question',
         delivery: 'followUp',
         content: 'Stray answer.',
-      },
+      }
     );
     assert.equal(publishFromChild(plannerChild, mismatchedReply).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'waiting');
-    assert.equal(lifecycleRegistry.getTask(scoutTask.id).pendingReplyMessageId, busyQuestion.messageId);
+    assert.equal(
+      lifecycleRegistry.getTask(scoutTask.id).pendingReplyMessageId,
+      busyQuestion.messageId
+    );
     console.log('PASS a mismatched reply is rejected and the task stays waiting');
 
     // ── Valid reply: planner answers; scout resumes; relay preserves provenance ──
     const peerReply = createEnvelope(
-      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        sessionId: plannerChild.sessionId,
+        brokerId: plannerChild.brokerId,
+        senderId: plannerChild.agentId,
+      },
       {
         kind: 'reply',
         targetId: 'shepherd',
@@ -272,23 +349,35 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyTo: busyQuestion.messageId,
         delivery: 'followUp',
         content: 'Sessions are validated by middleware in src/auth/session.ts.',
-      },
+      }
     );
     assert.equal(publishFromChild(plannerChild, peerReply).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
-    const peerRelay = pollChildInbox(scoutChild).find(m => m.kind === 'reply' && m.replyTo === busyQuestion.messageId);
+    const peerRelay = pollChildInbox(scoutChild).find(
+      m => m.kind === 'reply' && m.replyTo === busyQuestion.messageId
+    );
     assert.ok(peerRelay, 'the answer is relayed to the worker inbox');
-    assert.equal(peerRelay.originSenderId, plannerChild.agentId, 'provenance: origin sender stays the planner');
+    assert.equal(
+      peerRelay.originSenderId,
+      plannerChild.agentId,
+      'provenance: origin sender stays the planner'
+    );
     assert.equal(peerRelay.content, 'Sessions are validated by middleware in src/auth/session.ts.');
     assert.notEqual(peerRelay.messageId, peerReply.messageId, 'relay uses a fresh message id');
-    console.log('PASS planner reply resolves the request, the worker resumes, and the relay preserves sender provenance');
+    console.log(
+      'PASS planner reply resolves the request, the worker resumes, and the relay preserves sender provenance'
+    );
 
     // A peer may answer directly to the requester's inbox. The child-side
     // reply mirror still lets the parent clear the tracked waiting task, while
     // avoiding a second parent-generated relay.
     const directQuestion = createEnvelope(
-      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        sessionId: scoutChild.sessionId,
+        brokerId: scoutChild.brokerId,
+        senderId: scoutChild.agentId,
+      },
       {
         kind: 'message',
         targetId: planner.id,
@@ -296,11 +385,15 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         expectsReply: true,
         delivery: 'followUp',
         content: 'Can you answer directly?',
-      },
+      }
     );
     assert.equal(publishFromChild(scoutChild, directQuestion).delivery, 'queued');
     const directRequestMirror = createEnvelope(
-      { sessionId: scoutChild.sessionId, brokerId: scoutChild.brokerId, senderId: scoutChild.agentId },
+      {
+        sessionId: scoutChild.sessionId,
+        brokerId: scoutChild.brokerId,
+        senderId: scoutChild.agentId,
+      },
       {
         kind: 'runtime',
         targetId: 'shepherd',
@@ -310,13 +403,17 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         requestTargetId: planner.id,
         summary: directQuestion.content,
         delivery: 'followUp',
-      },
+      }
     );
     assert.equal(publishFromChild(scoutChild, directRequestMirror).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'waiting');
     const directPeerReply = createEnvelope(
-      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        sessionId: plannerChild.sessionId,
+        brokerId: plannerChild.brokerId,
+        senderId: plannerChild.agentId,
+      },
       {
         kind: 'reply',
         targetId: scout.id,
@@ -324,11 +421,15 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyTo: directQuestion.messageId,
         delivery: 'followUp',
         content: 'Direct pong.',
-      },
+      }
     );
     assert.equal(publishFromChild(plannerChild, directPeerReply).delivery, 'queued');
     const directReplyMirror = createEnvelope(
-      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        sessionId: plannerChild.sessionId,
+        brokerId: plannerChild.brokerId,
+        senderId: plannerChild.agentId,
+      },
       {
         kind: 'runtime',
         targetId: 'shepherd',
@@ -337,17 +438,23 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyReceived: true,
         summary: directPeerReply.content,
         delivery: 'followUp',
-      },
+      }
     );
     assert.equal(publishFromChild(plannerChild, directReplyMirror).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
     assert.deepEqual(pollChildInbox(scoutChild), [directPeerReply]);
-    console.log('PASS direct peer reply mirrors resolve the waiting task without duplicate delivery');
+    console.log(
+      'PASS direct peer reply mirrors resolve the waiting task without duplicate delivery'
+    );
 
     // ── Duplicate reply: idempotent, no second relay, no state change ─────
     const duplicateReply = createEnvelope(
-      { sessionId: plannerChild.sessionId, brokerId: plannerChild.brokerId, senderId: plannerChild.agentId },
+      {
+        sessionId: plannerChild.sessionId,
+        brokerId: plannerChild.brokerId,
+        senderId: plannerChild.agentId,
+      },
       {
         kind: 'reply',
         targetId: 'shepherd',
@@ -356,18 +463,31 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
         replyTo: busyQuestion.messageId,
         delivery: 'followUp',
         content: 'Sessions are validated by middleware in src/auth/session.ts.',
-      },
+      }
     );
     assert.equal(publishFromChild(plannerChild, duplicateReply).accepted, true);
     await processParentBrokerMessages();
     assert.equal(lifecycleRegistry.getTask(scoutTask.id).state, 'running');
-    const relaysForQuestion = pollChildInbox(scoutChild).filter(m => m.kind === 'reply' && m.replyTo === busyQuestion.messageId);
-    assert.equal(relaysForQuestion.length, 0, 'a reply for an already-resolved request is not relayed again');
+    const relaysForQuestion = pollChildInbox(scoutChild).filter(
+      m => m.kind === 'reply' && m.replyTo === busyQuestion.messageId
+    );
+    assert.equal(
+      relaysForQuestion.length,
+      0,
+      'a reply for an already-resolved request is not relayed again'
+    );
     console.log('PASS a duplicate reply is idempotent and does not re-deliver');
 
     // ── Reply deadline expiry settles the task as blocked ─────────────────
-    const timeoutAgent = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'timeout target', paneId: 'pane-timeout' });
-    const timeoutTask = lifecycleRegistry.createTask(timeoutAgent, 'Task that waits for a dead reply.');
+    const timeoutAgent = lifecycleRegistry.registerAgent({
+      agent: 'worker',
+      label: 'timeout target',
+      paneId: 'pane-timeout',
+    });
+    const timeoutTask = lifecycleRegistry.createTask(
+      timeoutAgent,
+      'Task that waits for a dead reply.'
+    );
     lifecycleRegistry.setTaskRunning(timeoutTask.id);
     lifecycleRegistry.openPendingRequest(timeoutTask.id, {
       messageId: 'shepherd-message-timeout-question',
@@ -389,25 +509,34 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     console.log('PASS a reply deadline expiry settles the waiting task as blocked');
 
     // ── Rejections: closed target, unknown target, mismatched task owner ──
-    const closedAgent = lifecycleRegistry.registerAgent({ agent: 'planner', label: 'closed message target' });
+    const closedAgent = lifecycleRegistry.registerAgent({
+      agent: 'planner',
+      label: 'closed message target',
+    });
     lifecycleRegistry.close(closedAgent);
     assert.throws(
       () => sendParentMessage({ target: closedAgent.id, message: 'Hello.' }),
-      error => error instanceof LifecycleError && error.code === 'closed_handle',
+      error => error instanceof LifecycleError && error.code === 'closed_handle'
     );
     console.log('PASS messaging a closed agent is rejected');
 
     assert.throws(
       () => sendParentMessage({ target: 'not-an-agent', message: 'Hello.' }),
-      error => error instanceof LifecycleError && error.code === 'invalid_target',
+      error => error instanceof LifecycleError && error.code === 'invalid_target'
     );
     console.log('PASS messaging an unknown target id is rejected as an invalid message target');
 
     const foreignTask = lifecycleRegistry.createTask(timeoutAgent, 'Task for the other worker.');
     lifecycleRegistry.setTaskRunning(foreignTask.id);
     assert.throws(
-      () => sendParentMessage({ target: scout.id, message: 'Wrong owner.', taskId: foreignTask.id, expectsReply: true }),
-      error => error instanceof LifecycleError && error.code === 'task_agent_mismatch',
+      () =>
+        sendParentMessage({
+          target: scout.id,
+          message: 'Wrong owner.',
+          taskId: foreignTask.id,
+          expectsReply: true,
+        }),
+      error => error instanceof LifecycleError && error.code === 'task_agent_mismatch'
     );
     assert.equal(lifecycleRegistry.getTask(foreignTask.id).state, 'running');
     console.log('PASS expectsReply against a task owned by another agent is rejected');
@@ -416,7 +545,12 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     for (const agent of lifecycleRegistry.allAgents()) {
       const active = lifecycleRegistry.activeTaskForAgent(agent);
       if (active) {
-        try { lifecycleRegistry.settleTask(active.taskId, { status: 'cancelled', error: 'test cleanup' }); } catch {}
+        try {
+          lifecycleRegistry.settleTask(active.taskId, {
+            status: 'cancelled',
+            error: 'test cleanup',
+          });
+        } catch {}
       }
     }
     shutdownParentBroker(() => true);

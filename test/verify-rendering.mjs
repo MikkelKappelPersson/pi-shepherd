@@ -108,14 +108,16 @@ const expandedCompletedWatch = formatExpandedToolResult({
     returnValue: {
       watcherId: 'shepherd-watcher-123',
       pending: [],
-      completed: [{
-        taskId: 'shepherd-task-123',
-        agentId: 'shepherd-agent-123',
-        status: 'completed',
-        returnCode: 0,
-        text: 'First line\nSecond line',
-        artifact: { id: 'large/session-note.md', task: 'omit this metadata' },
-      }],
+      completed: [
+        {
+          taskId: 'shepherd-task-123',
+          agentId: 'shepherd-agent-123',
+          status: 'completed',
+          returnCode: 0,
+          text: 'First line\nSecond line',
+          artifact: { id: 'large/session-note.md', task: 'omit this metadata' },
+        },
+      ],
     },
     returnCode: 0,
   },
@@ -123,14 +125,27 @@ const expandedCompletedWatch = formatExpandedToolResult({
 assert.match(expandedCompletedWatch, /completions:\n/);
 assert.match(expandedCompletedWatch, /text:\nFirst line\nSecond line/);
 assert.doesNotMatch(expandedCompletedWatch, /omit this metadata|artifact:/);
-console.log('PASS expanded completed watcher results omit artifact metadata and preserve text blocks');
+console.log(
+  'PASS expanded completed watcher results omit artifact metadata and preserve text blocks'
+);
 
 const collapsedHerd = renderCollapsedLifecycleResult(
   {
-    content: [{ type: 'text', text: '• pi (self/focused) ●(shepherd) [working] pane=w1:p1 cwd=/private' }],
+    content: [
+      { type: 'text', text: '• pi (self/focused) ●(shepherd) [working] pane=w1:p1 cwd=/private' },
+    ],
     details: {
       call: { name: 'shepherd' },
-      agents: [{ name: 'pi', state: 'working', focused: true, shepherd: true, paneId: 'w1:p1', cwd: '/private' }],
+      agents: [
+        {
+          name: 'pi',
+          state: 'working',
+          focused: true,
+          shepherd: true,
+          paneId: 'w1:p1',
+          cwd: '/private',
+        },
+      ],
       returnCode: 0,
     },
   },
@@ -144,7 +159,12 @@ console.log('PASS collapsed herd results show only the active-agent count');
 
 const collapsedAgents = renderCollapsedLifecycleResult(
   {
-    content: [{ type: 'text', text: 'Available agent names (copy the name exactly; names are case-sensitive):' }],
+    content: [
+      {
+        type: 'text',
+        text: 'Available agent names (copy the name exactly; names are case-sensitive):',
+      },
+    ],
     details: {
       call: { name: 'shepherd' },
       scope: 'both',
@@ -164,7 +184,12 @@ assert.equal(collapsedAgents, 'Available agents: planner, reviewer, worker');
 const styledCollapsedAgents = renderCollapsedLifecycleResult(
   {
     content: [{ type: 'text', text: 'Available agent names:' }],
-    details: { call: { name: 'shepherd' }, scope: 'both', agents: [{ name: 'planner' }], returnCode: 0 },
+    details: {
+      call: { name: 'shepherd' },
+      scope: 'both',
+      agents: [{ name: 'planner' }],
+      returnCode: 0,
+    },
   },
   'shepherd',
   {
@@ -173,7 +198,10 @@ const styledCollapsedAgents = renderCollapsedLifecycleResult(
   },
   {}
 );
-assert.equal(styledCollapsedAgents, '<accent>Available agents:</accent> <toolOutput>planner</toolOutput>');
+assert.equal(
+  styledCollapsedAgents,
+  '<accent>Available agents:</accent> <toolOutput>planner</toolOutput>'
+);
 console.log('PASS collapsed available-agent labels use accent styling');
 
 const expandedHerd = formatExpandedToolResult({
@@ -220,7 +248,10 @@ const messageResult = {
   },
 };
 const messageExpanded = formatExpandedToolResult(messageResult);
-assert.match(messageExpanded, /call\ntarget: shepherd-agent-123\nmessage:\nFirst line\nStatus: pending\nThird line\n\nreturn\nstatus: queued/);
+assert.match(
+  messageExpanded,
+  /call\ntarget: shepherd-agent-123\nmessage:\nFirst line\nStatus: pending\nThird line\n\nreturn\nstatus: queued/
+);
 console.log('PASS multiline message content uses a raw copy-friendly block');
 
 const theme = {
@@ -235,16 +266,23 @@ assert.match(styledMessage, /<bold>call<\/bold>/);
 assert.match(styledMessage, /<bold>return<\/bold>/);
 console.log('PASS raw message lines stay normal while headers and labels are styled');
 
-const longSingleLine = 'A long single-line message that should wrap naturally in the terminal without introducing explicit line breaks.';
+const longSingleLine =
+  'A long single-line message that should wrap naturally in the terminal without introducing explicit line breaks.';
 const longMessage = formatExpandedToolResult({
   content: [{ type: 'text', text: 'Message queued to worker' }],
   details: {
-    call: { name: 'shepherd_message', arguments: { target: 'shepherd-agent-123', message: longSingleLine } },
+    call: {
+      name: 'shepherd_message',
+      arguments: { target: 'shepherd-agent-123', message: longSingleLine },
+    },
     returnValue: { messageId: 'shepherd-message-long', delivery: 'queued' },
     returnCode: 0,
   },
 });
-assert.match(longMessage, new RegExp(`message:\\n${longSingleLine.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\n\\nreturn`));
+assert.match(
+  longMessage,
+  new RegExp(`message:\\n${longSingleLine.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\n\\nreturn`)
+);
 console.log('PASS long single-line messages stay single-line in the raw block');
 
 const parentMessage = formatParentMessageNotification({
@@ -257,43 +295,62 @@ const parentMessage = formatParentMessageNotification({
   content: 'Reply line one\nReply line two',
 });
 assert.match(parentMessage, /^Shepherd reply from shepherd-agent-123\n\nmessage id:/);
-assert.match(parentMessage, /reply to: shepherd-message-000\n\nmessage:\nReply line one\nReply line two/);
+assert.match(
+  parentMessage,
+  /reply to: shepherd-message-000\n\nmessage:\nReply line one\nReply line two/
+);
 assert.doesNotMatch(parentMessage, /\ncall:\n|\nreturn:\n|\ndetails:/);
-const styledParentMessage = styleExpandedToolResult(parentMessage, theme, { boldFields: ['message'] });
+const styledParentMessage = styleExpandedToolResult(parentMessage, theme, {
+  boldFields: ['message'],
+});
 assert.match(styledParentMessage, /<bold>message:<\/bold>/);
 assert.match(styledParentMessage, /<accent>message id:<\/accent>/);
 console.log('PASS incoming replies use spacious metadata and a bold message label');
-const collapsedReply = formatCollapsedNotification({
-  details: {
-    messageId: 'shepherd-message-123',
-    senderId: 'shepherd-agent-123',
-    content: 'Reply line one\nReply line two',
+const collapsedReply = formatCollapsedNotification(
+  {
+    details: {
+      messageId: 'shepherd-message-123',
+      senderId: 'shepherd-agent-123',
+      content: 'Reply line one\nReply line two',
+    },
   },
-}, parentMessage);
-assert.equal(collapsedReply, 'Shepherd reply from shepherd-agent-123\nReply line one Reply line two');
-const collapsedLongReply = formatCollapsedNotification({
-  details: {
-    messageId: 'shepherd-message-long',
-    content: 'A very long message '.repeat(20),
+  parentMessage
+);
+assert.equal(
+  collapsedReply,
+  'Shepherd reply from shepherd-agent-123\nReply line one Reply line two'
+);
+const collapsedLongReply = formatCollapsedNotification(
+  {
+    details: {
+      messageId: 'shepherd-message-long',
+      content: 'A very long message '.repeat(20),
+    },
   },
-}, parentMessage);
+  parentMessage
+);
 assert.equal(collapsedLongReply.split('\n').length, 2);
 assert.ok(collapsedLongReply.split('\n')[1].endsWith('…'));
 assert.ok(collapsedLongReply.split('\n')[1].length <= 160);
 console.log('PASS collapsed incoming replies show a concise sender and message summary');
 
-const watcher = formatWatcherNotification({
-  watcherId: 'shepherd-watcher-123',
-  taskIds: ['shepherd-task-123'],
-  completions: [{
-    taskId: 'shepherd-task-123',
-    agentId: 'shepherd-agent-123',
-    status: 'completed',
-    text: 'Finished the task.\nSecond line of the result.',
-    returnCode: 0,
-    artifact: { id: 'session/worker-01.md', task: 'large durable metadata' },
-  }],
-}, 'task');
+const watcher = formatWatcherNotification(
+  {
+    watcherId: 'shepherd-watcher-123',
+    taskIds: ['shepherd-task-123'],
+    completions: [
+      {
+        taskId: 'shepherd-task-123',
+        agentId: 'shepherd-agent-123',
+        status: 'completed',
+        text: 'Finished the task.\nSecond line of the result.',
+        returnCode: 0,
+        artifact: { id: 'session/worker-01.md', task: 'large durable metadata' },
+      },
+    ],
+  },
+  'task'
+);
 assert.match(watcher, /^Shepherd watcher/);
 assert.match(watcher, /watcher id: shepherd-watcher-123/);
 assert.match(watcher, /completions:/);

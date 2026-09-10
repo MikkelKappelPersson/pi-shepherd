@@ -79,7 +79,7 @@ export interface BrokerOptions {
   maxContentLength?: number;
   maxQueueDepth?: number;
   parentId?: string;
-};
+}
 
 export interface ChildCapability {
   sessionId: string;
@@ -216,11 +216,25 @@ export function validateEnvelope(value: unknown): ShepherdMessageEnvelope {
   if (typeof envelope.createdAt !== 'number' || !Number.isFinite(envelope.createdAt)) {
     throw new MessagingError('invalid_envelope', 'createdAt must be a finite number.');
   }
-  if (envelope.deadlineAt !== undefined &&
-    (typeof envelope.deadlineAt !== 'number' || !Number.isFinite(envelope.deadlineAt))) {
-    throw new MessagingError('invalid_envelope', 'deadlineAt must be a finite number when present.');
+  if (
+    envelope.deadlineAt !== undefined &&
+    (typeof envelope.deadlineAt !== 'number' || !Number.isFinite(envelope.deadlineAt))
+  ) {
+    throw new MessagingError(
+      'invalid_envelope',
+      'deadlineAt must be a finite number when present.'
+    );
   }
-  for (const field of ['taskId', 'threadId', 'replyTo', 'content', 'summary', 'error', 'requestTargetId', 'originSenderId']) {
+  for (const field of [
+    'taskId',
+    'threadId',
+    'replyTo',
+    'content',
+    'summary',
+    'error',
+    'requestTargetId',
+    'originSenderId',
+  ]) {
     if (envelope[field] !== undefined && typeof envelope[field] !== 'string') {
       throw new MessagingError('invalid_envelope', `${field} must be a string when present.`);
     }
@@ -235,7 +249,10 @@ export function validateEnvelope(value: unknown): ShepherdMessageEnvelope {
     throw new MessagingError('invalid_envelope', 'replyReceived must be a boolean when present.');
   }
   if (envelope.status !== undefined && !STATUSES.has(envelope.status as ShepherdMessageStatus)) {
-    throw new MessagingError('invalid_envelope', `Unsupported message status "${envelope.status}".`);
+    throw new MessagingError(
+      'invalid_envelope',
+      `Unsupported message status "${envelope.status}".`
+    );
   }
   return { ...(value as ShepherdMessageEnvelope) };
 }
@@ -292,7 +309,8 @@ function readJson(filePath: string): unknown {
 
 function inboxFiles(inboxPath: string): string[] {
   try {
-    return fs.readdirSync(inboxPath)
+    return fs
+      .readdirSync(inboxPath)
       .filter(name => name.endsWith('.json'))
       .sort()
       .map(name => path.join(inboxPath, name));
@@ -309,7 +327,10 @@ function isAcknowledged(broker: ParentBroker | ChildBroker, messageId: string): 
   return fs.existsSync(ackPath(broker, messageId));
 }
 
-function acknowledgeEnvelope(broker: ParentBroker | ChildBroker, envelope: ShepherdMessageEnvelope): void {
+function acknowledgeEnvelope(
+  broker: ParentBroker | ChildBroker,
+  envelope: ShepherdMessageEnvelope
+): void {
   const target = ackPath(broker, envelope.messageId);
   if (!fs.existsSync(target)) {
     writeJsonAtomic(target, {
@@ -350,7 +371,12 @@ function queuePathForChildConnection(child: ChildBroker, targetId: string): stri
   if (targetId === child.parentId || targetId === 'shepherd' || targetId === 'parent') {
     return path.join(child.rootDir, 'parent', 'inbox');
   }
-  const manifestPath = path.join(child.rootDir, 'agents', childDirectoryName(targetId), 'manifest.json');
+  const manifestPath = path.join(
+    child.rootDir,
+    'agents',
+    childDirectoryName(targetId),
+    'manifest.json'
+  );
   if (!fs.existsSync(manifestPath)) {
     throw new MessagingError('invalid_target', invalidChildTargetMessage(targetId));
   }
@@ -393,10 +419,16 @@ function publishToQueue(
     try {
       existing = validateEnvelope(readJson(target));
     } catch {
-      throw new MessagingError('duplicate_conflict', `Message file for "${envelope.messageId}" is invalid.`);
+      throw new MessagingError(
+        'duplicate_conflict',
+        `Message file for "${envelope.messageId}" is invalid.`
+      );
     }
     if (JSON.stringify(existing) !== JSON.stringify(envelope)) {
-      throw new MessagingError('duplicate_conflict', `Message id "${envelope.messageId}" is already in use.`);
+      throw new MessagingError(
+        'duplicate_conflict',
+        `Message id "${envelope.messageId}" is already in use.`
+      );
     }
     return { accepted: true, messageId: envelope.messageId, delivery: 'duplicate' };
   }
@@ -430,22 +462,35 @@ function pollQueue(
     try {
       envelope = validateEnvelope(readJson(filePath));
       assertBrokerIdentity(broker, envelope);
-      if (envelope.targetId !== expectedTarget &&
-        !(expectedTarget === broker.parentId && ['shepherd', 'parent'].includes(envelope.targetId))) {
-        throw new MessagingError('invalid_target', `Envelope target "${envelope.targetId}" does not match this inbox.`);
+      if (
+        envelope.targetId !== expectedTarget &&
+        !(expectedTarget === broker.parentId && ['shepherd', 'parent'].includes(envelope.targetId))
+      ) {
+        throw new MessagingError(
+          'invalid_target',
+          `Envelope target "${envelope.targetId}" does not match this inbox.`
+        );
       }
     } catch {
       try {
-        fs.renameSync(filePath, path.join(rejectedPath, `${path.basename(filePath)}.${randomUUID()}`));
+        fs.renameSync(
+          filePath,
+          path.join(rejectedPath, `${path.basename(filePath)}.${randomUUID()}`)
+        );
       } catch {}
       continue;
     }
     if (isAcknowledged(broker, envelope.messageId)) {
-      try { fs.rmSync(filePath, { force: true }); } catch {}
+      try {
+        fs.rmSync(filePath, { force: true });
+      } catch {}
       continue;
     }
     try {
-      fs.renameSync(filePath, path.join(processedPath, `${path.basename(filePath)}.${randomUUID()}`));
+      fs.renameSync(
+        filePath,
+        path.join(processedPath, `${path.basename(filePath)}.${randomUUID()}`)
+      );
       acknowledgeEnvelope(broker, envelope);
       messages.push(envelope);
     } catch {
@@ -457,7 +502,10 @@ function pollQueue(
 }
 
 /** Create the parent broker and its protected inbox structure. */
-export function createParentBroker(sessionOwner: string, options: BrokerOptions = {}): ParentBroker {
+export function createParentBroker(
+  sessionOwner: string,
+  options: BrokerOptions = {}
+): ParentBroker {
   assertNonEmptyString(sessionOwner, 'sessionOwner');
   const rootDir = options.rootDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-broker-'));
   ensureDirectory(rootDir);
@@ -473,8 +521,16 @@ export function createParentBroker(sessionOwner: string, options: BrokerOptions 
     brokerId: `shepherd-broker-${randomUUID()}`,
     parentId: options.parentId ?? 'shepherd',
     parentInboxPath,
-    maxMessageBytes: assertSafeLimit(options.maxMessageBytes, DEFAULT_MAX_MESSAGE_BYTES, 'maxMessageBytes'),
-    maxContentLength: assertSafeLimit(options.maxContentLength, DEFAULT_MAX_CONTENT_LENGTH, 'maxContentLength'),
+    maxMessageBytes: assertSafeLimit(
+      options.maxMessageBytes,
+      DEFAULT_MAX_MESSAGE_BYTES,
+      'maxMessageBytes'
+    ),
+    maxContentLength: assertSafeLimit(
+      options.maxContentLength,
+      DEFAULT_MAX_CONTENT_LENGTH,
+      'maxContentLength'
+    ),
     maxQueueDepth: assertSafeLimit(options.maxQueueDepth, DEFAULT_MAX_QUEUE_DEPTH, 'maxQueueDepth'),
     children: new Map(),
     closed: false,
@@ -527,7 +583,10 @@ export function createChildBroker(input: ChildCapability & { rootDir: string }):
     throw new MessagingError('invalid_capability', 'Parent broker manifest is unavailable.');
   }
   if (manifest.sessionId !== input.sessionId || manifest.brokerId !== input.brokerId) {
-    throw new MessagingError('foreign_session', 'Child capability belongs to another broker session.');
+    throw new MessagingError(
+      'foreign_session',
+      'Child capability belongs to another broker session.'
+    );
   }
   const directory = path.join(input.rootDir, 'agents', childDirectoryName(input.agentId));
   let stored: any;
@@ -536,8 +595,15 @@ export function createChildBroker(input: ChildCapability & { rootDir: string }):
   } catch {
     throw new MessagingError('invalid_capability', 'Child capability manifest is unavailable.');
   }
-  if (stored.agentId !== input.agentId || stored.token !== input.token || stored.inboxPath !== input.inboxPath) {
-    throw new MessagingError('invalid_capability', 'Child capability does not match its registered inbox.');
+  if (
+    stored.agentId !== input.agentId ||
+    stored.token !== input.token ||
+    stored.inboxPath !== input.inboxPath
+  ) {
+    throw new MessagingError(
+      'invalid_capability',
+      'Child capability does not match its registered inbox.'
+    );
   }
   return {
     rootDir: input.rootDir,
@@ -546,9 +612,21 @@ export function createChildBroker(input: ChildCapability & { rootDir: string }):
     parentId: typeof manifest.parentId === 'string' ? manifest.parentId : 'shepherd',
     agentId: input.agentId,
     capability: { ...input },
-    maxMessageBytes: assertSafeLimit(manifest.maxMessageBytes, DEFAULT_MAX_MESSAGE_BYTES, 'maxMessageBytes'),
-    maxContentLength: assertSafeLimit(manifest.maxContentLength, DEFAULT_MAX_CONTENT_LENGTH, 'maxContentLength'),
-    maxQueueDepth: assertSafeLimit(manifest.maxQueueDepth, DEFAULT_MAX_QUEUE_DEPTH, 'maxQueueDepth'),
+    maxMessageBytes: assertSafeLimit(
+      manifest.maxMessageBytes,
+      DEFAULT_MAX_MESSAGE_BYTES,
+      'maxMessageBytes'
+    ),
+    maxContentLength: assertSafeLimit(
+      manifest.maxContentLength,
+      DEFAULT_MAX_CONTENT_LENGTH,
+      'maxContentLength'
+    ),
+    maxQueueDepth: assertSafeLimit(
+      manifest.maxQueueDepth,
+      DEFAULT_MAX_QUEUE_DEPTH,
+      'maxQueueDepth'
+    ),
     closed: false,
   };
 }
@@ -561,7 +639,10 @@ export function publishFromParent(
   const valid = validateEnvelope(envelope);
   assertBrokerIdentity(broker, valid);
   if (valid.senderId !== broker.parentId) {
-    throw new MessagingError('invalid_sender', `Parent envelopes must be sent by "${broker.parentId}".`);
+    throw new MessagingError(
+      'invalid_sender',
+      `Parent envelopes must be sent by "${broker.parentId}".`
+    );
   }
   if (valid.targetId === broker.parentId || ['parent', 'shepherd'].includes(valid.targetId)) {
     throw new MessagingError('invalid_target', 'Parent messages cannot target the parent inbox.');
@@ -577,7 +658,10 @@ export function publishFromChild(
   const valid = validateEnvelope(envelope);
   assertBrokerIdentity(child, valid);
   if (valid.senderId !== child.agentId) {
-    throw new MessagingError('invalid_sender', `Child envelopes must be sent by "${child.agentId}".`);
+    throw new MessagingError(
+      'invalid_sender',
+      `Child envelopes must be sent by "${child.agentId}".`
+    );
   }
   return publishToQueue(child, queuePathForChildConnection(child, valid.targetId), valid);
 }

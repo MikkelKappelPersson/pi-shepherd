@@ -16,7 +16,11 @@ import {
   registerChild,
   unregisterChild,
 } from '../src/core/messaging.ts';
-import { createFakeChildIdentity, createFakeParentIdentity, withTempDirectory } from './helpers/test-utils.mjs';
+import {
+  createFakeChildIdentity,
+  createFakeParentIdentity,
+  withTempDirectory,
+} from './helpers/test-utils.mjs';
 
 function expectMessagingError(fn, code, label) {
   assert.throws(fn, error => {
@@ -57,7 +61,7 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
       expectsReply: true,
       taskId: 'shepherd-task-example',
       threadId: 'thread-example',
-    },
+    }
   );
   const acceptedToParent = publishFromChild(scout, childToParent);
   assert.equal(acceptedToParent.accepted, true);
@@ -76,7 +80,7 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
       deadlineAt: 123_456,
       delivery: 'followUp',
       content: 'Investigate the planner side of the question.',
-    },
+    }
   );
   assert.equal(parentToChild.deadlineAt, 123_456);
   assert.equal(publishFromParent(broker, parentToChild).delivery, 'queued');
@@ -93,7 +97,7 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
       threadId: childToParent.threadId,
       delivery: 'followUp',
       content: 'Please check the session middleware.',
-    },
+    }
   );
   assert.equal(publishFromChild(scout, peerMessage).delivery, 'queued');
   assert.deepEqual(pollChildInbox(planner), [peerMessage]);
@@ -106,19 +110,33 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
   assert.deepEqual(pollParentInbox(broker), []);
   console.log('PASS duplicate envelopes are acknowledged idempotently');
 
-  const foreignSender = { ...childToParent, senderId: planner.agentId, messageId: 'foreign-sender' };
+  const foreignSender = {
+    ...childToParent,
+    senderId: planner.agentId,
+    messageId: 'foreign-sender',
+  };
   expectMessagingError(
     () => publishFromChild(scout, foreignSender),
     'invalid_sender',
     'child cannot publish as another child'
   );
   expectMessagingError(
-    () => publishFromParent(broker, { ...parentToChild, senderId: planner.agentId, messageId: 'foreign-parent' }),
+    () =>
+      publishFromParent(broker, {
+        ...parentToChild,
+        senderId: planner.agentId,
+        messageId: 'foreign-parent',
+      }),
     'invalid_sender',
     'parent broker rejects non-parent sender'
   );
   assert.throws(
-    () => publishFromChild(scout, { ...childToParent, targetId: 'planner', messageId: 'display-name-target' }),
+    () =>
+      publishFromChild(scout, {
+        ...childToParent,
+        targetId: 'planner',
+        messageId: 'display-name-target',
+      }),
     error => {
       assert.ok(error instanceof MessagingError);
       assert.equal(error.code, 'invalid_target');
@@ -126,20 +144,35 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
       assert.match(error.message, /agent name such as "planner"/);
       return true;
     },
-    'agent definition names are rejected with actionable target guidance',
+    'agent definition names are rejected with actionable target guidance'
   );
   expectMessagingError(
-    () => publishFromChild(scout, { ...childToParent, targetId: 'unknown-agent', messageId: 'unknown-target' }),
+    () =>
+      publishFromChild(scout, {
+        ...childToParent,
+        targetId: 'unknown-agent',
+        messageId: 'unknown-target',
+      }),
     'invalid_target',
     'unknown child target is rejected'
   );
   expectMessagingError(
-    () => publishFromParent(broker, { ...parentToChild, targetId: 'shepherd', messageId: 'parent-target' }),
+    () =>
+      publishFromParent(broker, {
+        ...parentToChild,
+        targetId: 'shepherd',
+        messageId: 'parent-target',
+      }),
     'invalid_target',
     'parent cannot publish into its own inbox'
   );
   expectMessagingError(
-    () => publishFromChild(scout, { ...childToParent, sessionId: 'foreign-session', messageId: 'foreign-session-message' }),
+    () =>
+      publishFromChild(scout, {
+        ...childToParent,
+        sessionId: 'foreign-session',
+        messageId: 'foreign-session-message',
+      }),
     'foreign_session',
     'foreign session envelope is rejected'
   );
@@ -172,15 +205,27 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
   const boundedChildCap = registerChild(boundedBroker, 'bounded-child');
   const boundedChild = createChildBroker({ rootDir: boundedBroker.rootDir, ...boundedChildCap });
   const boundedEnvelope = createEnvelope(
-    { sessionId: boundedChild.sessionId, brokerId: boundedChild.brokerId, senderId: boundedChild.agentId },
-    { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'one' },
+    {
+      sessionId: boundedChild.sessionId,
+      brokerId: boundedChild.brokerId,
+      senderId: boundedChild.agentId,
+    },
+    { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'one' }
   );
   publishFromChild(boundedChild, boundedEnvelope);
   expectMessagingError(
-    () => publishFromChild(boundedChild, createEnvelope(
-      { sessionId: boundedChild.sessionId, brokerId: boundedChild.brokerId, senderId: boundedChild.agentId },
-      { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'two' },
-    )),
+    () =>
+      publishFromChild(
+        boundedChild,
+        createEnvelope(
+          {
+            sessionId: boundedChild.sessionId,
+            brokerId: boundedChild.brokerId,
+            senderId: boundedChild.agentId,
+          },
+          { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'two' }
+        )
+      ),
     'queue_full',
     'queue depth limit rejects excess messages'
   );
@@ -191,10 +236,18 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
   const largeCap = registerChild(largeBroker, 'size-child');
   const largeChild = createChildBroker({ rootDir: largeBroker.rootDir, ...largeCap });
   expectMessagingError(
-    () => publishFromChild(largeChild, createEnvelope(
-      { sessionId: largeChild.sessionId, brokerId: largeChild.brokerId, senderId: largeChild.agentId },
-      { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'x'.repeat(500) },
-    )),
+    () =>
+      publishFromChild(
+        largeChild,
+        createEnvelope(
+          {
+            sessionId: largeChild.sessionId,
+            brokerId: largeChild.brokerId,
+            senderId: largeChild.agentId,
+          },
+          { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'x'.repeat(500) }
+        )
+      ),
     'message_too_large',
     'message size limit rejects oversized messages'
   );
@@ -206,15 +259,26 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
   const contentCap = registerChild(contentBroker, 'content-child');
   const contentChild = createChildBroker({ rootDir: contentBroker.rootDir, ...contentCap });
   expectMessagingError(
-    () => publishFromChild(contentChild, createEnvelope(
-      { sessionId: contentChild.sessionId, brokerId: contentChild.brokerId, senderId: contentChild.agentId },
-      { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'x'.repeat(11) },
-    )),
+    () =>
+      publishFromChild(
+        contentChild,
+        createEnvelope(
+          {
+            sessionId: contentChild.sessionId,
+            brokerId: contentChild.brokerId,
+            senderId: contentChild.agentId,
+          },
+          { kind: 'message', targetId: 'shepherd', delivery: 'followUp', content: 'x'.repeat(11) }
+        )
+      ),
     'message_too_large',
     'content length limit rejects oversized content'
   );
 
-  assert.equal(closeBrokerWhenChildrenGone(broker, () => false), false);
+  assert.equal(
+    closeBrokerWhenChildrenGone(broker, () => false),
+    false
+  );
   assert.equal(fs.existsSync(broker.rootDir), true);
   unregisterChild(broker, scout.agentId);
   unregisterChild(broker, planner.agentId);
@@ -222,9 +286,18 @@ await withTempDirectory('pi-shepherd-messaging-', async root => {
   assert.equal(fs.existsSync(broker.rootDir), false);
   console.log('PASS broker cleanup waits for confirmed child disappearance');
 
-  assert.equal(closeBrokerWhenChildrenGone(boundedBroker, () => true), true);
-  assert.equal(closeBrokerWhenChildrenGone(largeBroker, () => true), true);
-  assert.equal(closeBrokerWhenChildrenGone(contentBroker, () => true), true);
+  assert.equal(
+    closeBrokerWhenChildrenGone(boundedBroker, () => true),
+    true
+  );
+  assert.equal(
+    closeBrokerWhenChildrenGone(largeBroker, () => true),
+    true
+  );
+  assert.equal(
+    closeBrokerWhenChildrenGone(contentBroker, () => true),
+    true
+  );
 });
 
 console.log('All messaging assertions passed.');

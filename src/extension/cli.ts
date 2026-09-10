@@ -62,7 +62,8 @@ const READ_OPTION_KEYS = ['lines', 'source'];
 const USAGE =
   'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
   '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --cwd <path>\n' +
-  '  read options: --lines <n>, --source ' + SOURCE_VALUES.join('|');
+  '  read options: --lines <n>, --source ' +
+  SOURCE_VALUES.join('|');
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -75,48 +76,48 @@ const USAGE =
  * values via `JSON.stringify`, every quoted run is a valid JSON string literal.
  */
 export function tokenizeCli(input: string): string[] {
-	const tokens: string[] = [];
-	let cur = '';
-	let i = 0;
-	const push = () => {
-		if (cur !== '') tokens.push(cur);
-		cur = '';
-	};
-	while (i < input.length) {
-		const c = input[i];
-		if (c === '"') {
-			// Capture one JSON string literal and decode it, appending to `cur`
-			// so `--cwd=<quoted>` keeps the flag prefix attached.
-			let j = i + 1;
-			let body = '';
-			while (j < input.length) {
-				if (input[j] === '\\') {
-					body += input[j] + (input[j + 1] ?? '');
-					j += 2;
-					continue;
-				}
-				if (input[j] === '"') break;
-				body += input[j];
-				j++;
-			}
-			try {
-				cur += JSON.parse('"' + body + '"');
-			} catch {
-				cur += body; // malformed quote — keep the raw run rather than crashing
-			}
-			i = j + 1;
-			continue;
-		}
-		if (c === ' ' || c === '\t') {
-			push();
-			i++;
-			continue;
-		}
-		cur += c;
-		i++;
-	}
-	push();
-	return tokens;
+  const tokens: string[] = [];
+  let cur = '';
+  let i = 0;
+  const push = () => {
+    if (cur !== '') tokens.push(cur);
+    cur = '';
+  };
+  while (i < input.length) {
+    const c = input[i];
+    if (c === '"') {
+      // Capture one JSON string literal and decode it, appending to `cur`
+      // so `--cwd=<quoted>` keeps the flag prefix attached.
+      let j = i + 1;
+      let body = '';
+      while (j < input.length) {
+        if (input[j] === '\\') {
+          body += input[j] + (input[j + 1] ?? '');
+          j += 2;
+          continue;
+        }
+        if (input[j] === '"') break;
+        body += input[j];
+        j++;
+      }
+      try {
+        cur += JSON.parse('"' + body + '"');
+      } catch {
+        cur += body; // malformed quote — keep the raw run rather than crashing
+      }
+      i = j + 1;
+      continue;
+    }
+    if (c === ' ' || c === '\t') {
+      push();
+      i++;
+      continue;
+    }
+    cur += c;
+    i++;
+  }
+  push();
+  return tokens;
 }
 
 export type ParsedShepherdCommand =
@@ -150,7 +151,8 @@ function parseFlags(
     const eq = token.indexOf('=');
     const flag = (eq >= 0 ? token.slice(0, eq) : token).replace(/^--/, '');
     const spec = FLAG_LOOKUP.get(flag);
-    if (!spec || !allowedSet.has(spec.key)) return { options, error: `Unknown option "--${flag}".` };
+    if (!spec || !allowedSet.has(spec.key))
+      return { options, error: `Unknown option "--${flag}".` };
     if (spec.bare) {
       if (eq >= 0) return { options, error: `Option --${spec.flag} takes no value.` };
       options[spec.key] = true;
@@ -160,9 +162,13 @@ function parseFlags(
     if (raw === undefined || raw === '' || raw.startsWith('--'))
       return { options, error: `Missing value for --${spec.flag}.` };
     if (spec.values && !spec.values.includes(raw))
-      return { options, error: `Invalid value "${raw}" for --${spec.flag}; use ${spec.values.join(', ')}.` };
+      return {
+        options,
+        error: `Invalid value "${raw}" for --${spec.flag}; use ${spec.values.join(', ')}.`,
+      };
     if (spec.integer) {
-      if (!/^-?\d+$/.test(raw)) return { options, error: `Value "${raw}" for --${spec.flag} must be an integer.` };
+      if (!/^-?\d+$/.test(raw))
+        return { options, error: `Value "${raw}" for --${spec.flag} must be an integer.` };
       options[spec.key] = Number(raw);
     } else if (spec.boolean) {
       if (raw !== 'true' && raw !== 'false')
@@ -208,7 +214,9 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
     if (error) return { error: `${error}\n${USAGE}` };
     const positionalScope = positional[0];
     if (positional.length > 1 || (positionalScope && 'agentScope' in options))
-      return { error: `/shepherd agents takes at most one scope argument (positional or --scope).\n${USAGE}` };
+      return {
+        error: `/shepherd agents takes at most one scope argument (positional or --scope).\n${USAGE}`,
+      };
     const scope = positionalScope ?? (options.agentScope as string | undefined);
     if (scope && !SCOPE_VALUES.includes(scope as 'user'))
       return { error: `Invalid scope "${scope}"; use ${SCOPE_VALUES.join(', ')}.` };
@@ -225,7 +233,10 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
     const [agent, ...extra] = positional;
     if (!agent) return { error: `spawn requires an agent name.\n${USAGE}` };
     if (extra.length > 0) return { error: `Unexpected argument "${extra[0]}".\n${USAGE}` };
-    return { action: 'spawn', args: { action: 'spawn', agent, label: options.label ?? '', ...options } };
+    return {
+      action: 'spawn',
+      args: { action: 'spawn', agent, label: options.label ?? '', ...options },
+    };
   }
 
   if (action === 'status') {
@@ -240,13 +251,16 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
     const { options, error } = parseFlags(tokens, 1, READ_OPTION_KEYS, positional);
     if (error) return { error: `${error}\n${USAGE}` };
     const [name, ...extra] = positional;
-    if (!name) return { error: `read requires a target (agent name, pane id, or lifecycle id).\n${USAGE}` };
+    if (!name)
+      return { error: `read requires a target (agent name, pane id, or lifecycle id).\n${USAGE}` };
     if (extra.length > 0) return { error: `Unexpected argument "${extra[0]}".\n${USAGE}` };
     return { action: 'read', args: { action: 'read', name, ...options } };
   }
 
   if (tokens.length === 0)
-    return { error: `Provide an action. Try: agents, herd, spawn <agent>, status <target>, read <target>, or settings.\n${USAGE}` };
+    return {
+      error: `Provide an action. Try: agents, herd, spawn <agent>, status <target>, read <target>, or settings.\n${USAGE}`,
+    };
   return {
     error: `Unknown action "${action}". Try: agents, herd, spawn <agent>, status <target>, read <target>, or settings.\n${USAGE}`,
   };
@@ -267,7 +281,8 @@ export function omitMaterializedDefaults(
   const result = { ...options };
   if (verb !== 'spawn') return result;
   if (result.placement === 'tab') delete result.placement;
-  if (typeof result.cwd === 'string' && resolve(result.cwd) === resolve(defaultCwd)) delete result.cwd;
+  if (typeof result.cwd === 'string' && resolve(result.cwd) === resolve(defaultCwd))
+    delete result.cwd;
   return result;
 }
 
@@ -279,17 +294,30 @@ function previewText(value: unknown, maxLength = 40): string {
 
 /** Render opaque lifecycle ids as compact CLI-like values. */
 function handlePreview(value: unknown, maxLength = 40): string {
-  const rawId = typeof value === 'string' ? value : value && typeof value === 'object' && 'id' in value ? (value as any).id : undefined;
+  const rawId =
+    typeof value === 'string'
+      ? value
+      : value && typeof value === 'object' && 'id' in value
+        ? (value as any).id
+        : undefined;
   if (typeof rawId === 'string') {
     try {
       const agent = lifecycleRegistry.getAgent(rawId);
-      return previewText(`${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`, maxLength);
+      return previewText(
+        `${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`,
+        maxLength
+      );
     } catch {
       try {
         const prompt = lifecycleRegistry.getPrompt(rawId) as any;
         const agent = lifecycleRegistry.getAgent(prompt.handle.agentId);
-        return previewText(`${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`, maxLength);
-      } catch { /* retain opaque id for unknown handles */ }
+        return previewText(
+          `${agent.handle.agent}${agent.handle.label ? `: ${agent.handle.label}` : ''}`,
+          maxLength
+        );
+      } catch {
+        /* retain opaque id for unknown handles */
+      }
     }
   }
   if (Array.isArray(value)) {
