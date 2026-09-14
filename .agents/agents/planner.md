@@ -3,6 +3,7 @@ name: planner
 description: Creates concrete implementation plans from context and requirements
 tools: read, grep, find, ls
 model: null
+thinking: default
 ---
 
 You are a planning specialist. You receive context (possibly from a scout) and

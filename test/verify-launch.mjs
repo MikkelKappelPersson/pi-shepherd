@@ -67,6 +67,7 @@ function check(label, omit, includeOption = true, model, omitContextFiles) {
       script.includes("--model 'anthropic/claude-sonnet-4-5'") === (model !== undefined),
       `${label}: model argument`
     );
+    assert(!script.includes('--thinking '), `${label}: no thinking argument`);
     assert(fs.existsSync(`${files.dir}/sysprompt-${name}.md`), `${label}: system prompt file`);
     assert(
       fs.readFileSync(`${files.dir}/sysprompt-${name}.md`, 'utf8') === 'agent Markdown body',
@@ -83,6 +84,51 @@ check('context-true', false, true, undefined, true);
 check('context-false', false, true, undefined, false);
 check('context-absent', false, false);
 check('model', false, true, 'anthropic/claude-sonnet-4-5');
+
+const thinkingLaunch = writePiLaunchFiles({
+  name: 'thinking',
+  task: 'use the requested thinking level',
+  model: 'anthropic/claude-sonnet-4-5',
+  thinking: 'xhigh',
+});
+try {
+  const script = fs.readFileSync(thinkingLaunch.scriptFile, 'utf8');
+  assert(script.includes("--thinking 'xhigh'"), 'thinking: explicit level argument');
+} finally {
+  fs.rmSync(thinkingLaunch.dir, { recursive: true, force: true });
+}
+
+const offThinkingLaunch = writePiLaunchFiles({
+  name: 'thinking-off',
+  task: 'disable thinking',
+  thinking: 'off',
+});
+try {
+  const script = fs.readFileSync(offThinkingLaunch.scriptFile, 'utf8');
+  assert(script.includes("--thinking 'off'"), 'thinking: off argument');
+} finally {
+  fs.rmSync(offThinkingLaunch.dir, { recursive: true, force: true });
+}
+
+const defaultThinkingLaunch = writePiLaunchFiles({
+  name: 'thinking-default',
+  task: 'inherit thinking',
+  thinking: 'default',
+});
+try {
+  const script = fs.readFileSync(defaultThinkingLaunch.scriptFile, 'utf8');
+  assert(!script.includes('--thinking '), 'thinking: default omits override');
+} finally {
+  fs.rmSync(defaultThinkingLaunch.dir, { recursive: true, force: true });
+}
+
+let invalidThinkingLaunchRejected = false;
+try {
+  writePiLaunchFiles({ name: 'thinking-invalid', thinking: 'none' });
+} catch {
+  invalidThinkingLaunchRejected = true;
+}
+assert(invalidThinkingLaunchRejected, 'thinking: launch rejects invalid level');
 
 const brokerLaunch = writePiLaunchFiles({
   name: 'broker-wired',

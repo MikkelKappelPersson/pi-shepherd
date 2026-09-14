@@ -129,6 +129,7 @@ Agent definitions are Markdown files, so you can tune an agent’s behavior with
 | **`description`** | String | — | A short description shown during discovery. **Required.** |
 | **`tools`** | Comma-separated string or YAML list | pi’s default tools | Tools available to the agent. |
 | **`model`** | Provider-qualified model, `null`, or `default` | Shepherd’s model | Select the model, for example `anthropic/claude-sonnet-4-5`. `null`, `default`, or omission inherits the Shepherd’s model. |
+| **`thinking`** | `default`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Shepherd’s level | Select the requested Pi thinking level. `null`, `default`, empty, or omission inherits the Shepherd’s current level. Unsupported levels are clamped by Pi to the child model’s capabilities. |
 | **`omit-system-prompt`** | `true`, `false` | `false` | Omit pi’s built-in system prompt when `true`. |
 | **`omit-pi-documentation`** | `true`, `false` | `false` | Omit pi’s built-in documentation guidance when `true`. |
 | **`omit-context-files`** | `true`, `false` | `false` | Omit automatic `AGENTS.md` and `CLAUDE.md` context-file loading when `true`. |
@@ -142,6 +143,7 @@ name: tester
 description: Runs and evaluates GUI tests
 tools: read, grep, find
 model: anthropic/claude-sonnet-4-5
+thinking: high
 omit-system-prompt: false
 omit-pi-documentation: true
 omit-context-files: true
@@ -152,6 +154,10 @@ You are a focused GUI testing specialist. Report reproducible failures
 with exact steps and useful evidence.
 ```
 
+`thinking` is a requested level. Pi clamps it to a level supported by the
+child model, so `xhigh` may become `high`, and a model that cannot
+disable reasoning may not honor `off`. `none` is invalid; use `off` for an
+explicit no-reasoning request. Invalid `thinking` or `model` values cause that definition to be skipped during discovery rather than preventing other agents from loading.
 
 ### Bundled definitions and discovery
 
@@ -185,7 +191,7 @@ shepherd_spawn({
 })
 ```
 
-The working directory defaults to the Shepherd session and `cwd` can be supplied when spawning. The child model is selected only by the discovered agent definition; omission, `null`, or `default` inherits the Shepherd session model. Agent scope, project approval, and prompt-shaping options come from Shepherd settings and the discovered agent definition; they are not spawn overrides.
+The working directory defaults to the Shepherd session and `cwd` can be supplied when spawning. The child model and requested thinking level come from the discovered agent definition; omission, `null`, or `default` inherits the Shepherd session's corresponding setting. Agent scope, project approval, and prompt-shaping options come from Shepherd settings and the discovered definition; they are not spawn overrides.
 
 Lifecycle tools use short, opaque, session-scoped IDs:
 

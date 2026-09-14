@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { discoverAgents, resolveDelegatedModel } from './discovery.ts';
+import {
+  discoverAgents,
+  resolveDelegatedModel,
+  resolveDelegatedThinking,
+  type AgentThinkingLevel,
+} from './discovery.ts';
 import {
   createEnvelope,
   createParentBroker,
@@ -128,6 +133,7 @@ export async function startAgent(
   ctx: {
     cwd: string;
     model?: { provider: string; id: string };
+    thinkingLevel?: AgentThinkingLevel;
     hasUI?: boolean;
     ui?: any;
     sessionId?: string;
@@ -176,6 +182,9 @@ export async function startAgent(
     // The agent definition is the only source of an explicit child model;
     // otherwise inherit the parent Shepherd's current provider/model.
     const delegatedModel = resolveDelegatedModel(found.model, ctx.model);
+    // Thinking follows the parent unless the definition requests an explicit
+    // level. Pi clamps unsupported levels to the child model's capabilities.
+    const delegatedThinking = resolveDelegatedThinking(found.thinking, ctx.thinkingLevel);
     const created = createHerdrInstance(
       formatAgentName(name, label),
       cwd,
@@ -199,6 +208,7 @@ export async function startAgent(
       // The agent definition selects the model; absent a definition, inherit
       // the parent Shepherd's current provider/model.
       model: delegatedModel,
+      thinking: delegatedThinking,
       tools: found.tools,
     });
     setCreatedPaneDir(paneId, files.dir);

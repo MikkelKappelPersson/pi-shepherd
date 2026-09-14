@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { Text } from '@earendil-works/pi-tui';
 import { lifecycleRegistry, sessionOwner } from './orchestration.ts';
 import type { ChildCapability } from './messaging.ts';
+import { normalizeThinking, type AgentThinkingLevel } from './discovery.ts';
 import type { AgentHandle, AgentTaskStatus } from './orchestration.ts';
 
 const execFileAsync = promisify(execFile);
@@ -578,12 +579,15 @@ export function writePiLaunchFiles(opts: {
   /** Persistent lifecycle agents remain alive and have no initial task. */
   persistent?: boolean;
   model?: string;
+  /** Requested thinking level; Pi clamps it to the child model's capabilities. */
+  thinking?: AgentThinkingLevel;
   tools?: string[];
   /** Child-side mailbox capability, supplied once the parent broker exists. */
   childBroker?: ChildCapability & { rootDir: string };
   /** Active tracked task context, when this launch is for delegated work. */
   taskId?: string;
 }): { dir: string; sessionFile: string; scriptFile: string } {
+  const thinking = normalizeThinking(opts.thinking);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-'));
   const safe = opts.name.replace(/[^\w.-]+/g, '_') || 'agent';
   const sessionFile = path.join(dir, `session-${safe}.jsonl`);
@@ -592,6 +596,7 @@ export function writePiLaunchFiles(opts: {
 
   const args: string[] = ['--session', shellQuote(sessionFile), '-e', shellQuote(doneExt)];
   if (opts.model) args.push('--model', shellQuote(opts.model));
+  if (thinking) args.push('--thinking', shellQuote(thinking));
   if (opts.omitContextFiles) args.push('--no-context-files');
   // --tools is an allowlist: adding the child-surface tools keeps the
   // shepherd-done extension's shepherd_message/shepherd_done available even
@@ -663,6 +668,8 @@ export function launchPiInPane(
     omitPiDocumentation?: boolean;
     omitContextFiles?: boolean;
     model?: string;
+    /** Requested thinking level; Pi clamps it to the child model's capabilities. */
+    thinking?: AgentThinkingLevel;
     tools?: string[];
     /** Child-side mailbox capability, supplied once the parent broker exists. */
     childBroker?: ChildCapability & { rootDir: string };

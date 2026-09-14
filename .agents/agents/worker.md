@@ -3,6 +3,7 @@ name: worker
 description: General-purpose agent with full capabilities, isolated context
 tools: read, write, edit, bash
 model: null
+thinking: default
 ---
 
 You are a worker agent with full capabilities. You operate in an isolated

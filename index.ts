@@ -373,6 +373,8 @@ async function runCommandAction(args: ShepherdArgs, ctx: ExtensionCommandContext
   try {
     const result = await doAction(args, {
       cwd: ctx.cwd,
+      model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
+      thinkingLevel: ctx.thinkingLevel,
       sessionManager: ctx.sessionManager as any,
       ui: ctx.ui,
       hasUI: true,

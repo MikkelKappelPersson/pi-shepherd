@@ -27,8 +27,14 @@ const fixtures = path.join(__dirname, 'fixtures');
 // Point user dirs at the fixture "home" BEFORE importing discovery.
 process.env.HOME = path.join(fixtures, 'home');
 
-const { discoverAgents, formatAgentList, normalizeModel, resolveDelegatedModel } =
-  await import('../src/core/discovery.ts');
+const {
+  discoverAgents,
+  formatAgentList,
+  normalizeModel,
+  normalizeThinking,
+  resolveDelegatedModel,
+  resolveDelegatedThinking,
+} = await import('../src/core/discovery.ts');
 
 let failures = 0;
 function assert(cond, label, extra = '') {
@@ -57,6 +63,7 @@ assert(!!descOf(user, 'only-user'), 'user scope: includes only-user');
 assert(!!descOf(user, 'shared-only'), 'user scope: includes shared-only (user2)');
 assert(!descOf(user, 'project-pi'), 'user scope: excludes project-pi');
 assert(!descOf(user, 'proj-shared'), 'user scope: excludes proj-shared');
+assert(!descOf(user, 'invalid-thinking'), 'user scope: invalid thinking definition is skipped');
 assert(
   resolveDelegatedModel('default', { provider: 'test-provider', id: 'test-model' }) ===
     'test-provider/test-model',
@@ -66,6 +73,18 @@ assert(
   resolveDelegatedModel('explicit/model', { provider: 'test-provider', id: 'test-model' }) ===
     'explicit/model',
   'model: explicit model still wins'
+);
+assert(
+  resolveDelegatedThinking(undefined, 'high') === 'high',
+  'thinking: absent value inherits parent level'
+);
+assert(
+  resolveDelegatedThinking('default', 'xhigh') === 'xhigh',
+  'thinking: default sentinel inherits parent level'
+);
+assert(
+  resolveDelegatedThinking('off', 'high') === 'off',
+  'thinking: explicit off wins over parent level'
 );
 const omitTrue = user.agents.find(a => a.name === 'omit-true');
 const omitFalse = user.agents.find(a => a.name === 'omit-false');
@@ -119,8 +138,40 @@ assert(
   'frontmatter: empty/null model inherits'
 );
 assert(
+  normalizeThinking('  HIGH  ') === 'high',
+  'frontmatter: thinking level is trimmed and normalized'
+);
+assert(
+  normalizeThinking('') === undefined &&
+    normalizeThinking(null) === undefined &&
+    normalizeThinking('default') === undefined,
+  'frontmatter: empty/null/default thinking inherits'
+);
+let invalidModelRejected = false;
+try {
+  normalizeModel('none');
+} catch {
+  invalidModelRejected = true;
+}
+assert(invalidModelRejected, 'frontmatter: none model value is rejected');
+let invalidThinkingRejected = false;
+try {
+  normalizeThinking('none');
+} catch {
+  invalidThinkingRejected = true;
+}
+assert(invalidThinkingRejected, 'frontmatter: none thinking value is rejected');
+assert(
   user.agents.find(a => a.name === 'model-explicit')?.model === 'anthropic/claude-sonnet-4-5',
   'frontmatter: explicit model is retained'
+);
+assert(
+  user.agents.find(a => a.name === 'model-explicit')?.thinking === 'high',
+  'frontmatter: explicit thinking level is retained'
+);
+assert(
+  user.agents.find(a => a.name === 'model-empty')?.thinking === undefined,
+  'frontmatter: empty thinking is normalized for inheritance'
 );
 assert(
   user.agents.find(a => a.name === 'model-empty')?.model === undefined,

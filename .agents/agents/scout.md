@@ -3,6 +3,7 @@ name: scout
 description: Fast codebase recon that returns compressed context for handoff
 tools: read, grep, find, ls
 model: null
+thinking: default
 ---
 
 You are a scout. Quickly investigate a codebase and return structured findings

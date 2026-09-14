@@ -17,6 +17,19 @@ import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from '@earendil-works/
 
 export type AgentScope = 'user' | 'project' | 'both';
 
+/** Thinking levels accepted by Pi's model/session configuration. */
+export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const THINKING_LEVELS: readonly AgentThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
 /** The part of pi's current model needed to inherit its provider-qualified name. */
 export type DelegatorModel = { provider: string; id: string };
 
@@ -25,6 +38,8 @@ export interface AgentConfig {
   description: string;
   tools?: string[];
   model?: string;
+  /** Requested Pi thinking level; absent means inherit the delegator's level. */
+  thinking?: AgentThinkingLevel;
   /** Omit pi's built-in default system prompt when delegating this agent. */
   omitSystemPrompt?: boolean;
   /** Omit Pi's built-in documentation guidance from the delegated prompt. */
@@ -80,7 +95,42 @@ function findNearestProjectAgentsDir(cwd: string, subdir: string): string | null
 export function normalizeModel(model: unknown): string | undefined {
   if (typeof model !== 'string') return undefined;
   const normalized = model.trim();
-  return normalized.length > 0 ? normalized : undefined;
+  if (!normalized) return undefined;
+  if (normalized.toLowerCase() === 'none') {
+    throw new Error(
+      'Invalid model value "none"; agents must select a model or inherit the parent model.'
+    );
+  }
+  return normalized;
+}
+
+/** Normalize an agent thinking value. Missing, null, empty, and `default` values
+ * inherit the delegator's current level. Explicit Pi levels are retained. */
+export function normalizeThinking(value: unknown): AgentThinkingLevel | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new Error(
+      'Invalid thinking value; expected default, off, minimal, low, medium, high, xhigh, or max.'
+    );
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === 'default') return undefined;
+  if ((THINKING_LEVELS as readonly string[]).includes(normalized)) {
+    return normalized as AgentThinkingLevel;
+  }
+  throw new Error(
+    `Invalid thinking level "${value}"; expected default, off, minimal, low, medium, high, xhigh, or max.`
+  );
+}
+
+/** Resolve the requested child thinking level. Explicit agent values win;
+ * otherwise the parent level is passed through for Pi to clamp to the child
+ * model's supported levels. */
+export function resolveDelegatedThinking(
+  agentThinking: unknown,
+  parentThinking: unknown
+): AgentThinkingLevel | undefined {
+  return normalizeThinking(agentThinking) ?? normalizeThinking(parentThinking);
 }
 
 /** Resolve the model passed to a child pi process. An explicit agent model
@@ -156,36 +206,42 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
     const description = frontmatter.description;
     if (typeof agentName !== 'string' || agentName.length === 0) continue;
     if (typeof description !== 'string' || description.length === 0) continue;
-    if (seen.has(agentName)) continue; // earlier file in this dir wins
-    seen.add(agentName);
+    if (seen.has(agentName)) continue; // earlier valid file in this dir wins
 
-    agents.push({
-      name: agentName,
-      description,
-      tools: normalizeTools(frontmatter.tools),
-      model: normalizeModel(frontmatter.model),
-      systemPrompt: body,
-      source,
-      filePath,
-      // Only a YAML boolean is accepted; absent or malformed values default true.
-      userInvocable:
-        typeof frontmatter['user-invocable'] === 'boolean' ? frontmatter['user-invocable'] : true,
-      // Only the YAML boolean is accepted; malformed values are ignored.
-      omitSystemPrompt:
-        typeof frontmatter['omit-system-prompt'] === 'boolean'
-          ? frontmatter['omit-system-prompt']
-          : undefined,
-      // Only the YAML boolean is accepted; malformed values are ignored.
-      omitPiDocumentation:
-        typeof frontmatter['omit-pi-documentation'] === 'boolean'
-          ? frontmatter['omit-pi-documentation']
-          : false,
-      // Only the YAML boolean is accepted; quoted strings default to false.
-      omitContextFiles:
-        typeof frontmatter['omit-context-files'] === 'boolean'
-          ? frontmatter['omit-context-files']
-          : false,
-    });
+    try {
+      agents.push({
+        name: agentName,
+        description,
+        tools: normalizeTools(frontmatter.tools),
+        model: normalizeModel(frontmatter.model),
+        thinking: normalizeThinking(frontmatter.thinking),
+        systemPrompt: body,
+        source,
+        filePath,
+        // Only a YAML boolean is accepted; absent or malformed values default true.
+        userInvocable:
+          typeof frontmatter['user-invocable'] === 'boolean' ? frontmatter['user-invocable'] : true,
+        // Only the YAML boolean is accepted; malformed values are ignored.
+        omitSystemPrompt:
+          typeof frontmatter['omit-system-prompt'] === 'boolean'
+            ? frontmatter['omit-system-prompt']
+            : undefined,
+        // Only the YAML boolean is accepted; malformed values are ignored.
+        omitPiDocumentation:
+          typeof frontmatter['omit-pi-documentation'] === 'boolean'
+            ? frontmatter['omit-pi-documentation']
+            : false,
+        // Only the YAML boolean is accepted; quoted strings default to false.
+        omitContextFiles:
+          typeof frontmatter['omit-context-files'] === 'boolean'
+            ? frontmatter['omit-context-files']
+            : false,
+      });
+      seen.add(agentName);
+    } catch {
+      // A malformed definition must not prevent discovery of other agents.
+      continue;
+    }
   }
 
   return agents;

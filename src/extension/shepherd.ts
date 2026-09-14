@@ -50,7 +50,7 @@ import {
   resolveOrCreateParentArtifactSession,
   type ShepherdSession,
 } from '../core/artifact-sessions.ts';
-import type { DelegatorModel } from '../core/discovery.ts';
+import type { AgentThinkingLevel, DelegatorModel } from '../core/discovery.ts';
 import { discoverAgents, formatAgentList } from '../core/discovery.ts';
 import {
   HERDR_SETUP_HINT,
@@ -838,6 +838,7 @@ function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
 type ShepherdContext = {
   cwd: string;
   model?: DelegatorModel;
+  thinkingLevel?: AgentThinkingLevel;
   hasUI?: boolean;
   ui?: any;
   sessionManager?: { getSessionId(): string; getSessionFile?(): string | undefined };
@@ -1325,7 +1326,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: spawn agent',
     description:
       'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
-      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model, and a new tab. Use placement pane_right or pane_down to split the current pane.',
+      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model and thinking level, and a new tab; the agent definition can override both. Use placement pane_right or pane_down to split the current pane.',
     promptSnippet: 'Spawn a new agent in a Herdr pane.',
     promptGuidelines: [
       'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.',
