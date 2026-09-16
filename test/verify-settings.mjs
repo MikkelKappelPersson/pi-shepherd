@@ -35,6 +35,7 @@ try {
   );
   assert.equal(DEFAULT_SETTINGS.projectScope, false, 'default project scope is inactive');
   assert.equal(DEFAULT_SETTINGS.confirmProjectAgents, true, 'confirmation defaults on');
+  assert.equal(DEFAULT_SETTINGS.subagentCompatibility, false, 'compatibility facade defaults off');
   assert.equal(loadSettings().fieldnotes, true, 'missing fieldnotes defaults on');
   assert.equal(loadSettings().emojiSheep, true, 'missing sheep marker defaults on');
 
@@ -44,6 +45,7 @@ try {
     fieldnotes: false,
     emojiSheep: false,
     confirmProjectAgents: false,
+    subagentCompatibility: true,
     timeout: 25,
   };
   saveSettings(user, 'user');
@@ -51,6 +53,7 @@ try {
   assert.ok(!('projectScope' in rawUser), 'user file does not store projectScope');
   assert.ok(!('settingsScope' in rawUser), 'user file does not store settingsScope');
   assert.equal(rawUser.confirmProjectAgents, false, 'user file stores the security setting');
+  assert.equal(rawUser.subagentCompatibility, true, 'user file stores the compatibility setting');
   assert.equal(loadSettings().fieldnotes, false, 'user fieldnotes persists');
   assert.equal(loadSettings().emojiSheep, false, 'user sheep marker persists');
   assert.equal(loadSettings().timeout, 25, 'user timeout persists');
@@ -107,6 +110,7 @@ try {
   assert.equal(loadSettings(cwd).timeout, 25, 'dormant project timeout is ignored');
   assert.equal(loadSettings(cwd).fieldnotes, false, 'dormant project fieldnotes are ignored');
   assert.equal(loadSettings(cwd).confirmProjectAgents, false, 'project cannot own confirmation');
+  assert.equal(loadSettings(cwd).subagentCompatibility, true, 'project cannot disable compatibility');
 
   fs.writeFileSync(projectFile, JSON.stringify({ timeout: 30 }));
   assert.equal(loadSettings(cwd).projectScope, false, 'keyless project file is dormant');
@@ -124,6 +128,7 @@ try {
       timeout: 30,
       fieldnotes: true,
       confirmProjectAgents: true,
+      subagentCompatibility: false,
     })
   );
   const active = loadSettings(cwd);
@@ -136,6 +141,11 @@ try {
     active.confirmProjectAgents,
     false,
     'active project cannot override user confirmation'
+  );
+  assert.equal(
+    active.subagentCompatibility,
+    true,
+    'active project cannot override user compatibility setting'
   );
   assert.equal(loadSettings().projectScope, false, 'no-cwd resolution remains user-scoped');
   assert.equal(loadSettings(otherCwd).projectScope, false, 'another workspace is unaffected');
@@ -166,6 +176,7 @@ try {
   assert.equal(rawProject.projectScope, true, 'project save writes the activation flag');
   assert.equal(rawProject.timeout, 42, 'project save writes project values');
   assert.ok(!('confirmProjectAgents' in rawProject), 'project save omits user-only confirmation');
+  assert.ok(!('subagentCompatibility' in rawProject), 'project save omits user-only compatibility');
   assert.equal(loadSettings(cwd).timeout, 42, 'saved project value applies');
 
   result = saveSettings(

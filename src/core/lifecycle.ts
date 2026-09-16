@@ -21,10 +21,12 @@ import {
 import { loadSettings } from '../extension/config.ts';
 import {
   ensureHerdrRuntime,
+  callingHerdrPane,
   getHerdrWorkspaceId,
   createHerdrInstance,
   waitForHerdrShellReady,
   waitForHerdrAgentDetected,
+  waitForPaneGone,
   launchPiInPane,
   setCreatedPaneDir,
   herdrExec,
@@ -34,6 +36,10 @@ import {
   removeCreatedPaneDir,
   readPaneTail,
   readLastAssistantText,
+  lastAssistantText,
+  readSessionTelemetry,
+  sessionTelemetryCursor,
+  sessionTelemetrySince,
   readCompletionSignal,
   readLaunchExitCode,
 } from './herdr.ts';
@@ -119,12 +125,27 @@ export function shutdownParentBroker(childrenGone: () => boolean): boolean {
   return closed;
 }
 
+function projectAgentApprovalKey(file: string, contentHash: string): string {
+  return `${file}:${contentHash}`;
+}
+
+export function approvedProjectAgentKey(file: string, contentHash: string): string {
+  return projectAgentApprovalKey(file, contentHash);
+}
+
 export interface StartOptions {
   cwd?: string;
   placement?: 'pane_right' | 'pane_down' | 'tab' | 'workspace';
   label?: string;
+  /** Explicit discovery scope for compatibility callers. */
+  agentScope?: 'user' | 'project' | 'both';
+  /** Hash binding of the exact project-agent file approved by the trusted parent UI. */
+  projectAgentApprovalKey?: string;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
+  /** Compatibility recursion depth propagated into the child process. */
+  subagentDepth?: number;
+  signal?: AbortSignal;
 }
 
 export async function startAgent(
@@ -137,14 +158,16 @@ export async function startAgent(
     hasUI?: boolean;
     ui?: any;
     sessionId?: string;
+    sessionFile?: string;
   }
 ): Promise<AgentHandle> {
+  if (options.signal?.aborted) throw new Error('Subagent was aborted.');
   const cwd = options.cwd ?? ctx.cwd;
   const label = validateAgentLabel(options.label);
   const settings = loadSettings(cwd);
   // Agent scope and project approval are settings-owned; callers cannot
   // override them per spawn.
-  const agentScope = settings.agentScope;
+  const agentScope = options.agentScope ?? settings.agentScope;
   const confirmProjectAgents = settings.confirmProjectAgents;
   const discovered = discoverAgents(cwd, agentScope, {
     includeBundled: settings.includeBundledAgents,
@@ -160,14 +183,19 @@ export async function startAgent(
         ' Call shepherd with action "agents" to list exact names.'
     );
   }
-  if (found.source === 'project' && confirmProjectAgents && ctx.hasUI) {
-    const ok = await ctx.ui.confirm(
-      'Run project-local agent?',
-      `Agent: ${name}\nSource: ${found.filePath}`
-    );
-    if (!ok) throw new Error('Project-local agent was not approved.');
+  if (found.source === 'project' && confirmProjectAgents) {
+    const approvalKey = projectAgentApprovalKey(found.filePath, found.contentHash);
+    if (options.projectAgentApprovalKey !== approvalKey) {
+      if (!ctx.hasUI) throw new Error('Project-local agents require interactive confirmation.');
+      const ok = await ctx.ui.confirm(
+        'Run project-local agent?',
+        `Agent: ${name}\nSource: ${found.filePath}`
+      );
+      if (!ok) throw new Error('Project-local agent was not approved.');
+    }
   }
   await ensureHerdrRuntime();
+  if (options.signal?.aborted) throw new Error('Subagent was aborted.');
   const broker = ensureParentBroker(ctx.sessionId);
   const reservedAgentId = lifecycleRegistry.allocateAgentId();
   const childCapability = registerChild(broker, reservedAgentId);
@@ -185,17 +213,22 @@ export async function startAgent(
     // Thinking follows the parent unless the definition requests an explicit
     // level. Pi clamps unsupported levels to the child model's capabilities.
     const delegatedThinking = resolveDelegatedThinking(found.thinking, ctx.thinkingLevel);
+    const caller = callingHerdrPane(undefined, ctx.sessionId, ctx.sessionFile);
     const created = createHerdrInstance(
       formatAgentName(name, label),
       cwd,
       herdrPlacement,
-      herdrPlacement === 'workspace' ? undefined : getHerdrWorkspaceId(),
-      direction
+      herdrPlacement === 'workspace'
+        ? undefined
+        : (caller?.workspaceId ?? getHerdrWorkspaceId(ctx.sessionId)),
+      direction,
+      caller?.paneId
     );
     paneId = created.paneId;
     tabId = created.tabId;
     workspaceId = created.workspaceId;
-    await waitForHerdrShellReady(paneId, { timeoutMs: 15_000 });
+    await waitForHerdrShellReady(paneId, { timeoutMs: 15_000, signal: options.signal });
+    if (options.signal?.aborted) throw new Error('Subagent was aborted.');
     const files = launchPiInPane(paneId, {
       name,
       persistent: true,
@@ -210,11 +243,16 @@ export async function startAgent(
       model: delegatedModel,
       thinking: delegatedThinking,
       tools: found.tools,
+      subagentDepth: options.subagentDepth,
     });
     setCreatedPaneDir(paneId, files.dir);
     // Keep the launch directory registered while the persistent child is alive;
     // its completion sidecar is also the reliable fast-completion signal.
-    const ready = await waitForHerdrAgentDetected(paneId, { timeoutMs: 20_000 });
+    const ready = await waitForHerdrAgentDetected(paneId, {
+      timeoutMs: 20_000,
+      signal: options.signal,
+      sessionFile: files.sessionFile,
+    });
     if (!ready.detected) {
       const returnCode = ready.exitCode ?? (await readLaunchExitCode(paneId));
       const output = (await readPaneTail(paneId)).trim();
@@ -245,14 +283,20 @@ export async function startAgent(
       }
     );
   } catch (error) {
-    try {
-      unregisterChild(broker, reservedAgentId);
-    } catch {}
     if (paneId) {
       try {
         herdrExecSync(['pane', 'close', paneId]);
       } catch {}
-      if (!paneExists(paneId)) removeCreatedPaneDir(paneId);
+      if (!paneExists(paneId)) {
+        removeCreatedPaneDir(paneId);
+        try {
+          unregisterChild(broker, reservedAgentId);
+        } catch {}
+      }
+    } else {
+      try {
+        unregisterChild(broker, reservedAgentId);
+      } catch {}
     }
     throw error;
   }
@@ -303,6 +347,7 @@ function finalizeTaskArtifact(handle: TaskHandle, result: TaskResult): void {
 export interface DelegateOptions extends CreateTaskOptions {
   /** Parent pi session identity used for broker creation in tests/startup. */
   sessionId?: string;
+  signal?: AbortSignal;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
 }
@@ -319,11 +364,17 @@ export async function delegateAgent(
 ): Promise<TaskHandle> {
   if (typeof description !== 'string' || !description.trim())
     throw new Error('Delegated task description must not be empty.');
+  if (options.signal?.aborted) throw new Error('Subagent was aborted.');
   const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
   const record = lifecycleRegistry.getAgent(canonical);
   if (!record.handle.paneId) throw new Error('Agent handle has no pane.');
-  const detected = await waitForHerdrAgentDetected(record.handle.paneId, { timeoutMs: 15_000 });
+  const detected = await waitForHerdrAgentDetected(record.handle.paneId, {
+    timeoutMs: 15_000,
+    signal: options.signal,
+    sessionFile: lifecycleRegistry.completionResultPath(canonical),
+  });
   if (!detected.detected) throw new Error(`Agent "${canonical.id}" is not detected.`);
+  if (options.signal?.aborted) throw new Error('Subagent was aborted.');
 
   const broker = ensureParentBroker(options.sessionId);
   let childCapability = lifecycleRegistry.agentChildCapability(canonical);
@@ -332,10 +383,16 @@ export async function delegateAgent(
     lifecycleRegistry.attachAgentChildCapability(canonical, childCapability);
   }
 
+  const resultPath = lifecycleRegistry.completionResultPath(canonical);
+  const telemetryCursor = resultPath
+    ? sessionTelemetryCursor(readSessionTelemetry(resultPath))
+    : undefined;
   const task = lifecycleRegistry.createTask(canonical, description, {
     timeoutMs: options.timeoutMs,
     deadlineAt: options.deadlineAt,
     artifactSession: options.artifactSession ?? lifecycleRegistry.artifactSession(canonical),
+    reviewScorable: options.reviewScorable,
+    telemetryCursor,
   });
   const session = options.artifactSession ?? lifecycleRegistry.artifactSession(canonical);
   try {
@@ -348,6 +405,7 @@ export async function delegateAgent(
         finalizeTaskArtifact(task, result)
       );
     }
+    if (options.signal?.aborted) throw new Error('Subagent was aborted.');
     const envelope = createEnvelope(
       { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
       {
@@ -393,12 +451,18 @@ function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | 
     return undefined;
   }
   try {
+    const agent = lifecycleRegistry.getAgent({ id: envelope.senderId }).handle;
+    const sessionFile = lifecycleRegistry.completionResultPath(agent);
+    const taskTelemetry = sessionFile
+      ? sessionTelemetrySince(readSessionTelemetry(sessionFile), task.telemetryCursor)
+      : undefined;
+    const fullText = taskTelemetry ? lastAssistantText(taskTelemetry.messages).trim() : '';
     return lifecycleRegistry.settleTaskForAgent(
       envelope.taskId,
       { id: envelope.senderId },
       {
         status: envelope.status,
-        text: envelope.summary ?? envelope.content,
+        text: fullText || envelope.summary || envelope.content,
         error: envelope.error,
       }
     );
@@ -1187,7 +1251,7 @@ export class TaskWatcherService {
     }
     const notification: TaskWatcherNotification = {
       watcherId,
-      completions: completions as TaskResult[],
+      completions,
     };
     if (this.remaining.get(watcherId) === 0) {
       this.taskOrder.delete(watcherId);
@@ -1254,7 +1318,7 @@ export type StaleWaitNotifier = (info: StaleWaitInfo) => void | Promise<void>;
  */
 export class StaleWaitMonitor {
   private timer?: ReturnType<typeof setInterval>;
-  private readonly notifier?: StaleWaitNotifier;
+  private notifier?: StaleWaitNotifier;
   private readonly registry: typeof lifecycleRegistry;
   private readonly intervalMs: number;
 
@@ -1570,7 +1634,9 @@ export function statusAgent(handle: AgentHandleInput): AgentStatus {
   }
 }
 
-export function closeAgent(handle: AgentHandleInput): AgentHandle {
+export async function closeAgent(
+  handle: AgentHandleInput
+): Promise<AgentHandle & { confirmedGone: boolean }> {
   const canonical = lifecycleRegistry.canonicalAgentHandle(handle);
   const record = lifecycleRegistry.getAgent(canonical);
   if (!record.handle.paneId || !loadCreatedPanes().some(p => p.paneId === record.handle.paneId))
@@ -1581,6 +1647,7 @@ export function closeAgent(handle: AgentHandleInput): AgentHandle {
   } catch {
     if (paneExists(record.handle.paneId)) throw new Error('Could not close agent pane.');
   }
-  if (!paneExists(record.handle.paneId)) removeCreatedPaneDir(record.handle.paneId);
-  return canonical;
+  const confirmedGone = await waitForPaneGone(record.handle.paneId);
+  if (confirmedGone) removeCreatedPaneDir(record.handle.paneId);
+  return { ...canonical, confirmedGone };
 }

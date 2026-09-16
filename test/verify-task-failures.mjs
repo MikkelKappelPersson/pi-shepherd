@@ -158,7 +158,7 @@ await withTempDirectory('pi-shepherd-task-failures-', async root => {
       'Task that gets closed mid-flight.'
     );
 
-    closeAgent(closedAgent);
+    await closeAgent(closedAgent);
 
     const cancelledResult = lifecycleRegistry.taskResult(closedTask.id);
     assert.equal(cancelledResult?.status, 'cancelled');

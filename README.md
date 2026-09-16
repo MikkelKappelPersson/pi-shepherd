@@ -4,17 +4,17 @@ pi-shepherd is a no-fuss extension for native, low-level Herdr agent orchestrati
 
 ## Key Features
 
--   **Native, no-fuss, low-level Herdr agent orchestration** — Shepherd uses native Herdr panes for all agents and simple, open primitives for agent orchestration. Everything is visible and inspectable. Shepherd does not impose a workflow; it gives you the tools to build your own.
--   **Herdr headless support** — work inside Herdr or from a plain terminal while keeping launched agents visible and inspectable in Herdr.
--   **Granular system-prompt and agent-context support** — Shepherd goes beyond standard definitions and utilises pi's open system-prompt. Shepherd agents can be defined with granular control over context for very specific and narrow agent and context control.
--   **Manual agent launch** — start an interactive specialist directly with `/shepherd spawn` and chat with it in its own pi session.
--   **Shared pi-session fieldnotes (artifacts)** — give agents a durable shared place to leave notes and share context across delegated work.
+- **Native, no-fuss, low-level Herdr agent orchestration** — Shepherd uses native Herdr panes for all agents and simple, open primitives for agent orchestration. Everything is visible and inspectable. Shepherd does not impose a workflow; it gives you the tools to build your own.
+- **Herdr headless support** — work inside Herdr or from a plain terminal while keeping launched agents visible and inspectable in Herdr.
+- **Granular system-prompt and agent-context support** — Shepherd goes beyond standard definitions and utilises pi's open system-prompt. Shepherd agents can be defined with granular control over context for very specific and narrow agent and context control.
+- **Manual agent launch** — start an interactive specialist directly with `/shepherd spawn` and chat with it in its own pi session.
+- **Shared pi-session fieldnotes (artifacts)** — give agents a durable shared place to leave notes and share context across delegated work.
 
 ## Requirements
 
--   [pi](https://github.com/earendil-works/pi)
--   [Herdr](https://github.com/herdrdev/herdr)
--   Node.js 22 or newer
+- [pi](https://github.com/earendil-works/pi)
+- [Herdr](https://github.com/herdrdev/herdr)
+- Node.js 22 or newer
 
 ## Install
 
@@ -36,17 +36,17 @@ You should see the bundled agent definitions, including `scout`, `planner`, `wor
 
 pi-shepherd exposes these tools to the Shepherd. You can use them explicitly when you need precise control, but ordinary natural-language requests are the recommended starting point:
 
-| Tool | Purpose |
-| --- | --- |
-| `shepherd` | List definitions (`agents`), list active agents (`herd`), or remove stale pane registrations (`prune`) |
-| `shepherd_spawn` | Create an idle persistent agent |
-| `shepherd_delegate` | Start a tracked task; returns immediately with a task ID |
-| `shepherd_message` | Send an asynchronous message (parent or peer); `expectsReply` opens a tracked reply request |
-| `shepherd_watch` | Receive task completion without blocking the current turn (task IDs preferred, legacy prompt IDs still work) |
-| `shepherd_status` | Inspect an agent without focusing its pane; reports process and task state independently |
-| `shepherd_close` | Close an owned agent, cancel its active task, and clear pending requests |
-| `shepherd_read` | Read recent terminal output for diagnostics |
-| `shepherd_prompt` | **Deprecated** one-turn compatibility path; prefer `shepherd_delegate` for tracked work |
+| Tool                | Purpose                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `shepherd`          | List definitions (`agents`), list active agents (`herd`), or remove stale pane registrations (`prune`)       |
+| `shepherd_spawn`    | Create an idle persistent agent                                                                              |
+| `shepherd_delegate` | Start a tracked task; returns immediately with a task ID                                                     |
+| `shepherd_message`  | Send an asynchronous message (parent or peer); `expectsReply` opens a tracked reply request                  |
+| `shepherd_watch`    | Receive task completion without blocking the current turn (task IDs preferred, legacy prompt IDs still work) |
+| `shepherd_status`   | Inspect an agent without focusing its pane; reports process and task state independently                     |
+| `shepherd_close`    | Close an owned agent, cancel its active task, and clear pending requests                                     |
+| `shepherd_read`     | Read recent terminal output for diagnostics                                                                  |
+| `shepherd_prompt`   | **Deprecated** one-turn compatibility path; prefer `shepherd_delegate` for tracked work                      |
 
 Child agents additionally see `shepherd_message` (talk to the parent or a peer) and `shepherd_done` (the only normal successful completion of their tracked task).
 
@@ -90,7 +90,7 @@ shepherd_delegate({ target: "<agent ID>", task: "Implement the auth middleware f
 shepherd_watch({ id: "<task ID>" })
 ```
 
-When the task settles, the watcher delivers a completion notification containing the result. Delivery uses pi's steer mode: if the Shepherd is mid-turn, the notification is injected between tool rounds (before cleanup calls such as `shepherd_close`); if the Shepherd is idle, it triggers a new turn immediately. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
+When the task settles, the watcher delivers a completion notification containing the result. Delivery uses pi's steer mode: if the Shepherd is mid-turn, the notification is injected between tool rounds (before cleanup calls such as `shepherd_close`); if the Shepherd is idle, it triggers a new turn immediately. Watchers finish automatically after all their tasks settle. With **Keep tab open after done** off, a terminal tracked agent closes automatically after a short grace period; starting another task or prompt during that grace period keeps the reusable agent alive. With the setting on, close the agent explicitly. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
 
 ### Messaging between agents
 
@@ -123,17 +123,17 @@ While the answer is outstanding, the sender's task is `waiting` — even though 
 
 Agent definitions are Markdown files, so you can tune an agent’s behavior with granular system-prompt engineering. Define its role, workflow, tools, model, and prompt options in YAML frontmatter and the Markdown body. The supported frontmatter fields are:
 
-| Field | Values | Default | Description |
-| --- | --- | --- | --- |
-| **`name`** | String | — | The agent’s name. **Required.** |
-| **`description`** | String | — | A short description shown during discovery. **Required.** |
-| **`tools`** | Comma-separated string or YAML list | pi’s default tools | Tools available to the agent. |
-| **`model`** | Provider-qualified model, `null`, or `default` | Shepherd’s model | Select the model, for example `anthropic/claude-sonnet-4-5`. `null`, `default`, or omission inherits the Shepherd’s model. |
-| **`thinking`** | `default`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Shepherd’s level | Select the requested Pi thinking level. `null`, `default`, empty, or omission inherits the Shepherd’s current level. Unsupported levels are clamped by Pi to the child model’s capabilities. |
-| **`omit-system-prompt`** | `true`, `false` | `false` | Omit pi’s built-in system prompt when `true`. |
-| **`omit-pi-documentation`** | `true`, `false` | `false` | Omit pi’s built-in documentation guidance when `true`. |
-| **`omit-context-files`** | `true`, `false` | `false` | Omit automatic `AGENTS.md` and `CLAUDE.md` context-file loading when `true`. |
-| **`user-invocable`** | `true`, `false` | `true` | Indicate whether the agent is intended to be directly invoked by a user. |
+| Field                       | Values                                                               | Default            | Description                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`name`**                  | String                                                               | —                  | The agent’s name. **Required.**                                                                                                                                                              |
+| **`description`**           | String                                                               | —                  | A short description shown during discovery. **Required.**                                                                                                                                    |
+| **`tools`**                 | Comma-separated string or YAML list                                  | pi’s default tools | Tools available to the agent.                                                                                                                                                                |
+| **`model`**                 | Provider-qualified model, `null`, or `default`                       | Shepherd’s model   | Select the model, for example `anthropic/claude-sonnet-4-5`. `null`, `default`, or omission inherits the Shepherd’s model.                                                                   |
+| **`thinking`**              | `default`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Shepherd’s level   | Select the requested Pi thinking level. `null`, `default`, empty, or omission inherits the Shepherd’s current level. Unsupported levels are clamped by Pi to the child model’s capabilities. |
+| **`omit-system-prompt`**    | `true`, `false`                                                      | `false`            | Omit pi’s built-in system prompt when `true`.                                                                                                                                                |
+| **`omit-pi-documentation`** | `true`, `false`                                                      | `false`            | Omit pi’s built-in documentation guidance when `true`.                                                                                                                                       |
+| **`omit-context-files`**    | `true`, `false`                                                      | `false`            | Omit automatic `AGENTS.md` and `CLAUDE.md` context-file loading when `true`.                                                                                                                 |
+| **`user-invocable`**        | `true`, `false`                                                      | `true`             | Indicate whether the agent is intended to be directly invoked by a user.                                                                                                                     |
 
 For example:
 
@@ -163,10 +163,10 @@ explicit no-reasoning request. Invalid `thinking` or `model` values cause that d
 
 The bundled agent definitions are:
 
--   `scout` — fast codebase investigation
--   `planner` — planning and decomposition
--   `worker` — implementation work
--   `reviewer` — review and verification
+- `scout` — fast codebase investigation
+- `planner` — planning and decomposition
+- `worker` — implementation work
+- `reviewer` — review and verification
 
 User and project definitions can add or override these names. Discovery precedence is:
 
@@ -219,7 +219,7 @@ The slash command is useful when you want to manage an agent directly rather tha
 
 Supported actions are `agents`, `herd`, `prune`, `spawn`, `status`, `read`, and `settings`. `/shepherd list` remains a compatibility alias for `/shepherd agents`. Optional spawn flags include: `--placement pane_right|pane_down|tab|workspace` and `--cwd <path>`.
 
-For one-shot delegation, prompting, waiting, parallel work, and opaque-ID lifecycle control, use the structured `shepherd_*` tools instead of manual commands. The old single-tool form such as `shepherd({ action: "prompt", ... })` is no longer supported.
+For native asynchronous delegation, prompting, watching, and opaque-ID lifecycle control, use the structured `shepherd_*` tools instead of manual commands. The old single-tool form such as `shepherd({ action: "prompt", ... })` is no longer supported. Users who need the legacy blocking `subagent` contract can enable `subagentCompatibility`; it adds single, parallel, and chain modes with an 8-task fanout cap, four concurrent agents, conflict refusal, opt-in worktree isolation, recursion limits, cancellation, bounded output, and task-scoped usage/tool-call evidence. The compatibility facade uses the user-owned Shepherd agent scope and project-agent confirmation settings.
 
 ## Settings
 
@@ -227,18 +227,19 @@ Open `/shepherd` or `/shepherd settings` to configure pi-shepherd. The menu
 shows the effective values for the current workspace; use the arrow keys and
 Enter to cycle values, `/` to fuzzy-search, and `Esc` to close it.
 
-| Option | Values | Default | Description |
-| --- | --- | --- | --- |
-| **Settings scope** (`projectScope`) | `user`, `project` | `user` | Select the settings source for this workspace. A dormant project file is shown as `user (project file dormant)`. |
-| **Agent scope** (`agentScope`) | `user`, `project`, `both` | `user` | Select which agent definition directories are searched. Project agents are repository-controlled. |
-| **Include bundled agents** (`includeBundledAgents`) | on, off | on | Include the built-in `scout`, `planner`, `worker`, and `reviewer` definitions in discovery. |
-| **Confirm project agents** (`confirmProjectAgents`) | on, off | on | User-only security setting. A project config cannot disable confirmation for project-local agents. |
-| **Keep tab open after done** (`keepOpen`) | on, off | on | Leave the Herdr tab open after an agent completes so its output can be inspected. |
-| **Keep agent alive after done** (`stayOpen`) | on, off | off | Keep the agent's pi process alive after completion so you can continue driving it in its tab. |
-| **Enable fieldnotes** (`fieldnotes`) | on, off | on | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts. |
-| **Use sheep emoji** (`emojiSheep`) | on, off | on | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead. |
-| **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `20` minutes | Set the default time limit before a Herdr run is reported as timed out. |
-| **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
+| Option                                                      | Values                                            | Default      | Description                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Settings scope** (`projectScope`)                         | `user`, `project`                                 | `user`       | Select the settings source for this workspace. A dormant project file is shown as `user (project file dormant)`.                                                       |
+| **Agent scope** (`agentScope`)                              | `user`, `project`, `both`                         | `user`       | Select which agent definition directories are searched. Project agents are repository-controlled.                                                                      |
+| **Include bundled agents** (`includeBundledAgents`)         | on, off                                           | on           | Include the built-in `scout`, `planner`, `worker`, and `reviewer` definitions in discovery.                                                                            |
+| **Confirm project agents** (`confirmProjectAgents`)         | on, off                                           | on           | User-only security setting. A project config cannot disable confirmation for project-local agents.                                                                     |
+| **Legacy subagent compatibility** (`subagentCompatibility`) | on, off                                           | off          | User-only opt-in for the blocking `subagent` single/parallel/chain facade. Leave off when another extension already owns that tool name; restart Pi after changing it. |
+| **Keep tab open after done** (`keepOpen`)                   | on, off                                           | on           | Leave a terminal tracked agent's Herdr tab open for inspection. When off, close it automatically after a short grace period unless another task or prompt has started. |
+| **Keep agent alive after done** (`stayOpen`)                | on, off                                           | off          | Keep the agent's pi process alive after completion so you can continue driving it in its tab.                                                                          |
+| **Enable fieldnotes** (`fieldnotes`)                        | on, off                                           | on           | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts.                                                        |
+| **Use sheep emoji** (`emojiSheep`)                          | on, off                                           | on           | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead.                                                                         |
+| **Default run timeout** (`timeout`)                         | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes  | `20` minutes | Set the default time limit before a Herdr run is reported as timed out.                                                                                                |
+| **Stale wait reminder** (`staleWaitThreshold`)              | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes  | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task.                |
 
 The user layer is stored in `pi-shepherd/config.json` inside the active pi
 agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). It stores
@@ -248,9 +249,10 @@ it contains `"projectScope": true`; when active, it is self-contained and
 missing project-owned fields fall back to built-in defaults rather than private
 user values. A project file with `projectScope: false` or no flag is dormant.
 
-`confirmProjectAgents` is intentionally user-owned. A committed project file
-may select repository-controlled agent definitions through `agentScope`, but it
-cannot disable the confirmation gate. An explicit user-level opt-out remains
+`confirmProjectAgents` and `subagentCompatibility` are intentionally user-owned.
+A committed project file may select repository-controlled agent definitions through
+`agentScope`, but it cannot disable confirmation or replace the user's existing
+`subagent` tool. An explicit user-level confirmation opt-out remains
 the user's responsibility.
 
 For example:
@@ -261,6 +263,7 @@ For example:
   "agentScope": "both",
   "includeBundledAgents": true,
   "confirmProjectAgents": true,
+  "subagentCompatibility": false,
   "keepOpen": true,
   "stayOpen": false,
   "fieldnotes": true,
@@ -356,7 +359,7 @@ Inspect its state and terminal output:
 
 ### There are too many Herdr panes
 
-The slash command does not close lifecycle-managed agents. Use `shepherd_close` with the agent ID returned by `shepherd_spawn`:
+Turn **Keep tab open after done** off in `/shepherd settings`. Terminal tracked agents then close automatically after a short grace period; agents reused for another task or prompt remain open. The setting does not close an idle spawn that was never delegated or an agent from an older parent session. Close those explicitly with the agent ID returned by `shepherd_spawn`:
 
 ```text
 shepherd_close({ id: agent.id })

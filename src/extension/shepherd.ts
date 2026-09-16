@@ -713,9 +713,23 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
       .join(', ');
     const returnCode =
       notification.completions.find(completion => completion.returnCode !== 0)?.returnCode ?? 0;
-    // Keep the model-visible notification compact. The structured payload is
-    // retained in `details` for the expanded custom renderer and consumers.
-    const content = `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`;
+    // Include bounded result text in model-visible content; custom-message
+    // details are display metadata and are not part of the model context.
+    const completionText = notification.completions
+      .map(completion => {
+        const text = completion.text ?? completion.error;
+        if (!text) return undefined;
+        const bounded = text.length > 50_000 ? `${text.slice(0, 50_000)}\n[truncated]` : text;
+        return `${completion.taskId}: ${bounded}`;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    const content = [
+      `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`,
+      completionText,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     try {
       const sendResult: any = pi.sendMessage(
         {
@@ -891,7 +905,11 @@ export async function doAction(
           cwd: a.cwd,
           artifactSession,
         },
-        { ...ctx, sessionId: ctx.sessionManager?.getSessionId() }
+        {
+          ...ctx,
+          sessionId: ctx.sessionManager?.getSessionId(),
+          sessionFile: ctx.sessionManager?.getSessionFile?.(),
+        }
       );
       return textResult(
         `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
@@ -1079,7 +1097,12 @@ export async function doAction(
     }
     case 'close': {
       const a: any = args;
-      const handle = closeAgent(a.id ?? a.handle);
+      const handle = await closeAgent(a.id ?? a.handle);
+      if (!handle.confirmedGone) {
+        throw new Error(
+          `Close requested for ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}, but pane termination could not be confirmed. Retry shepherd_close with agent id ${handle.id}.`
+        );
+      }
       return textResult(
         `closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
         {
@@ -1825,7 +1848,7 @@ export function formatExpandedToolResult(result: any): string | undefined {
   }
 
   const returnValueKeys = ['returnValue', 'result'].filter(key =>
-    Object.prototype.hasOwnProperty.call(details, key)
+    Object.hasOwn(details, key)
   );
   for (const key of returnValueKeys) {
     lines.push(

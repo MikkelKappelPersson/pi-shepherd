@@ -24,14 +24,53 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
-import { fileURLToPath } from 'node:url';
-import { Text } from '@earendil-works/pi-tui';
+import type { Message } from '@earendil-works/pi-ai';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { lifecycleRegistry, sessionOwner } from './orchestration.ts';
 import type { ChildCapability } from './messaging.ts';
 import { normalizeThinking, type AgentThinkingLevel } from './discovery.ts';
-import type { AgentHandle, AgentTaskStatus } from './orchestration.ts';
+import type { AgentHandle, AgentTaskStatus, TaskTelemetryCursor } from './orchestration.ts';
 
 const execFileAsync = promisify(execFile);
+
+export function processAncestors(start = process.pid, maximum = 12): number[] {
+  const pids: number[] = [];
+  let current = start;
+  for (let count = 0; current > 1 && count < maximum; count++) {
+    if (!pids.includes(current)) pids.push(current);
+    if (current === process.pid && process.ppid > 1) {
+      current = process.ppid;
+      continue;
+    }
+    try {
+      const parent = Number.parseInt(
+        execFileSync('ps', ['-o', 'ppid=', '-p', String(current)], { encoding: 'utf8' }).trim(),
+        10
+      );
+      if (!Number.isFinite(parent) || parent <= 1 || pids.includes(parent)) break;
+      current = parent;
+    } catch {
+      break;
+    }
+  }
+  return pids;
+}
+
+export function shepherdSessionFromArgs(argv = process.argv): string | undefined {
+  let sessionFile: string | undefined;
+  const index = argv.findIndex(argument => argument === '--session');
+  if (index >= 0) sessionFile = argv[index + 1];
+  if (!sessionFile) {
+    const inline = argv.find(argument => argument.startsWith('--session='));
+    sessionFile = inline?.slice('--session='.length);
+  }
+  if (!sessionFile || !path.basename(path.dirname(sessionFile)).startsWith('pi-shepherd-')) {
+    return undefined;
+  }
+  return fs.existsSync(path.join(path.dirname(sessionFile), 'child-context.json'))
+    ? sessionFile
+    : undefined;
+}
 
 /** True when the caller is inside a Herdr session and the CLI is reachable. */
 export function isHerdrAvailable(): boolean {
@@ -101,14 +140,137 @@ export async function ensureHerdrRuntime(
   );
 }
 
+interface CallingHerdrPane {
+  paneId: string;
+  workspaceId: string;
+}
+
+function processInfoClaimsCaller(
+  info: any,
+  pids: number[],
+  sessionId?: string,
+  sessionFile?: string
+): boolean {
+  const processInfo = info?.result?.process_info;
+  const sessionMatch =
+    typeof sessionId === 'string' &&
+    Array.isArray(processInfo?.foreground_processes) &&
+    processInfo.foreground_processes.some((process: any) => {
+      if (!Array.isArray(process?.argv)) return false;
+      return process.argv.some((argument: unknown, index: number) => {
+        if (argument === `--session=${sessionId}` || argument === `--session=${sessionFile}`)
+          return true;
+        if (argument !== '--session') return false;
+        const value = process.argv[index + 1];
+        return (
+          value === sessionId ||
+          value === sessionFile ||
+          (typeof value === 'string' && value.includes(sessionId))
+        );
+      });
+    });
+  return Boolean(
+    processInfo &&
+    (sessionMatch ||
+      pids.includes(processInfo.foreground_process_group_id) ||
+      pids.includes(processInfo.shell_pid) ||
+      (Array.isArray(processInfo.foreground_processes) &&
+        processInfo.foreground_processes.some((process: any) => pids.includes(process?.pid))))
+  );
+}
+
+/** Resolve the current pane/workspace by process membership when declawd strips HERDR_* env. */
+export function callingHerdrPane(
+  pids = processAncestors(),
+  sessionId?: string,
+  sessionFile?: string
+): CallingHerdrPane | undefined {
+  const envPane = process.env.HERDR_PANE_ID;
+  const envWorkspace = process.env.HERDR_WORKSPACE_ID;
+  if (envPane && envWorkspace) return { paneId: envPane, workspaceId: envWorkspace };
+  let panes: any[] = [];
+  try {
+    const listed = herdrExecSync(['pane', 'list']) as any;
+    panes = Array.isArray(listed?.result?.panes) ? listed.result.panes : [];
+  } catch {
+    return undefined;
+  }
+  const orderedPanes = sessionFile
+    ? [...panes].sort((left, right) => {
+        const leftCwd = left?.foreground_cwd ?? left?.cwd;
+        const rightCwd = right?.foreground_cwd ?? right?.cwd;
+        const cwd = process.cwd();
+        return Number(rightCwd === cwd) - Number(leftCwd === cwd);
+      })
+    : panes;
+  for (const pane of orderedPanes) {
+    if (typeof pane?.pane_id !== 'string' || typeof pane?.workspace_id !== 'string') continue;
+    try {
+      const info = herdrExecSync(['pane', 'process-info', '--pane', pane.pane_id]);
+      if (processInfoClaimsCaller(info, pids, sessionId, sessionFile)) {
+        return { paneId: pane.pane_id, workspaceId: pane.workspace_id };
+      }
+    } catch {
+      // Process inspection may be sandbox-denied; structured fallbacks below remain deterministic.
+    }
+  }
+  if (sessionFile) {
+    const sessionMatches = orderedPanes.filter(pane => {
+      if (typeof pane?.pane_id !== 'string' || typeof pane?.workspace_id !== 'string') return false;
+      try {
+        const paneSession = herdrExecSync([
+          'pane',
+          'read',
+          pane.pane_id,
+          '--source',
+          'recent-unwrapped',
+          '--lines',
+          '8',
+        ]) as any;
+        const visible = String(paneSession?.result?.text ?? paneSession?.result?.output ?? '');
+        return visible.includes(sessionFile);
+      } catch {
+        return false;
+      }
+    });
+    if (sessionMatches.length === 1) {
+      return {
+        paneId: sessionMatches[0].pane_id,
+        workspaceId: sessionMatches[0].workspace_id,
+      };
+    }
+  }
+  let cwd: string;
+  try {
+    cwd = fs.realpathSync(process.cwd());
+  } catch {
+    cwd = path.resolve(process.cwd());
+  }
+  const cwdMatches = panes.filter((pane: any) => {
+    const raw = pane?.foreground_cwd ?? pane?.cwd;
+    if (typeof raw !== 'string') return false;
+    try {
+      return fs.realpathSync(raw) === cwd;
+    } catch {
+      return path.resolve(raw) === cwd;
+    }
+  });
+  if (cwdMatches.length === 1) {
+    return { paneId: cwdMatches[0].pane_id, workspaceId: cwdMatches[0].workspace_id };
+  }
+  return undefined;
+}
+
 /**
- * Resolve the workspace a new delegation tab should live in: the current
- * workspace when inside Herdr, otherwise the focused/first workspace of the
- * running server, creating one if none exist.
+ * Resolve the workspace a new delegation tab should live in: the caller's
+ * workspace when process membership can identify it, otherwise the focused or
+ * first workspace of the running server, creating one if none exist.
  */
-export function getHerdrWorkspaceId(): string {
+export function getHerdrWorkspaceId(sessionId?: string): string {
   const envId = process.env.HERDR_WORKSPACE_ID;
   if (envId) return envId;
+  const caller = callingHerdrPane(undefined, sessionId);
+  if (caller) return caller.workspaceId;
   const out = herdrExecSync(['workspace', 'list']) as any;
   const workspaces = out?.result?.workspaces;
   if (Array.isArray(workspaces) && workspaces.length > 0) {
@@ -141,8 +303,13 @@ export function herdrExecSync(args: string[]): unknown {
   const stdout = execFileSync('herdr', args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10_000,
   });
-  return JSON.parse(stdout);
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(`Herdr returned invalid JSON for ${args.join(' ')}.`);
+  }
 }
 
 /**
@@ -232,7 +399,11 @@ export function workingSubagents(): HerdrAgentSummary[] {
 
 export async function herdrExec(args: string[]): Promise<unknown> {
   const { stdout } = await execFileAsync('herdr', args, { encoding: 'utf8' });
-  return JSON.parse(stdout);
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(`Herdr returned invalid JSON for ${args.join(' ')}.`);
+  }
 }
 
 export function paneIdOf(output: unknown, context: string): string {
@@ -342,10 +513,6 @@ export function recordCreatedPane(entry: CreatedPane): void {
   }
 }
 
-function forgetCreatedPane(paneId: string): void {
-  saveCreatedPanes(loadCreatedPanes().filter(p => p.paneId !== paneId));
-}
-
 /**
  * Attach (or overwrite) the temp launch dir for an existing pane so that
  * `shepherd close` can clean it up. The pane is registered early (for orphan
@@ -371,15 +538,44 @@ export function removeCreatedPaneDir(paneId: string): void {
   }
 }
 
-/** True when Herdr still lists a pane with this id. */
-export function paneExists(paneId: string): boolean {
+/** True/false only from a valid Herdr listing; undefined means presence is unknown. */
+export function panePresence(paneId: string): boolean | undefined {
   try {
     const out = herdrExecSync(['pane', 'list']) as any;
     const panes = out?.result?.panes as Array<{ pane_id?: unknown }> | undefined;
-    return Array.isArray(panes) && panes.some(p => p?.pane_id === paneId);
+    return Array.isArray(panes) ? panes.some(p => p?.pane_id === paneId) : undefined;
   } catch {
-    return true; // assume present when we can't check — safer to not delete
+    return undefined;
   }
+}
+
+export function paneExists(paneId: string): boolean {
+  return panePresence(paneId) !== false;
+}
+
+export async function waitForPaneGone(
+  paneId: string,
+  options: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<boolean> {
+  const deadline = Date.now() + (options.timeoutMs ?? 5_000);
+  const intervalMs = options.intervalMs ?? 100;
+  while (Date.now() <= deadline) {
+    const remaining = Math.max(1, deadline - Date.now());
+    try {
+      const { stdout } = await execFileAsync('herdr', ['pane', 'list'], {
+        encoding: 'utf8',
+        timeout: remaining,
+      });
+      const panes = (JSON.parse(stdout) as any)?.result?.panes;
+      if (!Array.isArray(panes)) return false;
+      if (!panes.some((pane: any) => pane?.pane_id === paneId)) return true;
+    } catch {
+      return false;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  return false;
 }
 
 /**
@@ -417,7 +613,7 @@ export function paneOwnedByCurrentSession(entry: CreatedPane): boolean {
 // Pane lifecycle and persistent agent launch helpers.
 
 function shellQuote(value: string): string {
-  return "'" + value.replace(/'/g, "'\\''") + "'";
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export type HerdrPlacement = 'pane' | 'tab' | 'workspace';
@@ -431,13 +627,15 @@ export function createHerdrInstance(
   cwd: string,
   placement: HerdrPlacement = 'tab',
   workspaceId?: string,
-  direction: 'right' | 'down' = 'right'
+  direction: 'right' | 'down' = 'right',
+  callerPaneId?: string
 ): { paneId: string; tabId: string; workspaceId: string } {
   let out: any;
   if (placement === 'pane') {
     const args = ['pane', 'split', '--direction', direction, '--cwd', cwd, '--no-focus'];
-    if (process.env.HERDR_PANE_ID) args.push('--pane', process.env.HERDR_PANE_ID);
-    else throw new Error('Pane placement requires HERDR_PANE_ID for the calling Herdr pane.');
+    const callerPane = callerPaneId ?? process.env.HERDR_PANE_ID ?? callingHerdrPane()?.paneId;
+    if (callerPane) args.push('--pane', callerPane);
+    else throw new Error('Pane placement requires a resolvable calling Herdr pane.');
     out = herdrExecSync(args);
   } else if (placement === 'workspace') {
     out = herdrExecSync(['workspace', 'create', '--label', label, '--cwd', cwd, '--no-focus']);
@@ -465,7 +663,7 @@ export function createHerdrInstance(
     (typeof result?.workspace?.workspace_id === 'string' && result.workspace.workspace_id) ||
     (typeof result?.workspace_id === 'string' && result.workspace_id) ||
     (typeof result?.tab?.workspace_id === 'string' && result.tab.workspace_id) ||
-    (placement !== 'workspace' ? workspaceId || process.env.HERDR_WORKSPACE_ID || '' : '');
+    (placement === 'workspace' ? '' : workspaceId || process.env.HERDR_WORKSPACE_ID || '');
   if (!paneId || !resolvedWorkspaceId) {
     // A successful create with an unexpected response must not leave an
     // unowned background pane behind. If Herdr gave us a pane id, close it
@@ -508,16 +706,20 @@ export function createHerdrTab(
 /** Wait until the freshly created pane's foreground shell is at a prompt. */
 export async function waitForHerdrShellReady(
   paneId: string,
-  options: { timeoutMs?: number; intervalMs?: number } = {}
+  options: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {}
 ): Promise<void> {
   const timeoutMs = options.timeoutMs ?? 15_000;
   const intervalMs = options.intervalMs ?? 250;
   const deadline = Date.now() + timeoutMs;
   let last = 'no shell process observed';
   while (Date.now() <= deadline) {
+    if (options.signal?.aborted) throw new Error('Subagent was aborted.');
     try {
+      const remaining = Math.max(1, deadline - Date.now());
       const { stdout } = await execFileAsync('herdr', ['pane', 'process-info', '--pane', paneId], {
         encoding: 'utf8',
+        timeout: remaining,
+        signal: options.signal,
       });
       const info = (JSON.parse(stdout) as any)?.result?.process_info ?? {};
       const shellPid = typeof info.shell_pid === 'number' ? info.shell_pid : null;
@@ -541,16 +743,6 @@ function sendCommandInHerdr(paneId: string, command: string): void {
     execFileSync('herdr', ['pane', 'run', paneId, command], { stdio: 'ignore' });
   } catch (error: any) {
     throw new Error(`Failed to run command in pane ${paneId}: ${error?.message ?? error}`);
-  }
-}
-
-function sendEscapeInHerdr(paneId: string): void {
-  try {
-    execFileSync('herdr', ['pane', 'send-keys', paneId, 'Escape'], {
-      stdio: 'ignore',
-    });
-  } catch {
-    /* best effort */
   }
 }
 
@@ -586,6 +778,15 @@ export function writePiLaunchFiles(opts: {
   childBroker?: ChildCapability & { rootDir: string };
   /** Active tracked task context, when this launch is for delegated work. */
   taskId?: string;
+  /** Compatibility recursion depth propagated into the child process. */
+  subagentDepth?: number;
+  /** Pane-local Herdr identity restored before managed integrations load. */
+  herdrContext?: {
+    paneId: string;
+    tabId: string;
+    workspaceId: string;
+    socketPath?: string;
+  };
 }): { dir: string; sessionFile: string; scriptFile: string } {
   const thinking = normalizeThinking(opts.thinking);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-'));
@@ -593,8 +794,19 @@ export function writePiLaunchFiles(opts: {
   const sessionFile = path.join(dir, `session-${safe}.jsonl`);
   const scriptFile = path.join(dir, `launch-${safe}.sh`);
   const doneExt = fileURLToPath(new URL('../extension/shepherd-done.ts', import.meta.url));
+  const contextFile = path.join(dir, 'child-context.json');
+  const bootstrapFile = path.join(dir, 'shepherd-child.ts');
+  const childEnvironment: Record<string, string> = {
+    PI_SHEPHERD_SESSION: sessionFile,
+    PI_SHEPHERD_AUTO_EXIT: String(opts.persistent ? 0 : 1),
+    PI_SHEPHERD_STAY_OPEN: String(opts.stayOpen || opts.persistent ? 1 : 0),
+    ...(opts.omitPiDocumentation ? { PI_SHEPHERD_OMIT_PI_DOCUMENTATION: '1' } : {}),
+    ...(opts.subagentDepth === undefined ? {} : { PI_SUBAGENT_DEPTH: String(opts.subagentDepth) }),
+  };
 
-  const args: string[] = ['--session', shellQuote(sessionFile), '-e', shellQuote(doneExt)];
+  // Marker arguments are visible before extension modules execute, so parent-only
+  // user extensions can avoid registering in a child even when declawd clears env.
+  const args: string[] = ['--session', shellQuote(sessionFile), '-e', shellQuote(bootstrapFile)];
   if (opts.model) args.push('--model', shellQuote(opts.model));
   if (thinking) args.push('--thinking', shellQuote(thinking));
   if (opts.omitContextFiles) args.push('--no-context-files');
@@ -616,31 +828,46 @@ export function writePiLaunchFiles(opts: {
   if (opts.task !== undefined) {
     const taskFile = path.join(dir, `task-${safe}.md`);
     const taskContext = opts.taskId ? `\nTask ID: ${opts.taskId}` : '';
-    const task = `${opts.task}${taskContext}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. A delegated task may span multiple Pi turns: ending the current turn or becoming idle does not complete the task. Use shepherd_message when you need information from another participant. When you ask another participant a question, set taskId to your delegated Task ID, set expectsReply to true, and remember the returned Message ID. When you later have the answer to a request, send a shepherd_message TO THE SHEPHERD (target \"shepherd\") with taskId set and replyTo set to the original request's Message ID, so the Shepherd can correlate the reply and resume the waiting task. Do not reply directly to another participant's address for a tracked request; route it through the Shepherd. If the task cannot proceed, call shepherd_done with status blocked and explain why. Call shepherd_done only when the whole task is complete or explicitly blocked/failed. When finished, make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
+    const task = `${opts.task}${taskContext}\n\n[Autonomous agent]\nComplete this task autonomously in this Herdr tab. A delegated task may span multiple Pi turns: ending the current turn or becoming idle does not complete the task. Use shepherd_message when you need information from another participant. When you ask another participant a question, set taskId to your delegated Task ID, set expectsReply to true, and remember the returned Message ID. When you later have the answer to a request, send a shepherd_message TO THE SHEPHERD (target "shepherd") with taskId set and replyTo set to the original request's Message ID, so the Shepherd can correlate the reply and resume the waiting task. Do not reply directly to another participant's address for a tracked request; route it through the Shepherd. If the task cannot proceed, call shepherd_done with status blocked and explain why. Call shepherd_done only when the whole task is complete or explicitly blocked/failed. When finished, make your FINAL assistant message a concise summary of what you did and found; it is reported back to the caller.`;
     fs.writeFileSync(taskFile, task, { encoding: 'utf8', mode: '0600' });
     args.push(`'@${taskFile}'`);
   }
 
+  if (systemPromptFile) childEnvironment.PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE = systemPromptFile;
+  if (opts.childBroker) {
+    childEnvironment.PI_SHEPHERD_BROKER_DIR = opts.childBroker.rootDir;
+    childEnvironment.PI_SHEPHERD_BROKER_SESSION_ID = opts.childBroker.sessionId;
+    childEnvironment.PI_SHEPHERD_BROKER_ID = opts.childBroker.brokerId;
+    childEnvironment.PI_SHEPHERD_AGENT_ID = opts.childBroker.agentId;
+    childEnvironment.PI_SHEPHERD_BROKER_TOKEN = opts.childBroker.token;
+    childEnvironment.PI_SHEPHERD_AGENT_INBOX = opts.childBroker.inboxPath;
+  }
+  if (opts.taskId) childEnvironment.PI_SHEPHERD_TASK_ID = opts.taskId;
+  if (opts.herdrContext) {
+    childEnvironment.HERDR_ENV = '1';
+    childEnvironment.HERDR_PANE_ID = opts.herdrContext.paneId;
+    childEnvironment.HERDR_TAB_ID = opts.herdrContext.tabId;
+    childEnvironment.HERDR_WORKSPACE_ID = opts.herdrContext.workspaceId;
+    if (opts.herdrContext.socketPath) {
+      childEnvironment.HERDR_SOCKET_PATH = opts.herdrContext.socketPath;
+    }
+  }
+  fs.writeFileSync(contextFile, JSON.stringify(childEnvironment), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  fs.writeFileSync(
+    bootstrapFile,
+    `import { readFileSync } from 'node:fs';\n` +
+      `const values = JSON.parse(readFileSync(${JSON.stringify(contextFile)}, 'utf8'));\n` +
+      `for (const [key, value] of Object.entries(values)) process.env[key] = String(value);\n` +
+      `const { default: child } = await import(${JSON.stringify(pathToFileURL(doneExt).href)});\n` +
+      `export default child;\n`,
+    { encoding: 'utf8', mode: 0o600 }
+  );
+
   const launchScript = [
     '#!/bin/bash',
-    `export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
-    systemPromptFile
-      ? `export PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE=${shellQuote(systemPromptFile)}`
-      : 'unset PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE',
-    opts.omitPiDocumentation
-      ? 'export PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1'
-      : 'unset PI_SHEPHERD_OMIT_PI_DOCUMENTATION',
-    opts.childBroker
-      ? `export PI_SHEPHERD_BROKER_DIR=${shellQuote(opts.childBroker.rootDir)}\nexport PI_SHEPHERD_BROKER_SESSION_ID=${shellQuote(opts.childBroker.sessionId)}\nexport PI_SHEPHERD_BROKER_ID=${shellQuote(opts.childBroker.brokerId)}\nexport PI_SHEPHERD_AGENT_ID=${shellQuote(opts.childBroker.agentId)}\nexport PI_SHEPHERD_BROKER_TOKEN=${shellQuote(opts.childBroker.token)}\nexport PI_SHEPHERD_AGENT_INBOX=${shellQuote(opts.childBroker.inboxPath)}`
-      : 'unset PI_SHEPHERD_BROKER_DIR PI_SHEPHERD_BROKER_SESSION_ID PI_SHEPHERD_BROKER_ID PI_SHEPHERD_AGENT_ID PI_SHEPHERD_BROKER_TOKEN PI_SHEPHERD_AGENT_INBOX',
-    opts.taskId
-      ? `export PI_SHEPHERD_TASK_ID=${shellQuote(opts.taskId)}`
-      : 'unset PI_SHEPHERD_TASK_ID',
-
-    `export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
-    opts.stayOpen || opts.persistent
-      ? 'export PI_SHEPHERD_STAY_OPEN=1'
-      : 'export PI_SHEPHERD_STAY_OPEN=0',
     // Keep the effective child invocation visible in the spawned pane. This is
     // invaluable when a model/provider sentinel (such as "default") is rejected.
     `printf '%s\\n' ${shellQuote(`Launching: pi ${args.join(' ')}`)}`,
@@ -675,9 +902,26 @@ export function launchPiInPane(
     childBroker?: ChildCapability & { rootDir: string };
     /** Active tracked task context, when this launch is for delegated work. */
     taskId?: string;
+    /** Compatibility recursion depth propagated into the child process. */
+    subagentDepth?: number;
   }
 ): { dir: string; sessionFile: string; scriptFile: string } {
-  const files = writePiLaunchFiles(opts);
+  let paneRecord: Record<string, unknown> | undefined;
+  try {
+    paneRecord = (herdrExecSync(['pane', 'get', paneId]) as any)?.result?.pane;
+  } catch {
+    // Pane metadata is best effort; process detection below still verifies startup.
+  }
+  const files = writePiLaunchFiles({
+    ...opts,
+    herdrContext: {
+      paneId,
+      tabId: typeof paneRecord?.tab_id === 'string' ? paneRecord.tab_id : '',
+      workspaceId: typeof paneRecord?.workspace_id === 'string' ? paneRecord.workspace_id : '',
+      socketPath:
+        process.env.HERDR_SOCKET_PATH ?? path.join(os.homedir(), '.config', 'herdr', 'herdr.sock'),
+    },
+  });
   sendCommandInHerdr(paneId, `bash ${shellQuote(files.scriptFile)}`);
   return files;
 }
@@ -688,13 +932,19 @@ export function launchPiInPane(
  */
 export async function waitForHerdrAgentDetected(
   paneId: string,
-  options: { timeoutMs?: number; intervalMs?: number } = {}
+  options: {
+    timeoutMs?: number;
+    intervalMs?: number;
+    signal?: AbortSignal;
+    sessionFile?: string;
+  } = {}
 ): Promise<{ detected: boolean; state?: string; exitCode?: number }> {
   const timeoutMs = options.timeoutMs ?? 20_000;
   const intervalMs = options.intervalMs ?? 500;
   const deadline = Date.now() + timeoutMs;
   let state: string | undefined;
   while (Date.now() <= deadline) {
+    if (options.signal?.aborted) throw new Error('Subagent was aborted.');
     try {
       const out = herdrExecSync(['agent', 'get', paneId]);
       const rec = (out as any)?.result?.agent as Record<string, unknown> | undefined;
@@ -705,11 +955,37 @@ export async function waitForHerdrAgentDetected(
     } catch {
       /* not yet detected */
     }
+    if (options.sessionFile) {
+      try {
+        // Pi creates its session lazily. While the child is alive, the pane's
+        // foreground process is still authoritative enough to accept prompts;
+        // an exited launch is handled by the sentinel check below.
+        const processInfo = herdrExecSync(['pane', 'process-info', '--pane', paneId]) as any;
+        const foreground = processInfo?.result?.process_info?.foreground_processes;
+        if (
+          Array.isArray(foreground) &&
+          foreground.some((process: any) => {
+            if (!Array.isArray(process?.argv)) return false;
+            return process.argv.some((argument: unknown, index: number) => {
+              if (argument === `--session=${options.sessionFile}`) return true;
+              return argument === '--session' && process.argv[index + 1] === options.sessionFile;
+            });
+          })
+        ) {
+          return { detected: true, state: 'starting' };
+        }
+      } catch {
+        /* pane may still be transitioning from its shell */
+      }
+    }
     // A launch can fail before Herdr recognizes the child (for example when
     // pi cannot authenticate the requested provider). The launch script emits
     // an exit sentinel after pi terminates; surface that immediately instead
     // of waiting out the full readiness timeout.
-    const exitCode = await doneSentinelInTail(paneId);
+    const exitCode = await doneSentinelInTail(paneId, {
+      timeoutMs: Math.max(1, deadline - Date.now()),
+      signal: options.signal,
+    });
     if (exitCode !== null) return { detected: false, state: 'exited', exitCode };
     if (Date.now() >= deadline) break;
     await new Promise(r => setTimeout(r, intervalMs));
@@ -733,12 +1009,15 @@ export function readCompletionSignal(signalPath: string): CompletionSignal | und
   }
 }
 
-export async function readPaneTail(paneId: string): Promise<string> {
+export async function readPaneTail(
+  paneId: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<string> {
   try {
     const { stdout } = await execFileAsync(
       'herdr',
       ['agent', 'read', paneId, '--source', 'recent-unwrapped', '--lines', '120'],
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: options.timeoutMs ?? 10_000, signal: options.signal }
     );
     return stdout;
   } catch {
@@ -746,14 +1025,65 @@ export async function readPaneTail(paneId: string): Promise<string> {
   }
 }
 
-/** Reconstruct messages/model from the child's JSONL session file. */
-function parseSessionFile(sessionFile: string): {
+export interface SessionTelemetry {
   messages: Message[];
   model?: string;
-} {
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+    contextTokens: number;
+    turns: number;
+  };
+  toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
+}
+
+export function sessionTelemetryCursor(telemetry: SessionTelemetry): TaskTelemetryCursor {
+  return {
+    messageCount: telemetry.messages.length,
+    toolCallCount: telemetry.toolCalls.length,
+    usage: { ...telemetry.usage },
+  };
+}
+
+export function sessionTelemetrySince(
+  telemetry: SessionTelemetry,
+  cursor?: TaskTelemetryCursor
+): SessionTelemetry {
+  if (!cursor) return telemetry;
+  return {
+    messages: telemetry.messages.slice(cursor.messageCount),
+    model: telemetry.model,
+    toolCalls: telemetry.toolCalls.slice(cursor.toolCallCount),
+    usage: {
+      input: Math.max(0, telemetry.usage.input - cursor.usage.input),
+      output: Math.max(0, telemetry.usage.output - cursor.usage.output),
+      cacheRead: Math.max(0, telemetry.usage.cacheRead - cursor.usage.cacheRead),
+      cacheWrite: Math.max(0, telemetry.usage.cacheWrite - cursor.usage.cacheWrite),
+      cost: Math.max(0, telemetry.usage.cost - cursor.usage.cost),
+      contextTokens: telemetry.usage.contextTokens,
+      turns: Math.max(0, telemetry.usage.turns - cursor.usage.turns),
+    },
+  };
+}
+
+/** Reconstruct messages, model, usage, and observed tool calls from a child's JSONL session. */
+export function readSessionTelemetry(sessionFile: string): SessionTelemetry {
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+    contextTokens: 0,
+    turns: 0,
+  };
+  const toolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const messages: Message[] = [];
   let model: string | undefined;
-  if (!fs.existsSync(sessionFile)) return { messages, model };
+  if (!fs.existsSync(sessionFile)) return { messages, model, usage, toolCalls };
   for (const line of fs.readFileSync(sessionFile, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     let ev: any;
@@ -766,22 +1096,48 @@ function parseSessionFile(sessionFile: string): {
       model = ev.modelId;
     }
     if (ev?.type === 'message' && ev.message && typeof ev.message.role === 'string') {
+      const content = Array.isArray(ev.message.content) ? ev.message.content : [];
       messages.push({
         role: ev.message.role,
-        content: Array.isArray(ev.message.content) ? ev.message.content : [],
+        content,
         timestamp: ev.message.timestamp,
       });
+      if (ev.message.role === 'assistant') {
+        usage.turns += 1;
+        usage.input += Number(ev.message.usage?.input ?? 0);
+        usage.output += Number(ev.message.usage?.output ?? 0);
+        usage.cacheRead += Number(ev.message.usage?.cacheRead ?? 0);
+        usage.cacheWrite += Number(ev.message.usage?.cacheWrite ?? 0);
+        usage.cost += Number(ev.message.usage?.cost?.total ?? 0);
+        usage.contextTokens = Number(ev.message.usage?.totalTokens ?? usage.contextTokens);
+        if (!model && typeof ev.message.model === 'string') model = ev.message.model;
+        for (const item of content) {
+          if (item?.type !== 'toolCall' || typeof item.name !== 'string') continue;
+          const rawArguments = item.arguments ?? (item as any).input;
+          toolCalls.push({
+            name: item.name,
+            args:
+              rawArguments && typeof rawArguments === 'object' && !Array.isArray(rawArguments)
+                ? rawArguments
+                : {},
+          });
+        }
+      }
     }
   }
-  return { messages, model };
+  return { messages, model, usage, toolCalls };
 }
 
-function lastAssistantText(messages: Message[]): string {
+export function lastAssistantText(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== 'assistant') continue;
-    for (const part of messages[i].content) {
-      if (part.type === 'text' && part.text) return part.text;
-    }
+    const content = messages[i].content;
+    if (!Array.isArray(content)) return typeof content === 'string' ? content : '';
+    return content
+      .filter(part => typeof part !== 'string' && part.type === 'text' && part.text)
+      .map(part => (typeof part !== 'string' && part.type === 'text' ? part.text : ''))
+      .filter(Boolean)
+      .join('\n');
   }
   return '';
 }
@@ -795,7 +1151,7 @@ function lastAssistantText(messages: Message[]): string {
  * readable; callers fall back to the pane tail.
  */
 export function readLastAssistantText(sessionFile: string): string {
-  const { messages } = parseSessionFile(sessionFile);
+  const { messages } = readSessionTelemetry(sessionFile);
   return lastAssistantText(messages);
 }
 
@@ -806,13 +1162,18 @@ const DONE_SENTINEL = /__SHEPHERD_DONE_(\d+)__/;
  * finished and echoed its sentinel). Used to confirm a sentinel match is the
  * shell's real completion echo and not arbitrary subagent output.
  */
-async function piProcessGone(paneId: string): Promise<boolean> {
+async function piProcessGone(
+  paneId: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('herdr', ['pane', 'process-info', '--pane', paneId], {
       encoding: 'utf8',
+      timeout: options.timeoutMs ?? 10_000,
+      signal: options.signal,
     });
-    const fg = (JSON.parse(stdout) as any)?.result?.process_info?.foreground_processes ?? [];
-    return !Array.isArray(fg) || fg.every((p: any) => !p?.argv?.includes?.('pi'));
+    const fg = (JSON.parse(stdout) as any)?.result?.process_info?.foreground_processes;
+    return Array.isArray(fg) && fg.every((p: any) => !p?.argv?.includes?.('pi'));
   } catch {
     return false; // assume still running when we can't check — safer
   }
@@ -831,8 +1192,11 @@ async function piProcessGone(paneId: string): Promise<boolean> {
  * the run done, delete the child's session dir mid-run (ENOENT, corrupted
  * run, "(no output)" pickup) and return before the subagent finished.
  */
-async function doneSentinelInTail(paneId: string): Promise<number | null> {
-  const tail = await readPaneTail(paneId);
+async function doneSentinelInTail(
+  paneId: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<number | null> {
+  const tail = await readPaneTail(paneId, options);
   const nonEmpty = tail
     .split('\n')
     .map(l => l.trim())
@@ -847,11 +1211,14 @@ async function doneSentinelInTail(paneId: string): Promise<number | null> {
   }
   if (code === null) return null;
   // Sentinel text alone is not proof (see above) — require pi to be gone.
-  if (!(await piProcessGone(paneId))) return null;
+  if (!(await piProcessGone(paneId, options))) return null;
   return code;
 }
 
 /** Read the exit code emitted by a completed launch script, if available. */
-export async function readLaunchExitCode(paneId: string): Promise<number | null> {
-  return doneSentinelInTail(paneId);
+export async function readLaunchExitCode(
+  paneId: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<number | null> {
+  return doneSentinelInTail(paneId, options);
 }

@@ -19,9 +19,10 @@ active pi agent dir — `~/.pi/agent` by default, `PI_CODING_AGENT_DIR`
 overridable; stores personal values only) plus an optional self-contained
 project config (`.shepherd/config.json`, anchored at cwd). A project config is
 active only with `projectScope: true`, and its project-owned values fall back to
-built-in defaults rather than private user values. `confirmProjectAgents` is
-user-owned and cannot be disabled by a repository config. `.shepherd/config.json`
-may be committed explicitly; runtime fieldnote sessions remain ignored.
+built-in defaults rather than private user values. `confirmProjectAgents` and
+`subagentCompatibility` are user-owned and cannot be disabled or enabled by a
+repository config. `.shepherd/config.json` may be committed explicitly; runtime
+fieldnote sessions remain ignored.
 
 ## Runtime and architecture
 
@@ -66,6 +67,9 @@ may be committed explicitly; runtime fieldnote sessions remain ignored.
 - Only panes recorded in `~/.pi/agent/pi-shepherd/created-panes.json` may be
   closed by pi-shepherd. Raw pane IDs must not bypass ownership checks.
 - Background Herdr placement uses `--no-focus`.
+- The legacy-compatible `subagent` facade is opt-in, keeps the 8-task/4-concurrent
+  cap, refuses shared-file writers, preserves dirty/ahead worktrees, and emits
+  review evidence for the trusted harness to validate.
 - Temporary launch/session resources are removed only after the child pane is
   confirmed gone.
 

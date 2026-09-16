@@ -46,17 +46,24 @@ function check(label, omit, includeOption = true, model, omitContextFiles) {
         task.includes('does not complete the task'),
       `${label}: task and completion instructions`
     );
+    const bootstrap = fs.readFileSync(`${files.dir}/shepherd-child.ts`, 'utf8');
     assert(
-      script.includes('shepherd-done.ts') &&
+      script.includes('shepherd-child.ts') &&
+        bootstrap.includes('shepherd-done.ts') &&
         script.includes('--tools read,shepherd_message,shepherd_done'),
-      `${label}: completion extension wiring + child-surface tools kept in --tools allowlist`
+      `${label}: bootstrap extension wiring + child-surface tools kept in --tools allowlist`
     );
     assert(
-      script.includes("PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE='"),
+      bootstrap.indexOf('Object.entries(values)') < bootstrap.indexOf('await import('),
+      `${label}: bootstrap restores stripped variables before loading the child extension`
+    );
+    const context = JSON.parse(fs.readFileSync(`${files.dir}/child-context.json`, 'utf8'));
+    assert(
+      context.PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE === `${files.dir}/sysprompt-${name}.md`,
       `${label}: agent system prompt wiring`
     );
     assert(
-      script.includes('PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1'),
+      context.PI_SHEPHERD_OMIT_PI_DOCUMENTATION === '1',
       `${label}: Pi documentation omission wiring`
     );
     assert(
@@ -144,7 +151,7 @@ const brokerLaunch = writePiLaunchFiles({
   taskId: 'shepherd-task-1',
 });
 try {
-  const script = fs.readFileSync(brokerLaunch.scriptFile, 'utf8');
+  const context = JSON.parse(fs.readFileSync(`${brokerLaunch.dir}/child-context.json`, 'utf8'));
   const task = fs.readFileSync(`${brokerLaunch.dir}/task-broker-wired.md`, 'utf8');
   assert(
     task.includes('Task ID: shepherd-task-1') &&
@@ -153,27 +160,27 @@ try {
     'broker launch: tracked task context and reply instructions'
   );
   assert(
-    script.includes("PI_SHEPHERD_BROKER_DIR='/tmp/shepherd-broker'"),
+    context.PI_SHEPHERD_BROKER_DIR === '/tmp/shepherd-broker',
     'broker launch: broker directory wiring'
   );
   assert(
-    script.includes("PI_SHEPHERD_BROKER_SESSION_ID='session-1'"),
+    context.PI_SHEPHERD_BROKER_SESSION_ID === 'session-1',
     'broker launch: session wiring'
   );
-  assert(script.includes("PI_SHEPHERD_BROKER_ID='broker-1'"), 'broker launch: broker id wiring');
+  assert(context.PI_SHEPHERD_BROKER_ID === 'broker-1', 'broker launch: broker id wiring');
   assert(
-    script.includes("PI_SHEPHERD_AGENT_ID='shepherd-agent-1'"),
+    context.PI_SHEPHERD_AGENT_ID === 'shepherd-agent-1',
     'broker launch: agent id wiring'
   );
   assert(
-    script.includes("PI_SHEPHERD_BROKER_TOKEN='secret-token'"),
+    context.PI_SHEPHERD_BROKER_TOKEN === 'secret-token',
     'broker launch: capability wiring'
   );
   assert(
-    script.includes("PI_SHEPHERD_AGENT_INBOX='/tmp/shepherd-broker/agents/child/inbox'"),
+    context.PI_SHEPHERD_AGENT_INBOX === '/tmp/shepherd-broker/agents/child/inbox',
     'broker launch: inbox wiring'
   );
-  assert(script.includes("PI_SHEPHERD_TASK_ID='shepherd-task-1'"), 'broker launch: task id wiring');
+  assert(context.PI_SHEPHERD_TASK_ID === 'shepherd-task-1', 'broker launch: task id wiring');
 } finally {
   fs.rmSync(brokerLaunch.dir, { recursive: true, force: true });
 }

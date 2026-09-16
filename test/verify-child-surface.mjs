@@ -27,7 +27,10 @@ const savedEnv = Object.fromEntries(envNames.map(name => [name, process.env[name
 
 try {
   await withTempDirectory('pi-shepherd-child-', async root => {
-    const broker = createParentBroker('child-surface-session', { rootDir: `${root}/broker` });
+    const broker = createParentBroker('child-surface-session', {
+      rootDir: `${root}/broker`,
+      maxQueueDepth: 2,
+    });
     const capability = registerChild(broker, 'shepherd-agent-child-surface');
     const peerCapability = registerChild(broker, 'shepherd-agent-peer-surface');
     const peerChild = createChildBroker({ rootDir: broker.rootDir, ...peerCapability });
@@ -80,6 +83,16 @@ try {
     console.log('PASS child registers only messaging and explicit completion tools');
 
     const doneTool = registered.find(tool => tool.name === 'shepherd_done');
+    assert.equal(doneTool.parameters.properties.summary.maxLength, 8_000);
+    const oversizedCompletion = await doneTool.execute('oversized-done-call', {
+      taskId: 'shepherd-task-child-surface',
+      status: 'completed',
+      summary: 'x'.repeat(8_001),
+    });
+    assert.equal(oversizedCompletion.details.returnCode, 1);
+    assert.equal(oversizedCompletion.details.code, 'completion_too_large');
+    console.log('PASS oversized completion is rejected before it can become pending');
+
     const messageResult = await messageTool.execute('message-call', {
       target: 'shepherd',
       message: 'Please review the authentication flow.',
@@ -88,7 +101,7 @@ try {
       delivery: 'followUp',
     });
     assert.equal(messageResult.details.returnCode, 0);
-    assert.match(messageResult.content[0].text, /call:\n    shepherd_message/);
+    assert.match(messageResult.content[0].text, /call:\n {4}shepherd_message/);
     const inbox = pollParentInbox(broker);
     const sentMessage = inbox.find(m => m.kind === 'message');
     assert.ok(sentMessage, 'question envelope is queued in the parent inbox');
@@ -123,31 +136,34 @@ try {
       'PASS child shepherd_message rejects agent names instead of treating them as peer ids'
     );
 
+    const incomingTask = createEnvelope(
+      { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+      {
+        kind: 'task',
+        targetId: capability.agentId,
+        taskId: 'shepherd-task-child-surface',
+        delivery: 'followUp',
+        content: 'Complete the review.',
+      }
+    );
+    publishFromParent(broker, incomingTask);
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     const doneResult = await doneTool.execute('done-call', {
       taskId: 'shepherd-task-child-surface',
       status: 'completed',
       summary: 'Review completed.',
     });
     assert.equal(doneResult.details.returnCode, 0);
-    assert.match(doneResult.content[0].text, /call:\n    shepherd_done/);
-    const completion = pollParentInbox(broker)[0];
-    assert.equal(completion.kind, 'task_done');
-    assert.equal(completion.taskId, 'shepherd-task-child-surface');
-    assert.equal(completion.status, 'completed');
-    assert.equal(completion.summary, 'Review completed.');
-    console.log('PASS child shepherd_done publishes an explicit task-done envelope');
+    assert.match(doneResult.content[0].text, /call:\n {4}shepherd_done/);
+    assert.deepEqual(pollParentInbox(broker), [], 'completion waits for agent_end telemetry');
     const duplicateDone = await doneTool.execute('done-call-again', {
       taskId: 'shepherd-task-child-surface',
       status: 'completed',
       summary: 'A different summary must not create a second completion.',
     });
     assert.equal(duplicateDone.details.returnCode, 0);
-    const retryCompletion = pollParentInbox(broker)[0];
-    assert.equal(retryCompletion.kind, 'task_done');
-    assert.equal(retryCompletion.taskId, 'shepherd-task-child-surface');
-    console.log(
-      'PASS repeated child shepherd_done calls remain safe for parent idempotent settlement'
-    );
+    assert.deepEqual(pollParentInbox(broker), [], 'repeated completion remains pending');
 
     let shutdowns = 0;
     await handlers.get('agent_end')(
@@ -160,7 +176,12 @@ try {
     );
     assert.equal(shutdowns, 0);
     assert.equal(fs.existsSync(`${root}/child-session.jsonl.exit`), false);
-    console.log('PASS normal agent_end does not complete or shut down a tracked task');
+    const completion = pollParentInbox(broker)[0];
+    assert.equal(completion.kind, 'task_done');
+    assert.equal(completion.taskId, 'shepherd-task-child-surface');
+    assert.equal(completion.status, 'completed');
+    assert.equal(completion.summary, 'Review completed.');
+    console.log('PASS child publishes task completion only after agent_end');
 
     const incoming = createEnvelope(
       { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
@@ -176,11 +197,12 @@ try {
     );
     publishFromParent(broker, incoming);
     await handlers.get('session_start')({}, {});
-    assert.equal(sentUserMessages.length, 1);
-    assert.match(sentUserMessages[0].content, /Shepherd message from Shepherd/);
-    assert.match(sentUserMessages[0].content, /Reply to: request-123/);
-    assert.equal(sentUserMessages[0].options.deliverAs, 'steer');
-    assert.equal(sentUserMessages[0].options.triggerTurn, true);
+    const replyMessage = sentUserMessages.at(-1);
+    assert.equal(sentUserMessages.length, 2);
+    assert.match(replyMessage.content, /Shepherd message from Shepherd/);
+    assert.match(replyMessage.content, /Reply to: request-123/);
+    assert.equal(replyMessage.options.deliverAs, 'steer');
+    assert.equal(replyMessage.options.triggerTurn, true);
     assert.ok(
       messageTool.promptGuidelines.some(guideline =>
         guideline.includes('request, not your own task ID')
@@ -206,6 +228,54 @@ try {
     assert.ok(inferredEnvelope, 'reply with omitted taskId is published');
     assert.equal(inferredEnvelope.taskId, 'shepherd-task-child-surface');
     console.log('PASS child replies infer the requester task id and reject mismatched task ids');
+
+    const retryTask = createEnvelope(
+      { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: broker.parentId },
+      {
+        kind: 'task',
+        targetId: capability.agentId,
+        taskId: 'shepherd-task-retry-publication',
+        delivery: 'followUp',
+        content: 'Complete after a transient full queue.',
+      }
+    );
+    publishFromParent(broker, retryTask);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const retryDone = await doneTool.execute('retry-done-call', {
+      taskId: 'shepherd-task-retry-publication',
+      status: 'completed',
+      summary: 'Published after queue capacity returns.',
+    });
+    assert.equal(retryDone.details.returnCode, 0);
+    for (let index = 0; index < 2; index++) {
+      publishFromChild(
+        peerChild,
+        createEnvelope(
+          { sessionId: broker.sessionId, brokerId: broker.brokerId, senderId: peerChild.agentId },
+          {
+            kind: 'message',
+            targetId: broker.parentId,
+            delivery: 'followUp',
+            content: `queue filler ${index}`,
+          }
+        )
+      );
+    }
+    await handlers.get('agent_end')(
+      { messages: [{ role: 'assistant', stopReason: 'stop' }] },
+      { shutdown() {} }
+    );
+    assert.equal(
+      pollParentInbox(broker).some(message => message.kind === 'task_done'),
+      false,
+      'full queue defers completion publication'
+    );
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const retriedCompletion = pollParentInbox(broker).find(
+      message => message.kind === 'task_done' && message.taskId === retryTask.taskId
+    );
+    assert.ok(retriedCompletion, 'mailbox polling retries deferred completion publication');
+    console.log('PASS transient completion publication failure retries without another model turn');
 
     const peerRequest = createEnvelope(
       { sessionId: peerChild.sessionId, brokerId: peerChild.brokerId, senderId: peerChild.agentId },

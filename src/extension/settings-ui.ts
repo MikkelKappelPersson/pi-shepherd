@@ -44,6 +44,9 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
     case 'confirmProjectAgents':
       next.confirmProjectAgents = value === 'on';
       break;
+    case 'subagentCompatibility':
+      next.subagentCompatibility = value === 'on';
+      break;
     case 'keepOpen':
       next.keepOpen = value === 'on';
       break;
@@ -85,6 +88,7 @@ function refreshItems(items: SettingItem[], settings: ShepherdSettings, cwd: str
 
   const [bundledValue, bundledValues] = booleans(settings.includeBundledAgents);
   const [confirmValue, confirmValues] = booleans(settings.confirmProjectAgents);
+  const [compatValue, compatValues] = booleans(settings.subagentCompatibility);
   const [keepOpenValue, keepOpenValues] = booleans(settings.keepOpen);
   const [stayOpenValue, stayOpenValues] = booleans(settings.stayOpen);
   const [fieldnotesValue, fieldnotesValues] = booleans(settings.fieldnotes);
@@ -94,16 +98,18 @@ function refreshItems(items: SettingItem[], settings: ShepherdSettings, cwd: str
   items[2].values = bundledValues;
   items[3].currentValue = confirmValue;
   items[3].values = confirmValues;
-  items[4].currentValue = keepOpenValue;
-  items[4].values = keepOpenValues;
-  items[5].currentValue = stayOpenValue;
-  items[5].values = stayOpenValues;
-  items[6].currentValue = fieldnotesValue;
-  items[6].values = fieldnotesValues;
-  items[7].currentValue = emojiSheepValue;
-  items[7].values = emojiSheepValues;
-  items[8].currentValue = TIMEOUT_DISPLAY(settings.timeout);
-  items[9].currentValue = STALE_WAIT_DISPLAY(settings.staleWaitThreshold);
+  items[4].currentValue = compatValue;
+  items[4].values = compatValues;
+  items[5].currentValue = keepOpenValue;
+  items[5].values = keepOpenValues;
+  items[6].currentValue = stayOpenValue;
+  items[6].values = stayOpenValues;
+  items[7].currentValue = fieldnotesValue;
+  items[7].values = fieldnotesValues;
+  items[8].currentValue = emojiSheepValue;
+  items[8].values = emojiSheepValues;
+  items[9].currentValue = TIMEOUT_DISPLAY(settings.timeout);
+  items[10].currentValue = STALE_WAIT_DISPLAY(settings.staleWaitThreshold);
 }
 
 /** Render and drive the settings menu. */
@@ -143,6 +149,13 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
         label: 'Confirm project agents',
         description: 'User-only security gate; project files cannot disable confirmation.',
         currentValue: 'on',
+        values: ['on', 'off'],
+      },
+      {
+        id: 'subagentCompatibility',
+        label: 'Legacy subagent compatibility',
+        description: 'Register the blocking single/parallel/chain subagent facade; restart Pi after changing.',
+        currentValue: 'off',
         values: ['on', 'off'],
       },
       {
@@ -221,12 +234,14 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
                 'info'
               );
             }
-          } else if (id === 'confirmProjectAgents') {
-            // This field is always persisted in the trusted user layer,
+          } else if (id === 'confirmProjectAgents' || id === 'subagentCompatibility') {
+            // These fields are always persisted in the trusted user layer,
             // even when the menu is showing active project settings.
             const userSettings = loadSettings();
             saveSettings(
-              { ...userSettings, confirmProjectAgents: next.confirmProjectAgents },
+              id === 'confirmProjectAgents'
+                ? { ...userSettings, confirmProjectAgents: next.confirmProjectAgents }
+                : { ...userSettings, subagentCompatibility: next.subagentCompatibility },
               'user'
             );
           } else {
@@ -244,8 +259,8 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
               ? `${id} = ${value} (project agents are repository-controlled)`
               : id === 'fieldnotes'
                 ? `${id} = ${value} (takes effect next pi session)`
-                : id === 'confirmProjectAgents'
-                  ? `${id} = ${value} (user-only security setting)`
+                : id === 'confirmProjectAgents' || id === 'subagentCompatibility'
+                  ? `${id} = ${value} (user-only; restart Pi to apply)`
                   : `${id} = ${value}`;
           ctx.ui?.notify?.(note, 'info');
         } catch (error) {

@@ -39,8 +39,13 @@ import {
   activeTasksByPane,
   loadCreatedPanes,
   type HerdrAgentSummary,
+  readSessionTelemetry,
+  sessionTelemetrySince,
+  shepherdSessionFromArgs,
 } from './src/core/herdr.ts';
 import type { AgentTaskStatus } from './src/core/orchestration.ts';
+import { registerSubagentCompatibility } from './src/compat/subagent.ts';
+import { scheduleAgentAutoClose } from './src/extension/auto-close.ts';
 
 /**
  * Persistent "below the editor" status box listing the subagents currently
@@ -249,12 +254,18 @@ function renderWorkingAgents(
   const workingCount = agents.filter(agent => agent.state === 'working').length;
   const waitingCount = agents.filter(agent => agent.task?.state === 'waiting').length;
   const infoParts: string[] = [];
-  if (workingCount > 0) infoParts.push(`${workingCount} working`);
-  if (waitingCount > 0) infoParts.push(`${waitingCount} waiting`);
-  if (infoParts.length === 0 && agents.length > 0) infoParts.push(`${agents.length} active`);
+  if (workingCount > 0) {
+    infoParts.push(`${workingCount} working`);
+  }
+  if (waitingCount > 0) {
+    infoParts.push(`${waitingCount} waiting`);
+  }
+  if (infoParts.length === 0 && agents.length > 0) {
+    infoParts.push(`${agents.length} active`);
+  }
   const info = infoParts.join(' · ');
 
-  const lines: string[] = [borderTop(title, info, width, theme)];
+  const lines: string[] = [borderTop(title, info, width)];
 
   for (const agent of agents) {
     const task = agent.task;
@@ -262,13 +273,17 @@ function renderWorkingAgents(
     // An idle process that owns a waiting task renders as "waiting", not idle:
     // the child is parked, not finished.
     const iconState = waitingOnReply ? 'waiting' : agent.state;
-    const elapsed = agent.createdAt != null ? ` ${formatElapsedMMSS(agent.createdAt)}` : '';
+    const elapsed = agent.createdAt == null ? '' : ` ${formatElapsedMMSS(agent.createdAt)}`;
     const icon = stateIcon(iconState, theme, sheepFrame);
     // Right side: the task state wins while the task is open (working process +
     // waiting task → "waiting"), stale episodes are flagged distinctly.
     let rightState = agent.state;
-    if (task) rightState = task.state;
-    if (waitingOnReply && task?.stale) rightState = 'waiting (stale)';
+    if (task) {
+      rightState = task.state;
+    }
+    if (waitingOnReply && task?.stale) {
+      rightState = 'waiting (stale)';
+    }
     const right = ` ${theme.fg('text', rightState)} `;
     const name = theme.fg('text', agent.name);
     // Left side: waiting rows surface the elapsed wait and the expected-reply
@@ -277,7 +292,9 @@ function renderWorkingAgents(
     if (waitingOnReply && task) {
       const waitingMins = Math.floor((task.waitingMs ?? 0) / 60_000);
       detail = ` ⏳${waitingMins}m`;
-      if (task.waitingRecipient) detail += ` ←${task.waitingRecipient}`;
+      if (task.waitingRecipient) {
+        detail += ` ←${task.waitingRecipient}`;
+      }
     }
     const prefix = ` ${icon}${elapsed}  ${name}${detail}`;
     const sheepGlyph = useEmoji ? '🐑' : 'o';
@@ -292,19 +309,18 @@ function renderWorkingAgents(
     lines.push(borderLine(left, right, width, theme));
   }
 
-  lines.push(borderBottom(width, theme));
+  lines.push(borderBottom(width));
   return lines;
 }
 
 /** Bordered top line: ╭─ title ──── info ─╮ (all chars within `width`). */
-function borderTop(
-  title: string,
-  info: string,
-  width: number,
-  theme: { fg(color: string, text: string): string }
-): string {
-  if (width <= 0) return '';
-  if (width === 1) return teal('╭');
+function borderTop(title: string, info: string, width: number): string {
+  if (width <= 0) {
+    return '';
+  }
+  if (width === 1) {
+    return teal('╭');
+  }
   const inner = Math.max(0, width - 2); // inside ╭ and ╮
   const titlePart = `─ ${title} `;
   const infoPart = ` ${info} ─`;
@@ -315,9 +331,13 @@ function borderTop(
 }
 
 /** Bordered bottom line: ╰──────────────────╯ */
-function borderBottom(width: number, theme: { fg(color: string, text: string): string }): string {
-  if (width <= 0) return '';
-  if (width === 1) return teal('╰');
+function borderBottom(width: number): string {
+  if (width <= 0) {
+    return '';
+  }
+  if (width === 1) {
+    return teal('╰');
+  }
   const inner = Math.max(0, width - 2);
   return `${teal('╰')}${teal('─'.repeat(inner))}${teal('╯')}`;
 }
@@ -437,14 +457,72 @@ export default function (pi: ExtensionAPI) {
     bindSessionOwner(undefined);
   });
 
-  // Launched workers load the user extension set too, but their only Shepherd
-  // surface is the in-tab completion extension from shepherd-done.ts. Keep the
-  // parent orchestrator's tools, command, settings UI, and widget out of worker
-  // sessions; PI_SHEPHERD_SESSION is set by herdr.ts only for launched agents.
-  if (process.env.PI_SHEPHERD_SESSION) return;
+  // Declawd strips PI_* variables before Pi starts. The launch bootstrap restores
+  // them before importing shepherd-done, but user extensions were imported first;
+  // recognize Shepherd-owned session files as the child boundary here as well.
+  if (process.env.PI_SHEPHERD_SESSION || shepherdSessionFromArgs()) return;
+
+  // The parent package supplies review reach evidence for native and compatibility tasks.
+  // Child sessions return above so they cannot advertise a parent-side writer.
+  process.env.PI_REVIEW_REACH_WRITER = '1';
+  lifecycleRegistry.onTaskCreated(task => {
+    const agent = lifecycleRegistry.getAgent(task.agentId).handle;
+    if (!task.reviewScorable || !/(?:^|-)review(?:er)?(?:-|$)/i.test(agent.agent)) return;
+    pi.events.emit('pi-shepherd:review-started', {
+      taskId: task.taskId,
+      agent: agent.agent,
+      task: task.description,
+      cwd: task.cwd,
+    });
+  });
+  lifecycleRegistry.onTaskSettlement(completion => {
+    if (
+      completion.reviewScorable &&
+      completion.agent &&
+      /(?:^|-)review(?:er)?(?:-|$)/i.test(completion.agent)
+    ) {
+      const agent = lifecycleRegistry.getAgent(completion.agentId).handle;
+      const sessionFile = lifecycleRegistry.completionResultPath(agent);
+      const telemetry = sessionFile
+        ? sessionTelemetrySince(readSessionTelemetry(sessionFile), completion.telemetryCursor)
+        : undefined;
+      pi.events.emit('pi-shepherd:review-complete', {
+        taskId: completion.taskId,
+        agent: completion.agent,
+        task: completion.description,
+        cwd: completion.cwd,
+        ok: completion.ok,
+        returnCode: completion.returnCode,
+        model: telemetry?.model ?? completion.model,
+        usage: telemetry?.usage,
+        toolCalls: telemetry?.toolCalls,
+      });
+    }
+
+    scheduleAgentAutoClose(completion.agentId, completion.cwd, {
+      onFailure(error) {
+        try {
+          const errorText = error instanceof Error ? error.message : String(error);
+          const sendResult = pi.sendMessage(
+            {
+              customType: 'shepherd.auto-close.failure',
+              content: `Shepherd could not auto-close ${completion.agent ?? completion.agentId}: ${errorText}`,
+              display: true,
+              details: { agentId: completion.agentId, error: errorText },
+            },
+            { deliverAs: 'followUp', triggerTurn: false }
+          );
+          Promise.resolve(sendResult).catch(() => undefined);
+        } catch {
+          // The pane remains visible and can still be closed explicitly.
+        }
+      },
+    });
+  });
 
   // Tools for natural-language use.
   registerShepherdTools(pi);
+  if (loadSettings(activeSessionCwd).subagentCompatibility) registerSubagentCompatibility(pi);
   registerSubagentStatusWidget(pi);
 
   pi.registerCommand('shepherd', {

@@ -83,6 +83,7 @@ const StatusSchema = Type.Union(
   [Type.Literal('completed'), Type.Literal('blocked'), Type.Literal('failed')],
   { description: 'Terminal status for the delegated task.' }
 );
+const MAX_TASK_COMPLETION_SUMMARY_LENGTH = 8_000;
 
 function stringifyArguments(args: unknown): string {
   return JSON.stringify(args ?? {});
@@ -186,11 +187,20 @@ export default function (pi: ExtensionAPI) {
   const agentSystemPromptFile = process.env.PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE;
   const shouldOmitPiDocumentation = process.env.PI_SHEPHERD_OMIT_PI_DOCUMENTATION === '1';
   const configuredTaskId = process.env.PI_SHEPHERD_TASK_ID;
+  let pendingTaskCompletion:
+    | {
+        taskId: string;
+        status: 'completed' | 'blocked' | 'failed';
+        summary?: string;
+        ready: boolean;
+      }
+    | undefined;
   let agentSystemPrompt = '';
   let broker: ChildBroker | undefined;
   let brokerError: string | undefined;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   const receivedMessageTaskIds = new Map<string, string | undefined>();
+  let activeTaskId = configuredTaskId;
 
   if (agentSystemPromptFile) {
     try {
@@ -231,9 +241,43 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  const completionEnvelope = (
+    active: ChildBroker,
+    completion: NonNullable<typeof pendingTaskCompletion>
+  ): ShepherdMessageEnvelope =>
+    createEnvelope(
+      { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+      {
+        kind: 'task_done',
+        targetId: active.parentId,
+        taskId: completion.taskId,
+        status: completion.status,
+        summary: completion.summary,
+        content: completion.summary,
+        delivery: 'followUp',
+      }
+    );
+
+  const publishPendingTaskCompletion = (): boolean => {
+    const completion = pendingTaskCompletion;
+    if (!completion?.ready) return false;
+    const active = ensureBroker();
+    if (!active) return false;
+    try {
+      publishFromChild(active, completionEnvelope(active, completion));
+      pendingTaskCompletion = undefined;
+      activeTaskId = undefined;
+      return true;
+    } catch {
+      // The child mailbox poll retries independently of further model turns.
+      return false;
+    }
+  };
+
   const poll = (): void => {
     const active = ensureBroker();
     if (!active) return;
+    publishPendingTaskCompletion();
     let messages: ShepherdMessageEnvelope[];
     try {
       messages = pollChildInbox(active);
@@ -242,6 +286,10 @@ export default function (pi: ExtensionAPI) {
     }
     for (const message of messages) {
       receivedMessageTaskIds.set(message.messageId, message.taskId);
+      if (message.kind === 'task' && message.taskId) {
+        if (pendingTaskCompletion?.taskId !== message.taskId) pendingTaskCompletion = undefined;
+        activeTaskId = message.taskId;
+      }
       // Parent relays use a fresh envelope id while preserving the original
       // request in replyTo; replies from this child correlate to that original
       // request id.
@@ -331,7 +379,7 @@ export default function (pi: ExtensionAPI) {
       const taskId =
         args.replyTo && receivedMessageTaskIds.has(args.replyTo)
           ? referencedTaskId
-          : (args.taskId ?? configuredTaskId);
+          : (args.taskId ?? activeTaskId);
       try {
         const message = createEnvelope(
           { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
@@ -464,15 +512,18 @@ export default function (pi: ExtensionAPI) {
       }),
       status: StatusSchema,
       summary: Type.Optional(
-        Type.String({ description: 'Concise completion, blocked, or failure summary.' })
+        Type.String({
+          maxLength: MAX_TASK_COMPLETION_SUMMARY_LENGTH,
+          description: 'Concise completion, blocked, or failure summary.',
+        })
       ),
     }),
     async execute(_toolCallId, args) {
       const active = ensureBroker();
       if (!active)
         return unavailableToolResult('shepherd_done', args, brokerError ?? 'Broker unavailable.');
-      if (configuredTaskId && args.taskId !== configuredTaskId) {
-        const error = `Task id does not match this child context (${configuredTaskId}).`;
+      if (activeTaskId && args.taskId !== activeTaskId) {
+        const error = `Task id does not match this child context (${activeTaskId}).`;
         return childResult(
           'shepherd_done',
           args,
@@ -483,24 +534,61 @@ export default function (pi: ExtensionAPI) {
         );
       }
       try {
-        const completion = createEnvelope(
-          { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
-          {
-            kind: 'task_done',
-            targetId: active.parentId,
-            taskId: args.taskId,
-            status: args.status,
-            summary: args.summary,
-            content: args.summary,
-            delivery: 'followUp',
-          }
+        if (pendingTaskCompletion) {
+          return childResult(
+            'shepherd_done',
+            args,
+            'Shepherd task completion is already pending publication.',
+            { accepted: true, delivery: 'after_agent_end', duplicate: true },
+            {
+              taskId: pendingTaskCompletion.taskId,
+              status: pendingTaskCompletion.status,
+              delivery: 'after_agent_end',
+            }
+          );
+        }
+        const summary = args.summary?.trim();
+        const maximumSummaryLength = Math.min(
+          MAX_TASK_COMPLETION_SUMMARY_LENGTH,
+          active.maxContentLength
         );
-        const accepted = publishFromChild(active, completion);
-        return childResult('shepherd_done', args, 'Shepherd task completion accepted.', accepted, {
+        if (summary && summary.length > maximumSummaryLength) {
+          const error = `Completion summary exceeds ${maximumSummaryLength} characters; shorten it and retry.`;
+          return childResult(
+            'shepherd_done',
+            args,
+            'Shepherd task completion was rejected.',
+            { accepted: false, error },
+            { code: 'completion_too_large', error },
+            1
+          );
+        }
+        const proposed = {
           taskId: args.taskId,
           status: args.status,
-          delivery: accepted.delivery,
-        });
+          ...(summary ? { summary } : {}),
+          ready: false,
+        };
+        const encodedBytes = Buffer.byteLength(JSON.stringify(completionEnvelope(active, proposed)));
+        if (encodedBytes > active.maxMessageBytes) {
+          const error = `Completion envelope is ${encodedBytes} bytes; maximum is ${active.maxMessageBytes}. Shorten the summary and retry.`;
+          return childResult(
+            'shepherd_done',
+            args,
+            'Shepherd task completion was rejected.',
+            { accepted: false, error },
+            { code: 'completion_too_large', error },
+            1
+          );
+        }
+        pendingTaskCompletion = proposed;
+        return childResult(
+          'shepherd_done',
+          args,
+          'Shepherd task completion recorded and will be published after this turn finishes.',
+          { accepted: true, delivery: 'after_agent_end' },
+          { taskId: args.taskId, status: args.status, delivery: 'after_agent_end' }
+        );
       } catch (error) {
         return childResult(
           'shepherd_done',
@@ -537,17 +625,22 @@ export default function (pi: ExtensionAPI) {
     // it and exit. A tracked task is different: a normal agent_end is only a
     // turn observation, so it must not claim task success or shut down a child
     // that may need to resume after a peer reply.
-    if (!autoExit && !stayOpen) return;
+    if (!autoExit && !stayOpen && !pendingTaskCompletion) return;
     const outcome = latestAssistantOutcome(event?.messages);
     if (!outcome.exit) return; // aborted / no assistant turn — leave open.
     if (outcome.error) {
-      // Provider errors are still useful process-failure diagnostics for the
-      // parent, even when a tracked task is active.
+      // Keep provider failure evidence in the sidecar. Pi may retry after this
+      // low-level run ends; only task deadline, explicit completion, pane exit,
+      // or close may settle the tracked task.
       writeSidecar({ type: 'error', errorMessage: outcome.error.errorMessage });
       if (!stayOpen) ctx.shutdown();
       return;
     }
-    if (configuredTaskId) return;
+    if (pendingTaskCompletion) {
+      pendingTaskCompletion.ready = true;
+      publishPendingTaskCompletion();
+      return;
+    }
     writeSidecar({ type: 'done' });
     // Stay open: report completion to the parent via the sidecar, but keep
     // this pi session alive in the tab so the user can keep driving it.

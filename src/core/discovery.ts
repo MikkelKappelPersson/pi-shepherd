@@ -9,6 +9,7 @@
  * location in that order wins (first-write-with-guard).
  */
 
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -49,6 +50,8 @@ export interface AgentConfig {
   systemPrompt: string;
   source: 'user' | 'project' | 'bundled';
   filePath: string;
+  /** Digest of the exact source bytes parsed into this definition. */
+  contentHash: string;
   /** Whether the agent is intended to be directly invoked by a user. */
   userInvocable: boolean;
 }
@@ -218,6 +221,7 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
         systemPrompt: body,
         source,
         filePath,
+        contentHash: createHash('sha256').update(content).digest('hex'),
         // Only a YAML boolean is accepted; absent or malformed values default true.
         userInvocable:
           typeof frontmatter['user-invocable'] === 'boolean' ? frontmatter['user-invocable'] : true,

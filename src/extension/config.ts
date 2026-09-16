@@ -26,7 +26,7 @@ const PROJECT_FIELDS = [
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 
 /** Fields stored in the trusted user config. */
-const USER_FIELDS = [...PROJECT_FIELDS, 'confirmProjectAgents'] as const;
+const USER_FIELDS = [...PROJECT_FIELDS, 'confirmProjectAgents', 'subagentCompatibility'] as const;
 type UserField = (typeof USER_FIELDS)[number];
 
 export interface ShepherdSettings {
@@ -38,6 +38,8 @@ export interface ShepherdSettings {
   includeBundledAgents: boolean;
   /** User-owned security gate for project-local agent definitions. */
   confirmProjectAgents: boolean;
+  /** Register the blocking legacy-compatible `subagent` facade. */
+  subagentCompatibility: boolean;
   /** Keep the Herdr tab open after completion. */
   keepOpen: boolean;
   /** Keep the child pi process alive after completion. */
@@ -57,6 +59,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
   agentScope: 'user',
   includeBundledAgents: true,
   confirmProjectAgents: true,
+  subagentCompatibility: false,
   keepOpen: true,
   stayOpen: false,
   fieldnotes: true,
@@ -105,6 +108,7 @@ function validField(field: UserField, raw: Record<string, unknown>): unknown {
       return validStaleWaitThreshold(value);
     case 'includeBundledAgents':
     case 'confirmProjectAgents':
+    case 'subagentCompatibility':
     case 'keepOpen':
     case 'stayOpen':
     case 'fieldnotes':
@@ -123,7 +127,8 @@ function validateLayer(raw: unknown, projectLayer: boolean): Partial<ShepherdSet
   const record = raw as Record<string, unknown>;
   const partial: Partial<ShepherdSettings> = {};
   for (const field of USER_FIELDS) {
-    if (projectLayer && field === 'confirmProjectAgents') continue;
+    if (projectLayer && (field === 'confirmProjectAgents' || field === 'subagentCompatibility'))
+      continue;
     const value = validField(field, record);
     if (value !== undefined) (partial as Record<string, unknown>)[field] = value;
   }
@@ -221,6 +226,7 @@ export function loadSettings(cwd?: string): ShepherdSettings {
     ...project,
     projectScope: true,
     confirmProjectAgents: user.confirmProjectAgents,
+    subagentCompatibility: user.subagentCompatibility,
   };
 }
 

@@ -68,6 +68,20 @@ export type TaskState =
 
 export type TaskResultStatus = 'completed' | 'blocked' | 'failed' | 'cancelled' | 'timed_out';
 
+export interface TaskTelemetryCursor {
+  messageCount: number;
+  toolCallCount: number;
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+    contextTokens: number;
+    turns: number;
+  };
+}
+
 export interface TaskHandle {
   id: string;
   agentId: string;
@@ -80,6 +94,12 @@ export type TaskHandleInput = TaskHandle | string;
 export interface TaskResult {
   taskId: string;
   agentId: string;
+  agent?: string;
+  model?: string;
+  cwd?: string;
+  description?: string;
+  reviewScorable?: boolean;
+  telemetryCursor?: TaskTelemetryCursor;
   status: TaskResultStatus;
   ok: boolean;
   /** Stable process-style outcome: 0 success, 1 failure, 2 blocked, 124 timeout, 130 cancelled. */
@@ -119,6 +139,8 @@ export interface TaskRecord {
   artifactSession?: ShepherdSession;
   /** Workspace cwd owning this task. */
   cwd?: string;
+  reviewScorable?: boolean;
+  telemetryCursor?: TaskTelemetryCursor;
   artifact?: ArtifactReservation;
   result?: TaskResult;
 }
@@ -136,6 +158,8 @@ export interface CreateTaskOptions {
   timeoutMs?: number;
   deadlineAt?: number;
   artifactSession?: ShepherdSession;
+  reviewScorable?: boolean;
+  telemetryCursor?: TaskTelemetryCursor;
 }
 
 /** Public, task-scoped view of an agent's active tracked task. */
@@ -195,7 +219,7 @@ export interface TaskWatcherRegistration {
   watcherId: string;
   taskIds: string[];
   pending: string[];
-  completed: TaskResult[];
+  completed: TaskWatcherCompletion[];
 }
 
 /**
@@ -205,7 +229,7 @@ export interface TaskWatcherRegistration {
  */
 export interface TaskWatcherNotification {
   watcherId: string;
-  completions: TaskResult[];
+  completions: TaskWatcherCompletion[];
 }
 
 export type TaskWatcherCallback = (completion: TaskWatcherCompletion) => void;
@@ -235,6 +259,7 @@ export class LifecycleError extends Error {
     | 'unknown_task'
     | 'task_agent_mismatch'
     | 'invalid_handle'
+    | 'invalid_target'
     | 'invalid_task'
     | 'invalid_transition'
     | 'timeout';
@@ -269,6 +294,7 @@ interface TaskRecordInternal extends Omit<TaskRecord, 'pendingRequestIds'> {
   lifecycleSessionId: string;
   pendingRequestIds: Set<string>;
   settled: boolean;
+  reviewScorable: boolean;
   onSettled?: (result: TaskResult) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
 }
@@ -353,12 +379,14 @@ export class LifecycleRegistry {
       promptIds: string[];
       taskIds: string[];
       pending: Set<string>;
-      callback?: PromptWatcherCallback;
+      callback?: PromptWatcherCallback | TaskWatcherCallback;
       delivered: Set<string>;
     }
   >();
   private readonly promptWatchers = new Map<string, Set<string>>();
   private readonly taskWatchers = new Map<string, Set<string>>();
+  private readonly taskCreatedListeners = new Set<(task: TaskRecord) => void>();
+  private readonly taskSettlementListeners = new Set<(result: TaskResult) => void>();
 
   private id(kind: 'agent' | 'prompt' | 'task' | 'watch'): string {
     return `shepherd-${kind}-${this.sessionId}-${randomUUID()}`;
@@ -597,10 +625,19 @@ export class LifecycleRegistry {
       cwd: agent.handle.cwd,
       pendingRequestIds: new Set(),
       artifactSession: options.artifactSession,
+      reviewScorable: options.reviewScorable !== false,
+      telemetryCursor: options.telemetryCursor,
       settled: false,
     });
     agent.activeTaskId = task.id;
     const record = this.tasks.get(task.id)!;
+    for (const listener of this.taskCreatedListeners) {
+      try {
+        listener(this.taskSnapshot(record));
+      } catch {
+        /* creation observers must not block task submission */
+      }
+    }
     if (record.deadlineAt !== undefined) {
       const delay = Math.max(0, record.deadlineAt - Date.now());
       record.timeoutId = setTimeout(() => {
@@ -646,12 +683,10 @@ export class LifecycleRegistry {
       };
       // watchTasks delivers already-settled tasks synchronously (in input
       // order) through the Set callback, and registers the watch for the rest.
-      const registration = this.watchTasks(taskIds, [
-        completion => {
-          results.add(completion);
-          if (results.size >= taskIds.length) settle();
-        },
-      ]);
+      const registration = this.watchTasks(taskIds, completion => {
+        results.add(completion);
+        if (results.size >= taskIds.length) settle();
+      });
       if (results.size >= taskIds.length) {
         settle();
         return;
@@ -695,6 +730,8 @@ export class LifecycleRegistry {
       state: record.state,
       createdAt: record.createdAt,
       ...(record.cwd !== undefined ? { cwd: record.cwd } : {}),
+      reviewScorable: record.reviewScorable,
+      ...(record.telemetryCursor ? { telemetryCursor: record.telemetryCursor } : {}),
       ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
       ...(record.waitingSince !== undefined ? { waitingSince: record.waitingSince } : {}),
       ...(record.deadlineAt !== undefined ? { deadlineAt: record.deadlineAt } : {}),
@@ -984,6 +1021,33 @@ export class LifecycleRegistry {
     return this.taskSnapshot(record);
   }
 
+  onTaskCreated(listener: (task: TaskRecord) => void): () => void {
+    this.taskCreatedListeners.add(listener);
+    return () => this.taskCreatedListeners.delete(listener);
+  }
+
+  onTaskSettlement(listener: (result: TaskResult) => void): () => void {
+    this.taskSettlementListeners.add(listener);
+    return () => this.taskSettlementListeners.delete(listener);
+  }
+
+  clearTaskObservers(): void {
+    this.taskCreatedListeners.clear();
+    this.taskSettlementListeners.clear();
+  }
+
+  waitForTask(input: TaskHandleInput | unknown): Promise<TaskResult> {
+    const record = this.taskRecord(input);
+    if (record.settled) return Promise.resolve({ ...record.result! });
+    return new Promise(resolve => {
+      const previous = record.onSettled;
+      record.onSettled = result => {
+        previous?.(result);
+        resolve(result);
+      };
+    });
+  }
+
   attachTaskArtifact(
     input: TaskHandleInput | unknown,
     session: ShepherdSession,
@@ -1028,9 +1092,20 @@ export class LifecycleRegistry {
             : ok
               ? 0
               : 1;
+    const agent = this.agents.get(record.agentId);
     const result: TaskResult = {
       taskId: record.taskId,
       agentId: record.agentId,
+      ...(agent
+        ? {
+            agent: agent.handle.agent,
+            model: agent.handle.model,
+            cwd: agent.handle.cwd,
+          }
+        : {}),
+      description: record.description,
+      reviewScorable: record.reviewScorable,
+      telemetryCursor: record.telemetryCursor,
       status: settlement.status,
       ok,
       returnCode: settlement.returnCode ?? defaultReturnCode,
@@ -1059,7 +1134,13 @@ export class LifecycleRegistry {
     } catch {
       /* artifact persistence must not break task settlement */
     }
-    const agent = this.agents.get(record.agentId);
+    for (const listener of this.taskSettlementListeners) {
+      try {
+        listener({ ...result });
+      } catch {
+        /* completion observers must not break task settlement */
+      }
+    }
     if (agent?.activeTaskId === record.taskId) {
       agent.activeTaskId = undefined;
       if (agent.state !== 'closed') {
@@ -1080,19 +1161,17 @@ export class LifecycleRegistry {
     this.taskWatchers.delete(record.taskId);
     const agentHandle = this.agents.get(record.agentId)?.handle;
     const notifyTaskWatcher = (
-      watcher: WatcherRegistration,
+      watcher: { callback?: PromptWatcherCallback | TaskWatcherCallback },
       result: TaskResult,
       agentHandle: AgentHandle | undefined
     ): void => {
-      const cb = watcher.callback as TaskWatcherCallback | TaskWatcherCallback[] | undefined;
+      const cb = watcher.callback as TaskWatcherCallback | undefined;
       const delivery = {
         ...result,
         ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
       };
       try {
-        if (Array.isArray(cb)) {
-          for (const one of cb) one(delivery);
-        } else cb?.(delivery);
+        cb?.(delivery);
       } catch {
         /* notification delivery must not break lifecycle settlement */
       }
@@ -1461,7 +1540,7 @@ export class LifecycleRegistry {
       watcher.delivered.add(prompt.handle.id);
       watcher.pending.delete(prompt.handle.id);
       try {
-        watcher.callback?.({
+        (watcher.callback as PromptWatcherCallback | undefined)?.({
           ...prompt.result,
           ...(agentForWatcher
             ? { agent: agentForWatcher.agent, label: agentForWatcher.label }

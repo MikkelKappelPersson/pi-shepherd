@@ -18,10 +18,19 @@ function expectLifecycleError(fn, code, label) {
   console.log(`PASS ${label}`);
 }
 
-const task = registry.createTask(scout, 'Investigate the authentication flow.');
+const task = registry.createTask(scout, 'Investigate the authentication flow.', {
+  reviewScorable: true,
+  telemetryCursor: {
+    messageCount: 2,
+    toolCallCount: 1,
+    usage: { input: 3, output: 5, cacheRead: 7, cacheWrite: 11, cost: 0.25, contextTokens: 26, turns: 1 },
+  },
+});
 assert.match(task.id, /^shepherd-task-/);
 assert.equal(task.agentId, scout.id);
 assert.equal(registry.getTask(task.id).state, 'created');
+assert.equal(registry.getTask(task.id).reviewScorable, true);
+assert.equal(registry.getTask(task.id).telemetryCursor?.messageCount, 2);
 assert.equal(registry.canonicalTaskHandle(task.id).id, task.id);
 assert.equal(registry.taskResult(task.id), undefined);
 console.log('PASS task creation returns a session-scoped opaque task id');

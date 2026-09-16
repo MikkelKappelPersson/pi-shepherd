@@ -183,7 +183,7 @@ assert.equal(sentTask[0].message.details.completions[0].taskId, bridgeTask.id);
 assert.equal(sentTask[0].message.details.completions[0].agentId, bridgeAgent.id);
 assert.equal(
   sentTask[0].message.content,
-  'shepherd_watcher completion: worker: task-bridge completed'
+  `shepherd_watcher completion: worker: task-bridge completed\n\n${bridgeTask.id}: bridge task done`
 );
 assert.ok(Array.isArray(sentTask[0].message.details.completions));
 assert.doesNotMatch(sentTask[0].message.content, /\n(?:call|return|details):/);
