@@ -86,6 +86,7 @@ registerShepherdTools({
         'shepherd.task.completion',
         'shepherd.message.incoming',
         'shepherd.message.reply',
+        'shepherd.message.warning',
         'shepherd.stale.wait',
       ].includes(customType),
       'unexpected custom message renderer: ' + customType

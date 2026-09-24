@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   discoverAgents,
   resolveDelegatedModel,
@@ -56,6 +58,7 @@ import {
   type TaskHandle,
   type TaskResult,
   type TaskHandleInput,
+  type TaskRecord,
   type TaskWatcherCompletion,
   type TaskWatcherRegistration,
   type TaskWatcherNotification,
@@ -372,39 +375,134 @@ export async function delegateAgent(
   }
 }
 
-/** Apply one explicit child completion to the parent task registry. */
-function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | undefined {
-  if (envelope.kind !== 'task_done' || !envelope.taskId || !envelope.status) return undefined;
-  let task;
+const TERMINAL_TASK_STATES: ReadonlySet<TaskRecord['state']> = new Set([
+  'completed',
+  'blocked',
+  'failed',
+  'cancelled',
+  'timed_out',
+]);
+
+/**
+ * Record a diagnostic for a child completion in the broker's rejected store so
+ * a completion the parent could not apply is observable on disk instead of
+ * being silently acked.
+ */
+function writeTaskDoneDiagnostic(
+  kind: 'dropped' | 'mismatch',
+  envelope: ShepherdMessageEnvelope,
+  reason: string
+): void {
+  const broker = currentParentBroker();
+  if (!broker) return;
   try {
-    task = lifecycleRegistry.getTask(envelope.taskId);
+    const rejectedPath = path.join(broker.rootDir, 'rejected');
+    fs.mkdirSync(rejectedPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(rejectedPath, `task-done-${kind}-${randomUUID()}.json`),
+      JSON.stringify({ at: Date.now(), reason, envelope }, null, 2),
+      'utf8'
+    );
   } catch {
-    // The broker may contain a late completion after a parent restart/close;
-    // unknown session-local task ids are ignored rather than creating records.
-    return undefined;
+    // Diagnostics must never break broker polling.
   }
-  if (['completed', 'blocked', 'failed', 'cancelled', 'timed_out'].includes(task.state)) {
+}
+
+/** Warn the parent session about a completion the registry could not apply. */
+function dropUnappliedTaskDone(envelope: ShepherdMessageEnvelope, reason: string): void {
+  writeTaskDoneDiagnostic('dropped', envelope, reason);
+  notifyParentMessage('task_done_dropped', envelope, reason);
+}
+
+/**
+ * Apply one explicit child completion to the parent task registry.
+ *
+ * The child LLM can fabricate the task id it echoes back (it can mimic a
+ * Herdr pane-id string that no task uses). The envelope's sender, in
+ * contrast, is authenticated by the broker, and each agent holds at most one
+ * active tracked task. So a task id that does not resolve to the sender's
+ * own task is re-anchored on the sender's active task before anything is
+ * settled, and a completion with no resolvable task at all is dropped
+ * observably rather than silently.
+ */
+function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResult | undefined {
+  if (envelope.kind !== 'task_done' || !envelope.status) return undefined;
+
+  let task: TaskRecord | undefined;
+  if (envelope.taskId) {
+    try {
+      task = lifecycleRegistry.getTask(envelope.taskId);
+    } catch {
+      // Unknown session-local task id: the child may have fabricated it.
+      // Never create a record for it; fall through to sender correlation.
+    }
+  }
+
+  let senderAgentId: string | undefined;
+  try {
+    senderAgentId = lifecycleRegistry.getAgent(envelope.senderId).handle.id;
+  } catch {
+    senderAgentId = undefined;
+  }
+  const senderActiveTask =
+    senderAgentId !== undefined
+      ? lifecycleRegistry.activeTaskForAgent({ id: senderAgentId })
+      : undefined;
+
+  if (task && TERMINAL_TASK_STATES.has(task.state)) {
     return lifecycleRegistry.taskResult(task.taskId);
   }
-  if (envelope.status === 'completed' && task.pendingRequestIds.length > 0) {
-    // A child cannot declare success while required replies remain pending.
-    // Leave the task waiting so the reply or an explicit blocked/failed result
-    // can resolve it later.
+
+  let effective = task;
+  if (task && senderAgentId !== undefined && task.agentId !== senderAgentId) {
+    // The named task belongs to a different agent: the child mislabeled its
+    // own completion, so prefer the only task the sender actually owns.
+    effective = senderActiveTask;
+  }
+  if (!effective) effective = senderActiveTask;
+
+  if (!effective || senderAgentId === undefined) {
+    const named = task ? `task "${task.taskId}"` : `task id "${envelope.taskId ?? '<none>'}"`;
+    const reason = task
+      ? `${named} is not owned by the sender and the sender has no active task`
+      : `no active task matches ${named} for the sender`;
+    dropUnappliedTaskDone(envelope, reason);
     return undefined;
   }
+
+  if (envelope.status === 'completed' && effective.pendingRequestIds.length > 0) {
+    // A child cannot declare success while required replies remain pending.
+    // Leave the task waiting so the reply or an explicit blocked/failed
+    // result can resolve it later.
+    return undefined;
+  }
+
+  const idMismatched = (envelope.taskId ?? '') !== effective.taskId;
   try {
-    return lifecycleRegistry.settleTaskForAgent(
-      envelope.taskId,
-      { id: envelope.senderId },
+    const result = lifecycleRegistry.settleTaskForAgent(
+      effective.taskId,
+      { id: senderAgentId },
       {
         status: envelope.status,
         text: envelope.summary ?? envelope.content,
         error: envelope.error,
       }
     );
+    if (idMismatched) {
+      writeTaskDoneDiagnostic(
+        'mismatch',
+        envelope,
+        `child reported task id "${envelope.taskId ?? '<none>'}"; completion applied to the sender's active task "${effective.taskId}"`
+      );
+    }
+    return result;
   } catch {
     // Ownership and lifecycle failures are rejected at the registry boundary;
-    // malformed/late control messages must not stop broker polling.
+    // a completion lost here must stay observable instead of being acked away.
+    dropUnappliedTaskDone(
+      envelope,
+      `settlement of "${effective.taskId}" was rejected by the registry`
+    );
     return undefined;
   }
 }
@@ -577,10 +675,11 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
   };
 }
 
-export type ParentMessageKind = 'message' | 'reply' | 'runtime';
+export type ParentMessageKind = 'message' | 'reply' | 'runtime' | 'task_done_dropped';
 export type ParentMessageNotifier = (notification: {
   kind: ParentMessageKind;
   envelope: ShepherdMessageEnvelope;
+  reason?: string;
 }) => void;
 
 let parentMessageNotifier: ParentMessageNotifier | undefined;
@@ -592,9 +691,13 @@ export function configureParentMessageNotifications(
   parentMessageNotifier = notifier;
 }
 
-function notifyParentMessage(kind: ParentMessageKind, envelope: ShepherdMessageEnvelope): void {
+function notifyParentMessage(
+  kind: ParentMessageKind,
+  envelope: ShepherdMessageEnvelope,
+  reason?: string
+): void {
   try {
-    parentMessageNotifier?.({ kind, envelope });
+    parentMessageNotifier?.({ kind, envelope, reason });
   } catch {
     // Delivery diagnostics must never break broker polling.
   }

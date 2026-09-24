@@ -458,8 +458,9 @@ export function formatParentMessageNotification(
 ): string | undefined {
   if (!envelope || typeof envelope !== 'object' || !envelope.messageId) return undefined;
   const isReply = envelope.kind === 'reply' || customType === 'shepherd.message.reply';
+  const isWarning = customType === 'shepherd.message.warning';
   const sender = displayAgentName(String(envelope.senderId ?? envelope.from ?? 'unknown'));
-  const lines = [`Shepherd ${isReply ? 'reply' : 'message'} from ${sender}`];
+  const lines = [`Shepherd ${isWarning ? 'warning' : isReply ? 'reply' : 'message'} from ${sender}`];
   const metadata: string[] = [];
   for (const [label, value] of [
     ['message id', envelope.messageId],
@@ -470,6 +471,9 @@ export function formatParentMessageNotification(
     if (value !== undefined && value !== null && value !== '') {
       metadata.push(...formatHumanField(label, value, ''));
     }
+  }
+  if (isWarning && envelope.reason) {
+    metadata.push(...formatHumanField('reason', String(envelope.reason), ''));
   }
   if (metadata.length) lines.push('', ...metadata);
   lines.push('', ...formatHumanField('message', String(envelope.content ?? ''), ''));
@@ -794,9 +798,36 @@ function configurePromptWatcherBridge(pi: ExtensionAPI): void {
   });
   configureParentMessageNotifications(notification => {
     if (!messageParentSessionActive) return;
-    const { envelope } = notification;
+    const { envelope, reason } = notification;
     if (envelope.kind === 'runtime') return; // task-state mirror only; never a user-facing message
     const sender = displayAgentName(envelope.senderId);
+    if (notification.kind === 'task_done_dropped') {
+      // A child completion the registry could not apply: surface it so a lost
+      // completion is visible to the parent instead of resurfacing later as a
+      // misleading deadline timeout.
+      const content =
+        `Shepherd warning from ${sender}\n` +
+        `Task completion was not applied: ${reason ?? 'the reported task id matched no active task.'}` +
+        (envelope.summary ? `\nCompletion: ${envelope.summary}` : '');
+      try {
+        const sendResult: any = pi.sendMessage(
+          {
+            customType: 'shepherd.message.warning',
+            content,
+            display: true,
+            details: { ...envelope, reason: reason ?? undefined },
+          },
+          { deliverAs: 'steer', triggerTurn: true }
+        );
+        if (sendResult && typeof sendResult.catch === 'function') {
+          sendResult.catch(() => undefined);
+        }
+      } catch {
+        // Delivery is best effort; the diagnostic file remains in the
+        // broker's rejected store.
+      }
+      return;
+    }
     const title = envelope.kind === 'reply' ? 'Shepherd reply' : 'Shepherd message';
     // Keep the notification fallback readable too: the custom renderer uses
     // `details` for collapsed/expanded views, while the message content keeps
@@ -833,6 +864,7 @@ function registerShepherdMessageRenderer(pi: ExtensionAPI): void {
     );
   pi.registerMessageRenderer('shepherd.message.incoming', render);
   pi.registerMessageRenderer('shepherd.message.reply', render);
+  pi.registerMessageRenderer('shepherd.message.warning', render);
 }
 
 type ShepherdContext = {

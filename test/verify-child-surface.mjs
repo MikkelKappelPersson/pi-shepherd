@@ -149,6 +149,17 @@ try {
       'PASS repeated child shepherd_done calls remain safe for parent idempotent settlement'
     );
 
+    const omittedDone = await doneTool.execute('done-call-omitted', {
+      status: 'completed',
+      summary: 'Completed without pasting the id.',
+    });
+    assert.equal(omittedDone.details.returnCode, 0);
+    assert.equal(omittedDone.details.taskId, 'shepherd-task-child-surface');
+    assert.equal(omittedDone.details.idMismatch, undefined);
+    const omittedEnvelope = pollParentInbox(broker).find(envelope => envelope.kind === 'task_done');
+    assert.equal(omittedEnvelope.taskId, 'shepherd-task-child-surface');
+    console.log('PASS child shepherd_done without a task id uses the launch-time task id');
+
     let shutdowns = 0;
     await handlers.get('agent_end')(
       { messages: [{ role: 'assistant', stopReason: 'stop' }] },

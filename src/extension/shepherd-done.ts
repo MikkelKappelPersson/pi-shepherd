@@ -191,6 +191,10 @@ export default function (pi: ExtensionAPI) {
   let brokerError: string | undefined;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   const receivedMessageTaskIds = new Map<string, string | undefined>();
+  // Spawn-then-delegate children are launched without a task id; the
+  // delegated id arrives with the `kind: 'task'` envelope, so remember the
+  // most recently delegated task to validate shepherd_done against.
+  let lastDelegatedTaskId: string | undefined;
 
   if (agentSystemPromptFile) {
     try {
@@ -241,6 +245,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     for (const message of messages) {
+      if (message.taskId) lastDelegatedTaskId = message.taskId;
       receivedMessageTaskIds.set(message.messageId, message.taskId);
       // Parent relays use a fresh envelope id while preserving the original
       // request in replyTo; replies from this child correlate to that original
@@ -456,12 +461,16 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: 'explicitly complete the delegated Shepherd task',
     promptGuidelines: [
       'Call shepherd_done when the delegated task is complete, blocked, or failed, before ending your turn. If you need input from the parent or a peer, send shepherd_message with expectsReply instead.',
+      'Omit taskId to complete the current delegated task; the child context already knows it. If you do provide it, use the exact Task ID from the most recent delegated task.',
       'In the shepherd_done summary, state what was done and, when blocked or failed, what specifically prevents completion.',
     ],
     parameters: Type.Object({
-      taskId: Type.String({
-        description: 'Opaque task id supplied in the delegated task context.',
-      }),
+      taskId: Type.Optional(
+        Type.String({
+          description:
+            'Optional. Omit to complete the current delegated task; if provided, it is verified against the delegated task id.',
+        })
+      ),
       status: StatusSchema,
       summary: Type.Optional(
         Type.String({ description: 'Concise completion, blocked, or failure summary.' })
@@ -471,16 +480,41 @@ export default function (pi: ExtensionAPI) {
       const active = ensureBroker();
       if (!active)
         return unavailableToolResult('shepherd_done', args, brokerError ?? 'Broker unavailable.');
-      if (configuredTaskId && args.taskId !== configuredTaskId) {
-        const error = `Task id does not match this child context (${configuredTaskId}).`;
+      // The id is inferred, not pasted: one-shot launches pin the launch-time
+      // id in the environment, spawn-then-delegate children learn it from the
+      // delegated task envelope, and the most recent one wins.
+      const knownTaskId = lastDelegatedTaskId ?? configuredTaskId;
+      if (knownTaskId === undefined) {
+        const error =
+          'No delegated task has been received in this child context. shepherd_done only applies to a task delivered through the Shepherd.';
         return childResult(
           'shepherd_done',
           args,
           'Shepherd task completion was rejected.',
           { accepted: false, error },
-          { code: 'task_mismatch', error },
+          { code: 'no_delegated_task', error },
           1
         );
+      }
+      let idMismatch: string | undefined;
+      if (args.taskId !== undefined && args.taskId !== knownTaskId) {
+        if (knownTaskId === configuredTaskId) {
+          // A one-shot launch pins exactly one task: a mismatched id means the
+          // child is confused about which task it is completing, so reject.
+          const error = `Task id does not match this child context (${knownTaskId}).`;
+          return childResult(
+            'shepherd_done',
+            args,
+            'Shepherd task completion was rejected.',
+            { accepted: false, error },
+            { code: 'task_mismatch', error },
+            1
+          );
+        }
+        // A fabricated or misremembered id is corrected to the id of the task
+        // this child actually holds, so the completion is not lost upstream
+        // (issue #13).
+        idMismatch = `Supplied task id "${args.taskId}" does not match the delegated task; the completion was recorded against ${knownTaskId}.`;
       }
       try {
         const completion = createEnvelope(
@@ -488,7 +522,7 @@ export default function (pi: ExtensionAPI) {
           {
             kind: 'task_done',
             targetId: active.parentId,
-            taskId: args.taskId,
+            taskId: knownTaskId,
             status: args.status,
             summary: args.summary,
             content: args.summary,
@@ -496,11 +530,18 @@ export default function (pi: ExtensionAPI) {
           }
         );
         const accepted = publishFromChild(active, completion);
-        return childResult('shepherd_done', args, 'Shepherd task completion accepted.', accepted, {
-          taskId: args.taskId,
-          status: args.status,
-          delivery: accepted.delivery,
-        });
+        return childResult('shepherd_done', args,
+          idMismatch
+            ? 'Shepherd task completion accepted (task id corrected to the delegated task).'
+            : 'Shepherd task completion accepted.',
+          accepted,
+          {
+            taskId: knownTaskId,
+            status: args.status,
+            delivery: accepted.delivery,
+            ...(idMismatch ? { suppliedTaskId: args.taskId, idMismatch } : {}),
+          }
+        );
       } catch (error) {
         return childResult(
           'shepherd_done',
