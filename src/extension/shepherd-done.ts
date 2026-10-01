@@ -8,6 +8,8 @@
  *   2. Provide child-side shepherd_message and shepherd_done tools.
  *   3. Poll the parent-owned mailbox and queue incoming messages into this Pi
  *      session using followUp or steer delivery.
+ *   4. Nudge a tracked task that was left open when a turn ended without
+ *      shepherd_done (see the completion-nudge section below).
  *
  * The parent passes the mailbox capability through launch-time environment
  * variables. Without those variables the child surface still loads, but its
@@ -28,6 +30,54 @@ import {
   type ShepherdMessageEnvelope,
 } from '../core/messaging.ts';
 import { omitPiDocumentation, replacePiIdentity } from './system-prompt.ts';
+
+/**
+ * Default number of completion nudges sent per task before the stall is
+ * escalated to the parent. One reminder is enough for the common "finished the
+ * work, forgot the signal" case; the escalation, not another reminder, is what
+ * keeps a stubborn child from looping.
+ */
+const DEFAULT_DONE_NUDGE_LIMIT = 1;
+
+/**
+ * Completion-nudge budget for this child. `PI_SHEPHERD_DONE_NUDGES` overrides
+ * it; 0 disables nudging (the parent task deadline remains the backstop).
+ */
+function doneNudgeLimit(): number {
+  const raw = process.env.PI_SHEPHERD_DONE_NUDGES;
+  if (raw === undefined) return DEFAULT_DONE_NUDGE_LIMIT;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DONE_NUDGE_LIMIT;
+}
+
+/** The follow-up turn injected when a tracked task was left open at turn end. */
+export function completionNudgeText(taskId: string, attempt: number, limit: number): string {
+  const remaining = Math.max(0, limit - attempt);
+  return [
+    '[Shepherd completion check]',
+    `You ended a turn without calling shepherd_done, so delegated task ${taskId} is still open and shepherd_watch is waiting for its result. Nothing was reported to the Shepherd.`,
+    '',
+    'Do not start new work in this turn. Finish the task now and report exactly one terminal outcome with shepherd_done:',
+    '- status "completed" — the task is finished; summarize what you did.',
+    '- status "blocked" — you cannot proceed; state what blocks you.',
+    '- status "failed" — the task cannot be completed; give the reason.',
+    '',
+    'If you are instead waiting for an answer from the Shepherd or a peer, end this turn without shepherd_done and reply when the answer arrives.',
+    'If the Shepherd already cancelled or closed this task, ignore this reminder and end the turn.',
+    remaining > 0
+      ? `Reminder ${attempt} of ${limit}.`
+      : `Final reminder ${attempt} of ${limit}; if this task is still open after this turn, the Shepherd is told it stalled.`,
+  ].join('\n');
+}
+
+/** Parent-facing escalation for a task that stayed open past every nudge. */
+export function stalledCompletionText(taskId: string, reason: string): string {
+  return [
+    '[Shepherd completion stalled]',
+    `Delegated task ${taskId} ended its turn(s) without shepherd_done and no further reminder is being sent: ${reason}`,
+    'The task is still open in the Shepherd. Block, cancel, or close it, or wait for the task deadline.',
+  ].join('\n');
+}
 
 function writeSidecar(payload: Record<string, unknown>): void {
   const sessionFile = process.env.PI_SHEPHERD_SESSION;
@@ -195,6 +245,18 @@ export default function (pi: ExtensionAPI) {
   // delegated id arrives with the `kind: 'task'` envelope, so remember the
   // most recently delegated task to validate shepherd_done against.
   let lastDelegatedTaskId: string | undefined;
+  // Completion-nudge state (see nudgeForgottenCompletion). A tracked task is
+  // settled ONLY by shepherd_done, so a turn that simply ends would leave the
+  // parent watching a task that no longer has a worker.
+  const nudgeLimit = doneNudgeLimit();
+  /** Tasks with a published shepherd_done completion — never nudged again. */
+  const completedTasks = new Set<string>();
+  /** Nudges already sent, per task id; bounded by `nudgeLimit`. */
+  const nudgesSent = new Map<string, number>();
+  /** Ids of requests this child published with expectsReply and is awaiting. */
+  const outstandingRequests = new Set<string>();
+  /** Tasks whose stalled-completion escalation was already published. */
+  const escalatedTasks = new Set<string>();
 
   if (agentSystemPromptFile) {
     try {
@@ -250,12 +312,92 @@ export default function (pi: ExtensionAPI) {
       // Parent relays use a fresh envelope id while preserving the original
       // request in replyTo; replies from this child correlate to that original
       // request id.
-      if (message.replyTo) receivedMessageTaskIds.set(message.replyTo, message.taskId);
+      if (message.replyTo) {
+        receivedMessageTaskIds.set(message.replyTo, message.taskId);
+        // The answer arrived: ending a turn is no longer "waiting" for it.
+        outstandingRequests.delete(message.replyTo);
+      }
       try {
         pi.sendUserMessage(incomingMessageText(message), deliveryOptions(message));
       } catch (error) {
         sendDeliveryFailure(message, error);
       }
+    }
+  };
+
+  /**
+   * Tell the parent that a task stayed open past every nudge. Published as a
+   * plain message (not a task_done envelope) so no terminal status is invented:
+   * the parent decides whether to block, cancel, or wait for the deadline.
+   */
+  const escalateStalledCompletion = (taskId: string, reason: string): void => {
+    if (escalatedTasks.has(taskId)) return;
+    escalatedTasks.add(taskId);
+    const active = ensureBroker();
+    if (!active) return;
+    try {
+      publishFromChild(
+        active,
+        createEnvelope(
+          { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.agentId },
+          {
+            kind: 'message',
+            targetId: active.parentId,
+            taskId,
+            delivery: 'followUp',
+            content: stalledCompletionText(taskId, reason),
+          }
+        )
+      );
+    } catch {
+      // Best effort — the parent's task deadline is the remaining backstop.
+    }
+  };
+
+  /**
+   * Recover a task the child forgot to report.
+   *
+   * agent_end is the exact boundary where this is observable: pi drains queued
+   * messages right after it, so a nudge queued here starts one more turn
+   * instead of stalling the session. Guard rails keep the nudge from firing on
+   * legitimate turn ends:
+   *   - only a tracked task this child still holds (plain prompts settle via
+   *     the legacy completion sidecar and never had a shepherd_done to forget);
+   *   - never after an aborted or errored turn (the user or provider drives it);
+   *   - never while a tracked request is outstanding (ending the turn is how a
+   *     child waits for an answer);
+   *   - bounded per task, then escalated to the parent instead of looping.
+   */
+  const nudgeForgottenCompletion = (event: any): void => {
+    if (nudgeLimit <= 0) return;
+    // Drain the inbox first so a reply that already landed cancels the nudge
+    // and is delivered as its own turn.
+    poll();
+    const taskId = lastDelegatedTaskId ?? configuredTaskId;
+    if (taskId === undefined || completedTasks.has(taskId)) return;
+    const outcome = latestAssistantOutcome(event?.messages);
+    if (!outcome.exit) return;
+    if (outcome.error) return; // provider failure is reported through other paths
+    if (outstandingRequests.size > 0) return; // waiting for an answer is correct
+    const sent = nudgesSent.get(taskId) ?? 0;
+    if (sent >= nudgeLimit) {
+      escalateStalledCompletion(
+        taskId,
+        `the reminder budget (${nudgeLimit}) is exhausted and the task deadline is the only remaining settlement.`
+      );
+      return;
+    }
+    nudgesSent.set(taskId, sent + 1);
+    try {
+      pi.sendUserMessage(completionNudgeText(taskId, sent + 1, nudgeLimit), {
+        deliverAs: 'followUp',
+        triggerTurn: true,
+      });
+    } catch (error) {
+      escalateStalledCompletion(
+        taskId,
+        `the reminder could not be delivered to this session (${String((error as any)?.message ?? error)}).`
+      );
     }
   };
 
@@ -390,6 +532,10 @@ export default function (pi: ExtensionAPI) {
           }
         }
         if (accepted.delivery === 'queued' && args.expectsReply === true) {
+          // A queued tracked request is why this child may legitimately end its
+          // turn without shepherd_done (see nudgeForgottenCompletion), so it is
+          // recorded before the correlation mirror is attempted.
+          outstandingRequests.add(message.messageId);
           // Mirror the tracked request into the parent inbox so the parent
           // can open the request on the task (running -> waiting). The
           // question itself was published to the target; the mirror only
@@ -530,6 +676,7 @@ export default function (pi: ExtensionAPI) {
           }
         );
         const accepted = publishFromChild(active, completion);
+        completedTasks.add(knownTaskId);
         return childResult('shepherd_done', args,
           idMismatch
             ? 'Shepherd task completion accepted (task id corrected to the delegated task).'
@@ -573,6 +720,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on('agent_end', (event: any, ctx: { shutdown: () => void }) => {
+    // Independent of the legacy sidecar path: a tracked task left open at turn
+    // end gets one reminder turn before anything else is considered.
+    nudgeForgottenCompletion(event);
     // Persistent shepherd agents stay alive, but must still publish a
     // completion signal for the legacy prompt path. One-shot agents publish
     // it and exit. A tracked task is different: a normal agent_end is only a

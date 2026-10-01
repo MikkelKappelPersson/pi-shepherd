@@ -68,6 +68,12 @@ may be committed explicitly; runtime fieldnote sessions remain ignored.
 - Background Herdr placement uses `--no-focus`.
 - Temporary launch/session resources are removed only after the child pane is
   confirmed gone.
+- A tracked task settles only through an explicit child `shepherd_done`. When a
+  turn ends with a tracked task still open, `src/extension/shepherd-done.ts`
+  may nudge at most once per task (`PI_SHEPHERD_DONE_NUDGES`, `0` disables it),
+  never after an aborted or errored turn and never while a tracked request is
+  outstanding. A nudge never invents a terminal status; an exhausted budget is
+  escalated to the parent as an ordinary message.
 
 ## Reference implementation
 

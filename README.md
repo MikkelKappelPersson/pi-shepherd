@@ -92,6 +92,12 @@ shepherd_watch({ id: "<task ID>" })
 
 When the task settles, the watcher delivers a completion notification containing the result. Delivery uses pi's steer mode: if the Shepherd is mid-turn, the notification is injected between tool rounds (before cleanup calls such as `shepherd_close`); if the Shepherd is idle, it triggers a new turn immediately. Watchers finish automatically after all their tasks settle; they do not close agents. Use `shepherd_watch` for non-blocking completion notifications and `shepherd_status` to inspect intermediate task state.
 
+### Forgotten completion nudges
+
+If a child ends its turn while its tracked task is still open — the common slip being finished work with no `shepherd_done` — the child extension notices at that exact boundary and feeds itself one reminder turn asking for a terminal `shepherd_done`. The nudge is deliberately narrow: it only fires for a tracked task the child still holds, never after an aborted or errored turn, and never while a tracked request (`expectsReply`) is outstanding, because ending the turn is how a child waits for an answer.
+
+The reminder budget is one turn per task by default (`PI_SHEPHERD_DONE_NUDGES`, `0` disables it). If the task is still open afterwards, the child reports the stall to the parent as a normal Shepherd message instead of inventing a status — the parent then blocks, cancels, or waits for the task deadline. Legacy `shepherd_prompt` runs are unaffected: they settle through the completion sidecar at turn end.
+
 ### Messaging between agents
 
 Agents in the same project can message each other through the parent broker. The child's `shepherd_message` tool can target `parent` or an owned agent ID. A peer question that requires an answer is sent with `expectsReply: true`:

@@ -41,6 +41,8 @@ shepherd_spawn({
 | `shepherd_message` | `target`: `parent` or an owned agent ID, `message`; optional `taskId`, `threadId`, `replyTo`, `expectsReply`, `delivery` | A child sends an asynchronous message to the parent or a peer. `expectsReply` (to a parent task) opens the tracked reply request. |
 | `shepherd_done` | `taskId`, `summary`; optional `ok`, `returnCode`, `error` | The only normal successful completion for a tracked task. Repeated calls are idempotent. |
 
+A child that ends a turn with its tracked task still open feeds itself one reminder turn asking for `shepherd_done` (budget: one per task, `PI_SHEPHERD_DONE_NUDGES` overrides, `0` disables). Aborted or errored turns and turns waiting on an `expectsReply` request are never nudged; a task that survives every reminder is reported to the parent as a stalled completion.
+
 ## IDs at a glance
 
 - **Agent id** – from `shepherd_spawn`; accepted by `delegate`, `message`, `status`, `close`.
