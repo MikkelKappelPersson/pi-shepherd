@@ -42,6 +42,7 @@ import {
   configureParentMessageNotifications,
 } from '../runtimes/herdr/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from '../core/config.ts';
+import { unseenCompletionLedger } from '../core/unseen-completions.ts';
 import { lifecycleRegistry, LifecycleError } from '../runtimes/herdr/orchestration.ts';
 import { createHerdrRuntime } from '../runtimes/herdr/runtime.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
@@ -369,7 +370,7 @@ function reusableText(lastComponent: unknown): Text {
  * The message content intentionally remains the detailed protocol text for the
  * model/API; this formatter is only used by the human-facing message renderer.
  */
-function renderShepherdNotification(
+export function renderShepherdNotification(
   message: any,
   options: { expanded?: boolean; outputPad?: number },
   theme: any,
@@ -1059,6 +1060,11 @@ export async function doAction(
       }
       if (taskIds.length > 0) {
         const registration = taskWatcherService.watch(taskIds);
+        // Retrieval clear: an explicit watch is the authoritative way to pull
+        // already-settled task results, so their pending unseen notices must
+        // not fire later (the late delivery never reaches the watcher
+        // notifier; see spec 007 section 5).
+        unseenCompletionLedger.clear(registration.taskIds);
         const summary =
           registration.pending.length > 0
             ? `watching ${registration.pending.length} task${registration.pending.length === 1 ? '' : 's'} asynchronously`
@@ -1121,11 +1127,20 @@ export async function doAction(
       const id = a.id ?? a.handle;
       await runtime.close(id);
       const handle = lifecycleRegistry.getAgent(id).handle;
+      const cleared = unseenCompletionLedger.clearForAgent(handle.id);
+      const clearedNote =
+        cleared.length > 0
+          ? `; cleared ${cleared.length} unseen completion(s): ${cleared.join(', ')}`
+          : '';
       return textResult(
-        `closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
+        `closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}${clearedNote}`,
         {
           id: handle.id,
-          returnValue: { id: handle.id },
+          ...(cleared.length > 0 ? { clearedUnseenCompletions: cleared } : {}),
+          returnValue: {
+            id: handle.id,
+            ...(cleared.length > 0 ? { clearedUnseenCompletions: cleared } : {}),
+          },
         }
       );
     }
@@ -1567,7 +1582,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     name: 'shepherd_watch',
     label: 'Shepherd: watch task',
     description:
-      'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as a custom Shepherd follow-up message. Legacy prompt ids from shepherd_prompt are still accepted.',
+      'Register a non-blocking one-shot watcher for one task or an array of task ids returned by shepherd_delegate. A watcher reports only terminal task outcomes—a child must explicitly call shepherd_done (or the task must fail, time out, or be cancelled) before a result is reported; idle, agent_end, and waiting states do not complete it. Returns immediately with pending and already-completed results; later completions arrive as custom Shepherd notifications delivered with steer. Unwatched settlements are surfaced at the next settle boundary or as one coalesced idle wake. Legacy prompt ids from shepherd_prompt are still accepted.',
     promptSnippet: 'Watch task completion asynchronously without blocking the parent turn.',
     promptGuidelines: [
       'Pass task ids returned by shepherd_delegate; legacy prompt ids from shepherd_prompt are also accepted. Never pass agent ids or Herdr pane ids.',

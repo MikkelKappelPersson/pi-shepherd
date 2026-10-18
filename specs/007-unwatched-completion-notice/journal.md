@@ -14,6 +14,10 @@
   (an unwatched settlement produces the boundary notice with the retrieval
   command; `shepherd_watch` retrieves the result; no duplicate notice).
   Then merge `feat/007-unwatched-completion-notice` back into `main`.
+- **Status: implemented, reviewed, and verified.** Full `npm test`
+  EXIT=0 with 487 PASS assertions (new suite in the chain; no existing
+  test file modified); live Herdr smoke ALL PASS twice, including once
+  after the review fixes.
 
 ## Decisions
 
@@ -62,3 +66,29 @@
      `completions`); close reports dropped entries; drop-on-notify replaces
      the `unseen|notified` two-state design; debounce/ledger injectable for
      deterministic tests; docs fix for the stale "follow-ups" wording.
+- 2026-10-18: implementation delegated to worker-05
+  (`shepherd-task-3a2282a0-93277d49-…`, watched). It delivered the ledger,
+  observer + `source` tag, bridge, wiring, tests, and docs without
+  committing. I inspected the diff, ran the full suite, and ran the live
+  smoke, which caught one harness bug (counting every `sendMessage` instead
+  of the unseen-notice custom type) and then passed.
+- 2026-10-18: independent code review delegated to reviewer-05
+  (`shepherd-task-3a2282a0-713bd813-…`, watched). Verdict: **no
+  Critical**; all 3 spec-review Criticals and all 8 warnings confirmed
+  fixed, boundary semantics cross-checked against pi's runner internals.
+  Two warnings fixed after review: (a) `hadWatchers` no longer counts a
+  callback-less watcher registration as observed, and (b) the test suite
+  now guards the delegate-failure source tag end-to-end and watched
+  settlement suppression at the bridge level.
+- 2026-10-18: post-review polish adopted from the suggestions: summary
+  detail falls back to error text on an empty summary and is clipped at
+  200 chars (full result stays one `shepherd_watch` away); the renderer
+  falls back to message content when `details.settlements` is absent;
+  `agent_settled` no longer schedules an empty-ledger timer; the boundary
+  comment names the cross-extension projection trigger. Not adopted:
+  clearing on `waitForTasks` retrieval (not reachable from the tool
+  surface; the spec defines clearing on the watch action and the notice is
+  accurate) and close-details duplication (consistent with existing
+  actions).
+- 2026-10-18: final verification after the fixes: `npm test` EXIT=0,
+  487 PASS, no failures; live smoke ALL PASS; then merge to `main`.

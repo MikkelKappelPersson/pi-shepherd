@@ -366,12 +366,16 @@ export async function delegateAgent(
     lifecycleRegistry.setTaskRunning(task);
     return task;
   } catch (error) {
-    lifecycleRegistry.settleTask(task, {
-      status: 'failed',
-      ok: false,
-      returnCode: 1,
-      error: String((error as any)?.message ?? error),
-    });
+    lifecycleRegistry.settleTask(
+      task,
+      {
+        status: 'failed',
+        ok: false,
+        returnCode: 1,
+        error: String((error as any)?.message ?? error),
+      },
+      { source: 'delegate-submission-failure' }
+    );
     throw new Error(`Task submission failed: ${String((error as any)?.message ?? error)}`);
   }
 }

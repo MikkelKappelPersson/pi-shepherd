@@ -6,7 +6,7 @@ are complete. This spec is `007-unwatched-completion-notice`
 
 ## Phase 1 — Detection + ledger (core)
 
-- [ ] **1.1 Add `src/core/unseen-completions.ts`**
+- [x] **1.1 Add `src/core/unseen-completions.ts`**
   - `UnseenCompletionLedger` keyed by `taskId`, entries are the structural
     `UnseenSettlement` (result fields + optional `agent`/`label`),
     insertion order; a queue of un-noticed settlements.
@@ -20,7 +20,7 @@ are complete. This spec is `007-unwatched-completion-notice`
     `src/extension/` imports; export the class and a
     `unseenCompletionLedger` singleton (mirroring `taskWatcherService`).
 
-- [ ] **1.2 Add the settlement observer to the task registry**
+- [x] **1.2 Add the settlement observer to the task registry**
   - `onTaskSettled(listener): () => void` in
     `src/runtimes/herdr/orchestration.ts`; listener receives
     `(result, { hadWatchers, agent?, label?, source? })`, with `result`
@@ -38,7 +38,7 @@ are complete. This spec is `007-unwatched-completion-notice`
   - Document the hook in the code as part of the runtime contract so the
     durable runtime (spec 006 Phase 1+) implements it identically.
 
-- [ ] **1.3 Core cases in `test/verify-unseen-completions.mjs`**
+- [x] **1.3 Core cases in `test/verify-unseen-completions.mjs`**
   - Create the suite file with ledger + observer cases first (run it
     directly; chain wiring happens in 3.1).
   - Ledger: cancelled exclusion, had-watchers exclusion,
@@ -50,7 +50,7 @@ are complete. This spec is `007-unwatched-completion-notice`
 
 ## Phase 2 — Notice delivery (extension)
 
-- [ ] **2.1 Session-scoped bridge + activity tracking + idle wake**
+- [x] **2.1 Session-scoped bridge + activity tracking + idle wake**
   - New `src/extension/unseen-completions.ts`,
     `configureUnseenCompletionBridge(pi, { coalesceMs?, ledger? })`.
   - Subscribe `lifecycleRegistry.onTaskSettled` on `session_start`
@@ -68,7 +68,7 @@ are complete. This spec is `007-unwatched-completion-notice`
     `pi.sendMessage` function; synchronous send failure leaves entries
     pending (no unbounded retry).
 
-- [ ] **2.2 Boundary continuation**
+- [x] **2.2 Boundary continuation**
   - `pi.on("agent_before_settle", event)`: only when
     `event.outcome === "completed"`, `event.context.canContinue !== false`,
     and pending entries exist — build one `custom_message` entry, drain
@@ -77,7 +77,7 @@ are complete. This spec is `007-unwatched-completion-notice`
   - Loop guard: drained entries never re-notify; a second boundary with no
     new entries returns `undefined`.
 
-- [ ] **2.3 Notice content + renderer**
+- [x] **2.3 Notice content + renderer**
   - One formatter (exported for tests) producing the spec's text: header,
     `- <taskId> (<agent>[, "label"]): <status> — <summary|error>` lines,
     and `Full results: shepherd_watch({ id: [ "id", ... ] })`.
@@ -86,7 +86,7 @@ are complete. This spec is `007-unwatched-completion-notice`
     `renderShepherdNotification` from `src/extension/shepherd.ts` and
     register `shepherd.task.unseen` with it plus the notice formatter.
 
-- [ ] **2.4 Clearing wiring**
+- [x] **2.4 Clearing wiring**
   - `src/extension/shepherd.ts` `watch` action:
     `unseenCompletionLedger.clear(registration.taskIds)` after
     `taskWatcherService.watch(taskIds)` — the authoritative retrieval
@@ -97,7 +97,7 @@ are complete. This spec is `007-unwatched-completion-notice`
   - `session_shutdown` clears timers, observer subscription, and the
     ledger; `session_start` clears stale entries before going idle.
 
-- [ ] **2.5 Wire the bridge in `index.ts`**
+- [x] **2.5 Wire the bridge in `index.ts`**
   - Call `configureUnseenCompletionBridge(pi)` after the
     `PI_SHEPHERD_SESSION` guard and `registerShepherdTools(pi)`
     (`index.ts` ~447). Not inside `registerShepherdTools`: six suites pass
@@ -107,7 +107,7 @@ are complete. This spec is `007-unwatched-completion-notice`
 
 ## Phase 3 — Verification, docs, landing
 
-- [ ] **3.1 Finish `test/verify-unseen-completions.mjs` + wiring**
+- [x] **3.1 Finish `test/verify-unseen-completions.mjs` + wiring**
   - Add bridge cases with a fake pi surface (capture `on`,
     `registerMessageRenderer`, `sendMessage` like
     `test/verify-parent-surface.mjs`): idle burst → exactly one
@@ -120,11 +120,11 @@ are complete. This spec is `007-unwatched-completion-notice`
   - Register `unseen-completions:test` in `package.json` and append it to
     the `test` chain.
 
-- [ ] **3.2 Full suite untouched and green**
+- [x] **3.2 Full suite untouched and green**
   - `npm test` with `PI_*`/`HERDR_*` unset: all existing suites + the new
     script pass; no existing test file modified.
 
-- [ ] **3.3 Docs**
+- [x] **3.3 Docs**
   - README `### Delegate, then watch`: unwatched settlements surface at the
     next settle boundary, or as one wake when the Shepherd is idle; the
     notice names `shepherd_watch` for retrieval.
@@ -136,7 +136,7 @@ are complete. This spec is `007-unwatched-completion-notice`
     description in `src/extension/shepherd.ts` ~1570) to match the actual
     `steer` delivery.
 
-- [ ] **3.4 Live smoke + journal**
+- [x] **3.4 Live smoke + journal**
   - Throwaway script (not committed): delegate to a real agent with **no**
     watch; the boundary notice appears with the retrieval command; the
     result is retrievable; no duplicate notice follows.

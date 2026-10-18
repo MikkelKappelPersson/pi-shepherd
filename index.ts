@@ -25,6 +25,7 @@ import {
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
+import { configureUnseenCompletionBridge } from './src/extension/unseen-completions.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/runtimes/herdr/orchestration.ts';
 import {
   shutdownPromptWatchers,
@@ -445,6 +446,7 @@ export default function (pi: ExtensionAPI) {
 
   // Tools for natural-language use.
   registerShepherdTools(pi);
+  configureUnseenCompletionBridge(pi);
   registerSubagentStatusWidget(pi);
 
   pi.registerCommand('shepherd', {

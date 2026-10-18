@@ -133,6 +133,33 @@ export interface TaskSettlement {
   completedAt?: number;
 }
 
+/** Internal source tags for settlements that are not unseen-at-source. */
+export type TaskSettlementSource = 'delegate-submission-failure';
+
+/**
+ * Context attached to each registry settlement observation.
+ *
+ * `hadWatchers` is true only when at least one task-watcher callback was
+ * actually invoked for this settlement. `agent`/`label` come from the settled
+ * agent's handle. `source` marks settlements callers must not treat as unseen
+ * completions (a delegate submission failure is already reported in the
+ * `shepherd_delegate` tool result).
+ */
+export interface TaskSettlementContext {
+  hadWatchers: boolean;
+  agent?: string;
+  label?: string;
+  source?: TaskSettlementSource;
+}
+
+/** One registry settlement observation; see {@link LifecycleRegistry.onTaskSettled}. */
+export type TaskSettledListener = (result: TaskResult, context: TaskSettlementContext) => void;
+
+/** Internal settle options; only the delegate failure path passes `source`. */
+export interface SettleTaskOptions {
+  source?: TaskSettlementSource;
+}
+
 export interface CreateTaskOptions {
   timeoutMs?: number;
   deadlineAt?: number;
@@ -334,9 +361,27 @@ export class LifecycleRegistry {
   >();
   private readonly promptWatchers = new Map<string, Set<string>>();
   private readonly taskWatchers = new Map<string, Set<string>>();
+  private readonly settlementListeners = new Set<TaskSettledListener>();
 
   private id(kind: IdKind): string {
     return mintId(kind, this.sessionId);
+  }
+
+  /**
+   * Registry contract: observe settlements that reach a terminal task state.
+   *
+   * The listener fires once per actual transition, after the task-watcher
+   * fan-out, with a shallow copy of the result and a fresh context. Listener
+   * failures are swallowed and can never affect settlement; with no listener
+   * subscribed, `settleTask` behaves exactly as before. Legacy prompt
+   * settlements are not observed. Any replacement runtime (spec 006,
+   * Phase 1+) must expose this hook with the same semantics.
+   */
+  onTaskSettled(listener: TaskSettledListener): () => void {
+    this.settlementListeners.add(listener);
+    return () => {
+      this.settlementListeners.delete(listener);
+    };
   }
 
   /**
@@ -979,7 +1024,11 @@ export class LifecycleRegistry {
     return { session: record.artifactSession, artifact: record.artifact };
   }
 
-  settleTask(input: TaskHandleInput | unknown, settlement: TaskSettlement): TaskResult {
+  settleTask(
+    input: TaskHandleInput | unknown,
+    settlement: TaskSettlement,
+    options: SettleTaskOptions = {}
+  ): TaskResult {
     const record = this.taskRecord(input);
     if (record.settled) return { ...record.result! };
     if (!['completed', 'blocked', 'failed', 'cancelled', 'timed_out'].includes(settlement.status)) {
@@ -1072,13 +1121,30 @@ export class LifecycleRegistry {
         /* notification delivery must not break lifecycle settlement */
       }
     };
+    let hadWatchers = false;
     for (const watcherId of watcherIds) {
       const watcher = this.watchers.get(watcherId);
       if (!watcher || watcher.delivered.has(record.taskId)) continue;
       watcher.delivered.add(record.taskId);
       watcher.pending.delete(record.taskId);
       notifyTaskWatcher(watcher, result, agentHandle);
+      // Only a watcher that actually registered a callback counts as observed;
+      // a callback-less registration (internal API) must not suppress the
+      // unseen-completion notice.
+      if (watcher.callback !== undefined) hadWatchers = true;
       if (watcher.pending.size === 0) this.watchers.delete(watcherId);
+    }
+    const settlementContext: TaskSettlementContext = {
+      hadWatchers,
+      ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+      ...(options.source !== undefined ? { source: options.source } : {}),
+    };
+    for (const listener of [...this.settlementListeners]) {
+      try {
+        listener({ ...result }, { ...settlementContext });
+      } catch {
+        /* settlement observation must not break lifecycle settlement */
+      }
     }
     return { ...result };
   }

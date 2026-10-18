@@ -18,8 +18,10 @@ pi-shepherd exposes these structured tools to the Shepherd. Lifecycle IDs are op
 | `shepherd_delegate` | `target`: agent ID, `task`: description; optional `timeout` | Start a tracked task and return a task ID without waiting. One active task per agent. |
 | `shepherd_message` | `target`: agent ID, `message`; optional `taskId`, `threadId`, `replyTo`, `expectsReply`, `delivery` | Send an asynchronous message (parent or peer). `expectsReply` opens a tracked reply request; the sender's task enters `waiting` until the reply. |
 | `shepherd_prompt` | `id`: agent ID, `message`: one-turn message | **Deprecated** compatibility path. Ties completion to one child turn; prefer `shepherd_delegate` for tracked work. |
-| `shepherd_watch` | `id`: task ID(s) (preferred) or legacy prompt ID(s) | Register a non-blocking completion watcher; completions arrive as follow-ups. |
+| `shepherd_watch` | `id`: task ID(s) (preferred) or legacy prompt ID(s) | Register a non-blocking completion watcher; completions arrive as steered notifications. An unwatched settlement surfaces at the next settle boundary or as one coalesced idle wake. |
 | `shepherd_close` | `id`: agent ID | Close an owned agent, cancel its active task (and unresolved prompt), and clear pending requests. |
+
+`shepherd_watch` is the explicit observation point: watching an already-settled task returns its result synchronously, and a pending watch delivers steered notifications as tasks settle. An unwatched settlement is still surfaced at the next settle boundary (one extra model request) while the Shepherd is busy, or as one coalesced idle wake; the notice names the `shepherd_watch` call that retrieves the full results.
 
 Example:
 
