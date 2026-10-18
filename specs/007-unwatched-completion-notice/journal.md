@@ -92,3 +92,21 @@
   actions).
 - 2026-10-18: final verification after the fixes: `npm test` EXIT=0,
   487 PASS, no failures; live smoke ALL PASS; then merge to `main`.
+
+## Landing — 2026-10-18
+
+- Landed on `main` as `93fafe8` (fast-forward from
+  `feat/007-unwatched-completion-notice`).
+- Evidence at landing: `npm test` EXIT=0, 487 PASS assertions (new
+  `unseen-completions:test` in the chain; every pre-existing suite
+  untouched); live Herdr smoke ALL PASS — a real spawned worker with no
+  watcher produced exactly one boundary notice (`continue: true`) while
+  busy, exactly one coalesced `triggerTurn` notice while idle, and
+  `shepherd_watch` retrieval of the settled task cleared the ledger with
+  no duplicate notice.
+- Review: reviewer-05 found no Critical; all three spec-review Criticals
+  and all eight warnings were verified fixed before merge.
+- Deferred non-goals (kept in issue #15): auto-watch on delegate;
+  child-side `task_done_ack`; ledger persistence across sessions; a
+  fallback when a watcher exists but its notification delivery is
+  swallowed; clearing on `waitForTasks` retrieval.
