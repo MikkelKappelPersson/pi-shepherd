@@ -99,19 +99,19 @@ dilute. To prevent it:
 `src/runtimes/`; the pi-coding-agent surface stays in `src/extension/`:
 
 ```text
-src/core/            discovery, artifact-sessions, types, ID codec
+src/core/            discovery, artifact-sessions, types, ids, config (settings store)
 src/runtimes/
   runtime.ts         ShepherdRuntime interface (opaque types only)
-  herdr/             current herdr.ts, orchestration.ts, lifecycle.ts, messaging.ts
+  herdr/             current herdr.ts, orchestration.ts, lifecycle.ts (+ messaging.ts support)
   durable/           new runtime.ts + extension.ts
-src/extension/       pi-coding-agent tools/commands; calls runtime.ts
+src/extension/       pi-coding-agent tools/commands/settings UI; calls runtime.ts
 ```
 
 ### Runtime interface
 
-Extract what `src/core/{herdr,orchestration,lifecycle,messaging}.ts` do
-today behind a pure interface. Existing Herdr code moves, behavior does
-not.
+Extract what `src/core/{herdr,orchestration,lifecycle}.ts` do today behind
+a pure interface; `messaging.ts` moves along as Herdr child I/O support.
+Existing Herdr code moves, behavior does not.
 
 ```ts
 // src/runtimes/runtime.ts (new, no herdr or pi-durable import)
@@ -126,17 +126,31 @@ interface ShepherdRuntime {
 }
 ```
 
-- `src/runtimes/herdr/` (new): `herdr.ts`, `orchestration.ts`,
-  `lifecycle.ts`, and `messaging.ts` move here rename-only and jointly
-  implement the interface. `src/core/` keeps only shared domain modules.
+- `src/core/ids.ts` (new): opaque ID mint/parse — formats and validation
+  errors extracted from `LifecycleRegistry` so both runtimes mint and
+  validate through one codec.
+- `src/runtimes/herdr/` (new): `herdr.ts`, `orchestration.ts`, and
+  `lifecycle.ts` move here rename-only and implement the interface;
+  `messaging.ts` (child filesystem broker) moves alongside as a support
+  module, not an interface implementer.
 - `src/runtimes/durable/runtime.ts` (new): implements the same interface
   over pi-durable.
-- `src/extension/shepherd.ts`: unchanged tool schemas; calls the runtime
-  interface instead of Herdr internals.
+- `src/core/config.ts`: the two-layer settings store moves here from
+  `src/extension/config.ts` so runtimes never import the extension layer;
+  `/shepherd settings` UI stays in `src/extension/`.
+- `src/extension/shepherd.ts`: unchanged tool schemas; lifecycle calls go
+  through the runtime interface.
 
-Phase 0 leaves temporary re-export shims at the old `src/core/*` paths so
-the existing `verify-*.mjs` suite passes untouched. Shims and import paths
-are cleaned up together in Phase 1.
+The interface is lifecycle-only. `/shepherd herd|agents|prune` and the 🐑
+widget read runtime introspection (owned-pane/registry summaries,
+ownership checks) and keep those accessors on the runtime module in
+Phase 0; durable defines its own in Phase 2 (owned conversations/tasks
+only). Introspection must not expose native IDs either.
+
+Phase 0 leaves temporary re-export shims at the old `src/core/*` and
+`src/extension/config.ts` paths so the existing `verify-*.mjs` suite
+passes untouched. Shims and import paths are cleaned up together in
+Phase 1.
 
 IDs stay opaque session-scoped strings as today (`shepherd_spawn -> agent
 ID`, `shepherd_delegate -> task ID`, `shepherd_message -> message ID`,
@@ -187,14 +201,21 @@ pi-durable has its own `defineExtension/defineTool` with
 `(args, api, chordContext)` signatures. Keep one shared core, two adapters:
 
 - Shared (no runtime import): `src/core/discovery.ts` (Markdown
-  frontmatter: `name/description/tools/model/thinking/omit-*`), prompt
-  assembly, fieldnotes path logic, ID codec.
+  frontmatter: `name/description/tools/model/thinking/omit-*`),
+  `src/core/artifact-sessions.ts` (fieldnotes paths/session persistence),
+  `src/core/ids.ts` (opaque ID codec), `src/core/types.ts` (tool-schema
+  types), and `src/core/config.ts` (settings store + fieldnotes snapshot).
+- Adapter-owned: prompt/instructions assembly (depends on the adapter's
+  tool list) and runtime introspection.
 - `src/extension/*`: the pi-coding-agent surface, unchanged behavior; it
   resolves the active runtime through `src/runtimes/runtime.ts`.
 - `src/runtimes/durable/extension.ts` (new): `defineExtension({ name: "shepherd",
-  tools: [shepherd_spawn, shepherd_delegate, shepherd_message,
-  shepherd_watch, shepherd_status, shepherd_close, shepherd_read],
-  docs: [ShepherdHerdDoc, ShepherdTasksDoc] })`.
+  tools: [shepherd, shepherd_spawn, shepherd_delegate, shepherd_message,
+  shepherd_prompt, shepherd_watch, shepherd_status, shepherd_close,
+  shepherd_read] })` plus the child surface (`shepherd_message` /
+  `shepherd_done`) and docs (`ShepherdHerdDoc, ShepherdTasksDoc`). Same
+  names and schemas as the pi-coding-agent adapter, including the
+  deprecated `shepherd_prompt` compatibility path.
 
 `@earendil-works/pi-durable` + `@earendil-works/chord` become optional
 peerDeps. Herdr-only installs must not grow install size or require new
@@ -318,7 +339,8 @@ Concrete settings for the motivating use case:
 
 Implementation is complete only when:
 
-- existing `verify-*.mjs` suite passes unchanged on `backend: herdr`;
+- existing `verify-*.mjs` suite passes on `backend: herdr` (assertions
+  unchanged; Phase 1 only rewrites import specifiers);
 - new `verify-durable-matrix.mjs` runs `delegate/task-completion/
   task-failures/message-routing/multi-wait/watchers` against
   `MemoryStorage + fauxProvider` on both backends with identical

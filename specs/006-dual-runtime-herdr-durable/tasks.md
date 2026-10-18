@@ -16,23 +16,37 @@ only when its implementation + verification are complete. This spec is
     rule for `shepherd_read`.
   - Interface file imports neither `herdr` CLI nor `pi-durable`; `src/core/`
     keeps only shared domain modules (`discovery.ts`, `artifact-sessions.ts`,
-    `types.ts`, ID codec).
+    `types.ts`, `ids.ts`, `config.ts`).
 
-- [ ] **0.2 Move Herdr implementation behind it**
+- [ ] **0.2 Extract `src/core/ids.ts`**
+  - Move ID minting (`shepherd-<kind>-<session>-<uuid>`) and handle
+    parse/validation (`handleId`, `taskHandleId`) out of
+    `LifecycleRegistry` into a pure codec both runtimes call.
+  - `orchestration.ts` keeps handles and registries only; formats and
+    `invalid_handle` messages stay byte-identical.
+  - Unit test: id formats mint/parse/validate the same before and after.
+
+- [ ] **0.3 Move Herdr implementation behind it**
   - Move current `herdr.ts + orchestration.ts + lifecycle.ts +
-    messaging.ts` rename-only into `src/runtimes/herdr/`, jointly
-    implementing the interface.
-  - Route `src/extension/shepherd.ts` through it with zero tool-schema,
-    prompt, settings, widget, or fieldnotes-path change.
-  - Leave temporary re-export shims at the old `src/core/*` paths so the
-    Phase 0 suite passes untouched; 1.5 removes them.
+    messaging.ts` rename-only into `src/runtimes/herdr/`; `lifecycle`/
+    `orchestration`/`herdr` implement the interface, `messaging.ts` is
+    support. Move the settings store `src/extension/config.ts` →
+    `src/core/config.ts` rename-only; `/shepherd settings` UI stays put.
+  - Route lifecycle calls in `src/extension/shepherd.ts` and `index.ts`
+    through it with zero tool-schema, prompt, settings, widget, or
+    fieldnotes-path change. Discovery stays shared; herd/prune/widget keep
+    runtime introspection accessors.
+  - Leave temporary re-export shims at the old `src/core/*` and
+    `src/extension/config.ts` paths so the Phase 0 suite passes untouched;
+    1.5 removes them.
   - Preserve: `created-panes.json` ownership, `--no-focus`, temp-file
     lifetime, session registries, `shepherd_done` 1-nudge
     (`PI_SHEPHERD_DONE_NUDGES`), `confirmProjectAgents` user-owned.
 
-- [ ] **0.3 Verify boundary**
-  - Full existing `verify-*.mjs` suite passes untouched; old `src/core/*`
-    shims are the only stale-path survivors.
+- [ ] **0.4 Verify boundary**
+  - Full existing `verify-*.mjs` suite passes untouched.
+  - After 0.3, `src/` and `index.ts` import runtime paths, not shims; old
+    paths survive only as shims for the test suite until 1.5.
   - Live: idle spawn, non-blocking prompt, single + multi-wait, status,
     close, ownership refusal, project-agent gate.
   - Herdr-only install unchanged (no new dep evaluated).
@@ -78,13 +92,17 @@ only when its implementation + verification are complete. This spec is
   - Asserts same handoff, opaque-ID rejection (pane + conversation IDs
     refused), `MemoryStorage` resume after restart.
 
-- [ ] **1.5 Update import paths + drop compat shims**
-  - Rewrite `test/verify-*.mjs` and remaining `src/` imports from
-    `../src/core/{herdr,orchestration,lifecycle,messaging}.ts` to the
-    `src/runtimes/herdr/*` paths; assertions stay unchanged.
+- [ ] **1.5 Update import/path references + drop compat shims**
+  - Rewrite imports in `test/verify-*.mjs` and root `index.ts` from
+    `src/core/{herdr,orchestration,lifecycle,messaging}.ts` and
+    `src/extension/config.ts` to `src/runtimes/herdr/*` and
+    `src/core/config.ts`; assertions stay unchanged.
+  - Update non-import path strings (e.g. `test/verify-status-widget.mjs`
+    module-path assertions) and the `index.ts` header comment describing
+    `src/core/` as the engine.
   - Delete the Phase 0 re-export shims; no old-path survivors remain.
-  - Refresh `AGENTS.md` layout and semantic-center references to the new
-    tree.
+  - Refresh layout and semantic-center references in `AGENTS.md` and
+    `docs/plans/architecture.md` (stale `src/core` tree) to the new tree.
   - `npm test` green with shims gone and Herdr-only install still clean.
 
 ## Phase 2 — Message/status/read/close parity

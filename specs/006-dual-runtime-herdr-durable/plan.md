@@ -31,23 +31,26 @@ reachable. Panes never write in `auto`.
 
 ## Design decisions
 
-- Core is pure: `discovery.ts` (already pure), ID codec, fieldnotes *path*
-  logic, orchestration semantics (`delegate = submit + watch`,
-  `expectsReply -> waiting`, `staleWait` info-only + `timeout -> blocked`,
-  1-turn `done-nudge` budget, close-ownership rule). Core imports neither
-  the `herdr` CLI nor `pi-durable`.
+- One behavioral contract, two implementations: `delegate = submit +
+  watch`, `expectsReply -> waiting`, `staleWait` info-only + `timeout ->
+  blocked`, 1-turn `done-nudge` budget, and the close-ownership rule are
+  specified once and implemented per runtime — Herdr keeps today's code,
+  durable reimplements the contract. Shared pure helpers (`discovery.ts`,
+  `ids.ts`, fieldnotes paths, settings store, tool-schema types) live in
+  `src/core/`, which imports neither the `herdr` CLI nor `pi-durable`.
 - Runtimes are thin executors of one interface (`src/runtimes/runtime.ts`):
   `spawn / delegate / message / watch / status / close / read`.
   Herdr-runtime is moved current code; durable-runtime is new over
   `Harness / createConversation / submit(requestId) / wait / abort /
   viewState / watchEvents / taskGraph`.
 - Layout: `src/core/` keeps shared domain only (`discovery.ts`,
-  `artifact-sessions.ts`, `types.ts`, ID codec). `src/runtimes/herdr/`
-  receives the current `herdr.ts + orchestration.ts + lifecycle.ts +
-  messaging.ts` rename-only; `src/runtimes/durable/` is new;
+  `artifact-sessions.ts`, `types.ts`, new `ids.ts`, settings store moved
+  from `extension/config.ts` to `core/config.ts`). `src/runtimes/herdr/`
+  receives `herdr.ts + orchestration.ts + lifecycle.ts` plus `messaging.ts`
+  as support, rename-only; `src/runtimes/durable/` is new;
   `src/extension/` remains the pi adapter. Temporary re-export shims at
-  the old `src/core/*` paths keep the Phase 0 suite untouched; the Phase 1
-  import-path task drops them.
+  the old `src/core/*` and `src/extension/config.ts` paths keep the Phase 0
+  suite untouched; the Phase 1 import-path task drops them.
 - Two adapters, one core: `src/extension/*` stays on
   `ExtensionAPI from '@earendil-works/pi-coding-agent'`; new
   `src/runtimes/durable/extension.ts` exposes `defineExtension({name:"shepherd"})`
@@ -76,7 +79,7 @@ reachable. Panes never write in `auto`.
 - `confirmProjectAgents` stays user-owned; backend choice follows the same
   rule (project file cannot force durable on).
 
-## Phase 0 — Extract runtime interface (no behavior change)
+## Phase 0 — Extract runtime boundary (no behavior change)
 
 ### 0.1 Define `src/runtimes/runtime.ts`
 
@@ -85,23 +88,48 @@ RuntimeStatus`. No Herdr identifiers, no durable identifiers in the public
 contract. Document mapping: Herdr `paneId` OR durable
 `{conversationId, submissionId, taskId}` internally.
 
-### 0.2 Move Herdr code
+### 0.2 Extract `src/core/ids.ts`
+
+Move ID minting (`shepherd-<kind>-<session>-<uuid>`) and handle
+parse/validation out of `LifecycleRegistry` into a pure codec both
+runtimes call. `orchestration.ts` keeps handles and registries only.
+Formats and `invalid_handle` messages stay identical.
+
+### 0.3 Move Herdr code
 
 Move current `src/core/herdr.ts + orchestration.ts + lifecycle.ts +
-messaging.ts` rename-only into `src/runtimes/herdr/`, jointly implementing
-the interface. `src/extension/shepherd.ts` calls through it. No schema
-change, no prompt change. Leave re-export shims at the old `src/core/*`
-paths so existing `verify-*.mjs` passes untouched — that is the proof the
-boundary is right.
+messaging.ts` rename-only into `src/runtimes/herdr/` (messaging is support,
+not an interface implementer), and the settings store
+`src/extension/config.ts` → `src/core/config.ts`. `src/extension/shepherd.ts`
+and `index.ts` route lifecycle calls through the interface; discovery stays
+shared and herd/prune/widget keep runtime introspection accessors. No
+schema change, no prompt change. Leave re-export shims at the old
+`src/core/*` and `src/extension/config.ts` paths so existing `verify-*.mjs`
+passes untouched — that is the proof the boundary is right.
 
 Keep: `created-panes.json` ownership source, `--no-focus` backgrounds,
 temp-file lifetime (delete only after pane gone), session-scoped registries
 with clear invalid-handle errors, `shepherd_done` 1-nudge rule
 (`PI_SHEPHERD_DONE_NUDGES`, `0` disables).
 
+### 0.4 Verify boundary
+
+Existing `verify-*.mjs` suite passes untouched, live Herdr checks pass
+(idle spawn, non-blocking prompt, single + multi-wait, status, close,
+ownership refusal, project-agent gate), Herdr-only install evaluates no
+new dependency.
+
 ## Phase 1 — Durable spawn/delegate/watch/done (foreground)
 
-### 1.1 New `src/runtimes/durable/runtime.ts` + `extension.ts`
+### 1.1 Scaffold `src/runtimes/durable/`
+
+Add `@earendil-works/pi-durable` + `@earendil-works/chord` as optional
+peerDeps (Herdr-only installs never import them). Create
+`src/runtimes/durable/runtime.ts` (interface over `Harness`) and
+`src/runtimes/durable/extension.ts` (`defineExtension` with the same tool
+surface + docs).
+
+### 1.2 Sheep-as-conversation
 
 `spawn`: `tx.createConversation({ownership:{kind:"task",taskId}})` +
 `configure()` from agent def. `model:null/default` inherits Shepherd session
@@ -121,7 +149,13 @@ Harness wiring: `Harness.open(storage)` with `MemoryStorage` (tests) or
 `settings.compaction/progress/retry/toolExecution` pass-through, no shepherd
 opinions except defaults that keep 8h logs alive.
 
-### 1.2 Matrix fixture
+### 1.3 Replay policy
+
+App-driving tools stay non-`replay:"safe"`: crash-interrupted calls yield
+`interrupted` + partial output, never silent rerun. Only idempotent
+readers opt in with keyed `executeTool` reattach.
+
+### 1.4 Matrix fixture
 
 Add `test/verify-durable-matrix.mjs`: same test-driver -> crash-reviewer
 fixture on both backends (`MemoryStorage + fauxProvider` for durable).
@@ -129,14 +163,16 @@ Asserts identical orchestrator prompts produce identical handoffs, opaque-ID
 contract holds (pane IDs and conversation IDs both rejected as tool IDs),
 same `requestId` never double-runs.
 
-### 1.3 Update import paths + drop shims
+### 1.5 Update import/path references + drop shims
 
-Rewrite `test/verify-*.mjs` and remaining `src/` imports from
-`../src/core/{herdr,orchestration,lifecycle,messaging}.ts` to
-`../src/runtimes/herdr/*`, then delete the Phase 0 re-export shims.
-Assertions stay unchanged — only import specifiers move. Refresh
-`AGENTS.md` layout references. `npm test` green with no old-path
-survivors.
+Rewrite imports in `test/verify-*.mjs` and root `index.ts` from
+`src/core/{herdr,orchestration,lifecycle,messaging}.ts` and
+`src/extension/config.ts` to `src/runtimes/herdr/*` and `src/core/config.ts`;
+update non-import path strings (e.g. `test/verify-status-widget.mjs`
+module-path assertions) and the `index.ts` header comment. Assertions stay
+unchanged. Delete the Phase 0 shims and refresh layout references in
+`AGENTS.md` and `docs/plans/architecture.md`. `npm test` green with no
+old-path survivors.
 
 ## Phase 2 — Message/status/read/close/timeouts
 
@@ -195,8 +231,8 @@ unsafe -> `interrupted`, safe-keyed -> reattached, report renders).
 
 ## Completion checklist
 
-- [ ] `runtime.ts` extracted, Herdr moved with zero behavior change; Phase
-      0 shims dropped and import paths updated in Phase 1.
+- [ ] `runtime.ts` + `ids.ts` extracted, Herdr moved with zero behavior
+      change; Phase 0 shims dropped and import paths updated in Phase 1.
 - [ ] Durable `spawn/delegate/watch/done` foreground works on memory+sqlite.
 - [ ] `message/expectsReply/status/read/close/timeout/staleWait` parity.
 - [ ] Notes doc <-> file mirror + `fork:asOf` handoff.
