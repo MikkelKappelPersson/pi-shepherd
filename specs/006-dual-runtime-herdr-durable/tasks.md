@@ -7,37 +7,44 @@ only when its implementation + verification are complete. This spec is
 
 ## Phase 0 — Extract 2-runtimes-1-core boundary (no behavior change)
 
-- [ ] **0.1 Add `src/core/runtime.ts` interface**
+- [ ] **0.1 Add `src/runtimes/runtime.ts` interface**
   - Define opaque `AgentHandle / TaskId / MessageId / Completion /
     RuntimeStatus` shapes; no Herdr pane IDs, no durable conversation IDs
     in the public contract.
   - Document internal mapping (Herdr `paneId` OR durable
     `{conversationId, submissionId, taskId}`) and diagnostic-only pane-ID
     rule for `shepherd_read`.
-  - Core file imports neither `herdr` CLI nor `pi-durable`.
+  - Interface file imports neither `herdr` CLI nor `pi-durable`; `src/core/`
+    keeps only shared domain modules (`discovery.ts`, `artifact-sessions.ts`,
+    `types.ts`, ID codec).
 
 - [ ] **0.2 Move Herdr implementation behind it**
-  - Relocate current `herdr.ts + orchestration.ts + lifecycle.ts` behavior
-    into `src/core/herdr-runtime.ts` implementing the interface.
+  - Move current `herdr.ts + orchestration.ts + lifecycle.ts +
+    messaging.ts` rename-only into `src/runtimes/herdr/`, jointly
+    implementing the interface.
   - Route `src/extension/shepherd.ts` through it with zero tool-schema,
     prompt, settings, widget, or fieldnotes-path change.
+  - Leave temporary re-export shims at the old `src/core/*` paths so the
+    Phase 0 suite passes untouched; 1.5 removes them.
   - Preserve: `created-panes.json` ownership, `--no-focus`, temp-file
     lifetime, session registries, `shepherd_done` 1-nudge
     (`PI_SHEPHERD_DONE_NUDGES`), `confirmProjectAgents` user-owned.
 
 - [ ] **0.3 Verify boundary**
-  - Full existing `verify-*.mjs` suite passes untouched.
+  - Full existing `verify-*.mjs` suite passes untouched; old `src/core/*`
+    shims are the only stale-path survivors.
   - Live: idle spawn, non-blocking prompt, single + multi-wait, status,
     close, ownership refusal, project-agent gate.
   - Herdr-only install unchanged (no new dep evaluated).
 
 ## Phase 1 — Durable spawn/delegate/watch/done
 
-- [ ] **1.1 Scaffold `src/durable/` adapter**
+- [ ] **1.1 Scaffold `src/runtimes/durable/` adapter**
   - Add `@earendil-works/pi-durable` + `@earendil-works/chord` as optional
     peerDeps; Herdr-only path never imports them.
-  - Add `src/durable/runtime.ts` implementing `runtime.ts` over `Harness`.
-  - Add `src/durable/extension.ts`:
+  - Add `src/runtimes/durable/runtime.ts` implementing `runtime.ts` over
+    `Harness`.
+  - Add `src/runtimes/durable/extension.ts`:
     `defineExtension({name:"shepherd"})` with shepherd tools + docs
     (`ShepherdHerdDoc, ShepherdTasksDoc`).
 
@@ -70,6 +77,15 @@ only when its implementation + verification are complete. This spec is
     fauxProvider`) with identical orchestrator prompts.
   - Asserts same handoff, opaque-ID rejection (pane + conversation IDs
     refused), `MemoryStorage` resume after restart.
+
+- [ ] **1.5 Update import paths + drop compat shims**
+  - Rewrite `test/verify-*.mjs` and remaining `src/` imports from
+    `../src/core/{herdr,orchestration,lifecycle,messaging}.ts` to the
+    `src/runtimes/herdr/*` paths; assertions stay unchanged.
+  - Delete the Phase 0 re-export shims; no old-path survivors remain.
+  - Refresh `AGENTS.md` layout and semantic-center references to the new
+    tree.
+  - `npm test` green with shims gone and Herdr-only install still clean.
 
 ## Phase 2 — Message/status/read/close parity
 

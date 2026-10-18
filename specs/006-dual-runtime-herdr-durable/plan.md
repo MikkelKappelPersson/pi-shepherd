@@ -36,14 +36,21 @@ reachable. Panes never write in `auto`.
   `expectsReply -> waiting`, `staleWait` info-only + `timeout -> blocked`,
   1-turn `done-nudge` budget, close-ownership rule). Core imports neither
   the `herdr` CLI nor `pi-durable`.
-- Runtimes are thin executors of one interface (`src/core/runtime.ts`):
+- Runtimes are thin executors of one interface (`src/runtimes/runtime.ts`):
   `spawn / delegate / message / watch / status / close / read`.
   Herdr-runtime is moved current code; durable-runtime is new over
   `Harness / createConversation / submit(requestId) / wait / abort /
   viewState / watchEvents / taskGraph`.
+- Layout: `src/core/` keeps shared domain only (`discovery.ts`,
+  `artifact-sessions.ts`, `types.ts`, ID codec). `src/runtimes/herdr/`
+  receives the current `herdr.ts + orchestration.ts + lifecycle.ts +
+  messaging.ts` rename-only; `src/runtimes/durable/` is new;
+  `src/extension/` remains the pi adapter. Temporary re-export shims at
+  the old `src/core/*` paths keep the Phase 0 suite untouched; the Phase 1
+  import-path task drops them.
 - Two adapters, one core: `src/extension/*` stays on
   `ExtensionAPI from '@earendil-works/pi-coding-agent'`; new
-  `src/durable/extension.ts` exposes `defineExtension({name:"shepherd"})`
+  `src/runtimes/durable/extension.ts` exposes `defineExtension({name:"shepherd"})`
   with `(args, api, chordCtx)` signatures. Shared agent frontmatter
   (`name/description/tools/model/thinking/omit-*`) maps to
   `configure({model, thinkingLevel, tools, cwd})` on durable.
@@ -71,7 +78,7 @@ reachable. Panes never write in `auto`.
 
 ## Phase 0 — Extract runtime interface (no behavior change)
 
-### 0.1 Define `src/core/runtime.ts`
+### 0.1 Define `src/runtimes/runtime.ts`
 
 Opaque types only: `AgentHandle / TaskId / MessageId / Completion /
 RuntimeStatus`. No Herdr identifiers, no durable identifiers in the public
@@ -80,10 +87,11 @@ contract. Document mapping: Herdr `paneId` OR durable
 
 ### 0.2 Move Herdr code
 
-Rename current `src/core/herdr.ts + orchestration.ts + lifecycle.ts`
-behavior into `src/core/herdr-runtime.ts` implementing the interface.
-`src/extension/shepherd.ts` calls through it. No schema change, no prompt
-change. Existing `verify-*.mjs` must pass untouched — that is the proof the
+Move current `src/core/herdr.ts + orchestration.ts + lifecycle.ts +
+messaging.ts` rename-only into `src/runtimes/herdr/`, jointly implementing
+the interface. `src/extension/shepherd.ts` calls through it. No schema
+change, no prompt change. Leave re-export shims at the old `src/core/*`
+paths so existing `verify-*.mjs` passes untouched — that is the proof the
 boundary is right.
 
 Keep: `created-panes.json` ownership source, `--no-focus` backgrounds,
@@ -93,7 +101,7 @@ with clear invalid-handle errors, `shepherd_done` 1-nudge rule
 
 ## Phase 1 — Durable spawn/delegate/watch/done (foreground)
 
-### 1.1 New `src/durable/runtime.ts` + `extension.ts`
+### 1.1 New `src/runtimes/durable/runtime.ts` + `extension.ts`
 
 `spawn`: `tx.createConversation({ownership:{kind:"task",taskId}})` +
 `configure()` from agent def. `model:null/default` inherits Shepherd session
@@ -120,6 +128,15 @@ fixture on both backends (`MemoryStorage + fauxProvider` for durable).
 Asserts identical orchestrator prompts produce identical handoffs, opaque-ID
 contract holds (pane IDs and conversation IDs both rejected as tool IDs),
 same `requestId` never double-runs.
+
+### 1.3 Update import paths + drop shims
+
+Rewrite `test/verify-*.mjs` and remaining `src/` imports from
+`../src/core/{herdr,orchestration,lifecycle,messaging}.ts` to
+`../src/runtimes/herdr/*`, then delete the Phase 0 re-export shims.
+Assertions stay unchanged — only import specifiers move. Refresh
+`AGENTS.md` layout references. `npm test` green with no old-path
+survivors.
 
 ## Phase 2 — Message/status/read/close/timeouts
 
@@ -178,7 +195,8 @@ unsafe -> `interrupted`, safe-keyed -> reattached, report renders).
 
 ## Completion checklist
 
-- [ ] `runtime.ts` extracted, Herdr moved with zero behavior change.
+- [ ] `runtime.ts` extracted, Herdr moved with zero behavior change; Phase
+      0 shims dropped and import paths updated in Phase 1.
 - [ ] Durable `spawn/delegate/watch/done` foreground works on memory+sqlite.
 - [ ] `message/expectsReply/status/read/close/timeout/staleWait` parity.
 - [ ] Notes doc <-> file mirror + `fork:asOf` handoff.
