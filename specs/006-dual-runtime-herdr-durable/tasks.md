@@ -7,7 +7,7 @@ only when its implementation + verification are complete. This spec is
 
 ## Phase 0 — Extract 2-runtimes-1-core boundary (no behavior change)
 
-- [ ] **0.1 Add `src/runtimes/runtime.ts` interface**
+- [x] **0.1 Add `src/runtimes/runtime.ts` interface**
   - Define opaque `AgentHandle / TaskId / MessageId / Completion /
     RuntimeStatus` shapes; no Herdr pane IDs, no durable conversation IDs
     in the public contract.
@@ -18,7 +18,7 @@ only when its implementation + verification are complete. This spec is
     keeps only shared domain modules (`discovery.ts`, `artifact-sessions.ts`,
     `types.ts`, `ids.ts`, `config.ts`).
 
-- [ ] **0.2 Extract `src/core/ids.ts`**
+- [x] **0.2 Extract `src/core/ids.ts`**
   - Move ID minting (`shepherd-<kind>-<session>-<uuid>`) and handle
     parse/validation (`handleId`, `taskHandleId`) out of
     `LifecycleRegistry` into a pure codec both runtimes call.
@@ -26,16 +26,20 @@ only when its implementation + verification are complete. This spec is
     `invalid_handle` messages stay byte-identical.
   - Unit test: id formats mint/parse/validate the same before and after.
 
-- [ ] **0.3 Move Herdr implementation behind it**
+- [x] **0.3 Move Herdr implementation behind it**
   - Move current `herdr.ts + orchestration.ts + lifecycle.ts +
     messaging.ts` rename-only into `src/runtimes/herdr/`; `lifecycle`/
     `orchestration`/`herdr` implement the interface, `messaging.ts` is
     support. Move the settings store `src/extension/config.ts` →
     `src/core/config.ts` rename-only; `/shepherd settings` UI stays put.
-  - Route lifecycle calls in `src/extension/shepherd.ts` and `index.ts`
-    through it with zero tool-schema, prompt, settings, widget, or
-    fieldnotes-path change. Discovery stays shared; herd/prune/widget keep
-    runtime introspection accessors.
+  - Route the lifecycle calls that map 1:1 to the lifecycle-only
+    interface (today: `delegate`, `close`) through it; leave call sites
+    whose results/callbacks the interface does not carry (spawn discovery
+    gate, prompt, message result shape, watch callbacks, status detail,
+    read source selection) on the concrete runtime with a comment, with
+    zero tool-schema, prompt, settings, widget, or fieldnotes-path change.
+    Discovery stays shared; herd/prune/widget keep runtime introspection
+    accessors.
   - Leave temporary re-export shims at the old `src/core/*` and
     `src/extension/config.ts` paths so the Phase 0 suite passes untouched;
     1.5 removes them.
@@ -43,7 +47,7 @@ only when its implementation + verification are complete. This spec is
     lifetime, session registries, `shepherd_done` 1-nudge
     (`PI_SHEPHERD_DONE_NUDGES`), `confirmProjectAgents` user-owned.
 
-- [ ] **0.4 Verify boundary**
+- [x] **0.4 Verify boundary**
   - Full existing `verify-*.mjs` suite passes untouched.
   - After 0.3, `src/` and `index.ts` import runtime paths, not shims; old
     paths survive only as shims for the test suite until 1.5.

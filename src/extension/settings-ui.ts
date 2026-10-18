@@ -16,7 +16,7 @@ import {
   projectConfigFile,
   saveSettings,
   type ShepherdSettings,
-} from './config.ts';
+} from '../core/config.ts';
 
 const TIMEOUT_CHOICES = [1, 2, 5, 10, 20, 30, 60];
 const STALE_WAIT_CHOICES = [0, 1, 2, 5, 10, 15, 30];

@@ -28,7 +28,7 @@ import {
   type ChildBroker,
   type ShepherdDelivery,
   type ShepherdMessageEnvelope,
-} from '../core/messaging.ts';
+} from '../runtimes/herdr/messaging.ts';
 import { omitPiDocumentation, replacePiIdentity } from './system-prompt.ts';
 
 /**

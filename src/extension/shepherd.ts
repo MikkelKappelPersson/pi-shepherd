@@ -30,10 +30,8 @@ import {
 } from '../core/types.ts';
 import {
   startAgent,
-  delegateAgent,
   promptAgent,
   statusAgent,
-  closeAgent,
   promptWatcherService,
   configurePromptWatcherNotifications,
   taskWatcherService,
@@ -42,9 +40,10 @@ import {
   type StaleWaitInfo,
   sendParentMessage,
   configureParentMessageNotifications,
-} from '../core/lifecycle.ts';
-import { fieldnotesEnabled, loadSettings } from './config.ts';
-import { lifecycleRegistry, LifecycleError } from '../core/orchestration.ts';
+} from '../runtimes/herdr/lifecycle.ts';
+import { fieldnotesEnabled, loadSettings } from '../core/config.ts';
+import { lifecycleRegistry, LifecycleError } from '../runtimes/herdr/orchestration.ts';
+import { createHerdrRuntime } from '../runtimes/herdr/runtime.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
 import {
   resolveOrCreateParentArtifactSession,
@@ -72,7 +71,7 @@ import {
   setCreatedPaneDir,
   waitForHerdrAgentDetected,
   waitForHerdrShellReady,
-} from '../core/herdr.ts';
+} from '../runtimes/herdr/herdr.ts';
 
 const execFileAsync = promisify(execFile);
 export const SourceSchema = StringEnum(
@@ -896,6 +895,17 @@ export async function doAction(
   signal?: AbortSignal,
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
+  // Lifecycle calls that map 1:1 to the runtime contract go through the Herdr
+  // adapter; calls that need richer results or callbacks stay on their
+  // primitives. The adapter is stateless, so one per action is enough.
+  const runtime = createHerdrRuntime({
+    cwd: ctx.cwd,
+    model: ctx.model,
+    thinkingLevel: ctx.thinkingLevel,
+    hasUI: ctx.hasUI,
+    ui: ctx.ui,
+    sessionId: ctx.sessionManager?.getSessionId(),
+  });
   switch (args.action) {
     case 'spawn': {
       const a: any = args;
@@ -949,21 +959,18 @@ export async function doAction(
       if (!Number.isFinite(timeoutMinutes) || timeoutMinutes <= 0) {
         throw new Error('Delegated task timeout must be a positive number of minutes.');
       }
-      const task = await delegateAgent(a.target, a.task, {
-        timeoutMs: timeoutMinutes * 60_000,
-        sessionId: ctx.sessionManager?.getSessionId(),
-      });
-      const agent = lifecycleRegistry.getAgent(task.agentId).handle;
+      const taskId = await runtime.delegate(a.target, a.task, { timeoutMin: timeoutMinutes });
+      const agent = lifecycleRegistry.getAgent(a.target).handle;
       return textResult(
         `Delegated task to ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
         {
-          id: task.id,
-          taskId: task.id,
-          agentId: task.agentId,
+          id: taskId,
+          taskId,
+          agentId: agent.id,
           state: 'running',
           returnValue: {
-            taskId: task.id,
-            agentId: task.agentId,
+            taskId,
+            agentId: agent.id,
             state: 'running',
           },
         }
@@ -1111,7 +1118,9 @@ export async function doAction(
     }
     case 'close': {
       const a: any = args;
-      const handle = closeAgent(a.id ?? a.handle);
+      const id = a.id ?? a.handle;
+      await runtime.close(id);
+      const handle = lifecycleRegistry.getAgent(id).handle;
       return textResult(
         `closed ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
         {

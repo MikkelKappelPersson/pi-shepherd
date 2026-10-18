@@ -138,8 +138,13 @@ interface ShepherdRuntime {
 - `src/core/config.ts`: the two-layer settings store moves here from
   `src/extension/config.ts` so runtimes never import the extension layer;
   `/shepherd settings` UI stays in `src/extension/`.
-- `src/extension/shepherd.ts`: unchanged tool schemas; lifecycle calls go
-  through the runtime interface.
+- `src/extension/shepherd.ts`: unchanged tool schemas. Lifecycle calls
+  that map 1:1 to the lifecycle-only interface (today: `delegate` and
+  `close`) go through it; calls whose results or callbacks the interface
+  does not carry (spawn discovery gate, prompt, message result shape,
+  watch callbacks, status detail, read source selection) stay on the
+  concrete runtime until a later phase needs them. The per-action routing
+  record lives in `tasks.md` 0.3.
 
 The interface is lifecycle-only. `/shepherd herd|agents|prune` and the 🐑
 widget read runtime introspection (owned-pane/registry summaries,

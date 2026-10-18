@@ -13,7 +13,7 @@ import {
   fieldnotesEnabled,
   initializeSessionSettings,
   loadSettings,
-} from './src/extension/config.ts';
+} from './src/core/config.ts';
 import { openSettings } from './src/extension/settings-ui.ts';
 import {
   doAction,
@@ -25,12 +25,12 @@ import {
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
 import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
-import { lifecycleRegistry, bindSessionOwner } from './src/core/orchestration.ts';
+import { lifecycleRegistry, bindSessionOwner } from './src/runtimes/herdr/orchestration.ts';
 import {
   shutdownPromptWatchers,
   shutdownTaskWatchers,
   shutdownStaleWaitMonitor,
-} from './src/core/lifecycle.ts';
+} from './src/runtimes/herdr/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
 import {
   isHerdrAvailable,
@@ -39,8 +39,8 @@ import {
   activeTasksByPane,
   loadCreatedPanes,
   type HerdrAgentSummary,
-} from './src/core/herdr.ts';
-import type { AgentTaskStatus } from './src/core/orchestration.ts';
+} from './src/runtimes/herdr/herdr.ts';
+import type { AgentTaskStatus } from './src/runtimes/herdr/orchestration.ts';
 
 /**
  * Persistent "below the editor" status box listing the subagents currently

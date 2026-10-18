@@ -14,7 +14,7 @@
  */
 
 import { resolve } from 'node:path';
-import { lifecycleRegistry } from '../core/orchestration.ts';
+import { lifecycleRegistry } from '../runtimes/herdr/orchestration.ts';
 
 export const SCOPE_VALUES = ['user', 'project', 'both'] as const;
 export const PLACEMENT_VALUES = ['pane_right', 'pane_down', 'tab', 'workspace'] as const;
