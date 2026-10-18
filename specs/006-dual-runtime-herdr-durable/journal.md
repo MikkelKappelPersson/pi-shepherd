@@ -72,4 +72,9 @@
   `spawn` resolved to the internal handle record instead of the opaque id
   string; fixed, and the rerun is **13/13 green**. Project-agent gate is covered by the
   suite (`verify-discovery`/`verify-command-ux`) rather than live, to
-  avoid mutating the user settings file.
+  avoid mutating the user settings file. Stale pane registrations left by
+  the pre-existing `closeAgent` cleanup race were removed with `shepherd
+  prune`.
+- 2026-10-18: **Phase 0 landed on `main`** (`42182eb`, fast-forward from
+  `feat/006-dual-runtime-herdr-durable`); `npm test` green on `main`
+  (465 PASS, 32 sub-suites). Phases 1–4 remain future work on this spec.
