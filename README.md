@@ -185,7 +185,7 @@ User and project definitions can add or override these names. Discovery preceden
 5.  bundled `.pi/agents/`
 6.  bundled `.agents/agents/`
 
-User-level discovery is the default. Project definitions are repo-controlled, require explicitly selecting project/both scope, and require confirmation when running interactively. The bundled definitions can be disabled from settings. Agents retain the host user’s normal pi tool permissions.
+Discovery defaults to `both` scope, so repository-controlled definitions are listed alongside user definitions. The confirmation gate (`confirmProjectAgents`) is user-owned and off by default; enable it in `/shepherd settings` when working in untrusted repositories — a project file can never change it. The bundled definitions can be disabled from settings. Agents retain the host user’s normal pi tool permissions.
 
 ## Placement and lifecycle
 
@@ -238,15 +238,15 @@ Enter to cycle values, `/` to fuzzy-search, and `Esc` to close it.
 | Option | Values | Default | Description |
 | --- | --- | --- | --- |
 | **Settings scope** (`projectScope`) | `user`, `project` | `user` | Select the settings source for this workspace. A dormant project file is shown as `user (project file dormant)`. |
-| **Agent scope** (`agentScope`) | `user`, `project`, `both` | `user` | Select which agent definition directories are searched. Project agents are repository-controlled. |
+| **Agent scope** (`agentScope`) | `user`, `project`, `both` | `both` | Select which agent definition directories are searched. Project agents are repository-controlled; choose `user` to ignore them entirely. |
 | **Include bundled agents** (`includeBundledAgents`) | on, off | on | Include the built-in `scout`, `planner`, `worker`, and `reviewer` definitions in discovery. |
-| **Confirm project agents** (`confirmProjectAgents`) | on, off | on | User-only security setting. A project config cannot disable confirmation for project-local agents. |
+| **Confirm project agents** (`confirmProjectAgents`) | on, off | off | User-only security gate for project-local agent definitions. A project config cannot change it. Enable it when working in untrusted repositories. |
 | **Keep tab open after done** (`keepOpen`) | on, off | on | Leave the Herdr tab open after an agent completes so its output can be inspected. |
-| **Keep agent alive after done** (`stayOpen`) | on, off | off | Keep the agent's pi process alive after completion so you can continue driving it in its tab. |
+| **Keep agent alive after done** (`stayOpen`) | on, off | on | Keep the agent's pi process alive after completion so you can continue driving it in its tab. |
 | **Enable fieldnotes** (`fieldnotes`) | on, off | on | Create durable shared session notes for delegated prompts. Changes take effect when the next pi session starts. |
 | **Use sheep emoji** (`emojiSheep`) | on, off | on | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead. |
-| **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `20` minutes | Set the default time limit before a Herdr run is reported as timed out. |
-| **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `5` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
+| **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `60` minutes | Set the default time limit before a Herdr run is reported as timed out. |
+| **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `30` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
 
 The user layer is stored in `pi-shepherd/config.json` inside the active pi
 agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). It stores
@@ -258,8 +258,9 @@ user values. A project file with `projectScope: false` or no flag is dormant.
 
 `confirmProjectAgents` is intentionally user-owned. A committed project file
 may select repository-controlled agent definitions through `agentScope`, but it
-cannot disable the confirmation gate. An explicit user-level opt-out remains
-the user's responsibility.
+cannot change the confirmation gate in either direction. The gate is off by
+default; a user who wants an approval prompt before a project-local agent runs
+must enable it in the user layer.
 
 For example:
 
@@ -268,13 +269,13 @@ For example:
 {
   "agentScope": "both",
   "includeBundledAgents": true,
-  "confirmProjectAgents": true,
+  "confirmProjectAgents": false,
   "keepOpen": true,
-  "stayOpen": false,
+  "stayOpen": true,
   "fieldnotes": true,
   "emojiSheep": true,
-  "timeout": 20,
-  "staleWaitThreshold": 5
+  "timeout": 60,
+  "staleWaitThreshold": 30
 }
 
 // .shepherd/config.json — optional, self-contained project values

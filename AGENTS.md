@@ -20,7 +20,7 @@ overridable; stores personal values only) plus an optional self-contained
 project config (`.shepherd/config.json`, anchored at cwd). A project config is
 active only with `projectScope: true`, and its project-owned values fall back to
 built-in defaults rather than private user values. `confirmProjectAgents` is
-user-owned and cannot be disabled by a repository config. `.shepherd/config.json`
+user-owned and cannot be changed by a repository config. `.shepherd/config.json`
 may be committed explicitly; runtime fieldnote sessions remain ignored.
 
 ## Runtime and architecture
@@ -55,8 +55,10 @@ may be committed explicitly; runtime fieldnote sessions remain ignored.
 
 - Discovery precedence remains user, shared-user, project, shared-project,
   bundled pi agents, bundled shared agents.
-- User agent discovery is the default. Project agent definitions are
-  repo-controlled and require explicit scope and interactive confirmation.
+- Agent discovery defaults to `both` scope. Project agent definitions are
+  repo-controlled; `confirmProjectAgents` is user-owned, defaults off, and a
+  project config can never set it, so a repository cannot turn the gate on or
+  off on the user's behalf.
 - Spawn uses the persisted agent scope and project-approval settings, plus the
   discovered definition's prompt options; these cannot be overridden by spawn
   arguments. Spawn placement is one optional value: `pane_right`, `pane_down`,

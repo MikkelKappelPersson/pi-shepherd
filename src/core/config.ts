@@ -4,7 +4,8 @@
  * The user file stores personal values. The project file is anchored at the
  * current cwd and, when it carries `projectScope: true`, is a self-contained
  * source for project-overridable values. `confirmProjectAgents` is deliberately
- * user-owned because a repository must not be able to disable its trust gate.
+ * user-owned because a repository must not be able to change its trust gate;
+ * built-in defaults run project-local agents without a prompt.
  */
 
 import * as fs from 'node:fs';
@@ -36,7 +37,7 @@ export interface ShepherdSettings {
   agentScope: AgentScope;
   /** Include pi-shepherd's bundled agent definitions. */
   includeBundledAgents: boolean;
-  /** User-owned security gate for project-local agent definitions. */
+  /** User-owned security gate for project-local agent definitions (default off). */
   confirmProjectAgents: boolean;
   /** Keep the Herdr tab open after completion. */
   keepOpen: boolean;
@@ -54,15 +55,15 @@ export interface ShepherdSettings {
 
 export const DEFAULT_SETTINGS: ShepherdSettings = {
   projectScope: false,
-  agentScope: 'user',
+  agentScope: 'both',
   includeBundledAgents: true,
-  confirmProjectAgents: true,
+  confirmProjectAgents: false,
   keepOpen: true,
-  stayOpen: false,
+  stayOpen: true,
   fieldnotes: true,
   emojiSheep: true,
-  timeout: 20,
-  staleWaitThreshold: 5,
+  timeout: 60,
+  staleWaitThreshold: 30,
 };
 
 export function userConfigFile(): string {

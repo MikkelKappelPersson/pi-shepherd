@@ -1009,7 +1009,7 @@ export async function doAction(
     case 'prompt': {
       const a: any = args;
       // Convert timeout from minutes to milliseconds for internal use.
-      // Default: from settings (20 minutes).
+      // Default: the settings timeout.
       const defaultTimeout = loadSettings(ctx.cwd).timeout;
       const timeoutMinutes = a.timeout ?? defaultTimeout;
       const timeoutMs = timeoutMinutes * 60_000;
@@ -1446,7 +1446,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       }),
       task: Type.String({ description: 'Non-empty delegated task description.' }),
       timeout: Type.Optional(
-        Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })
+        Type.Integer({ default: 60, description: 'Optional task deadline in minutes.' })
       ),
     }),
     prepareArguments: input =>
@@ -1546,7 +1546,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       }),
       timeout: Type.Optional(
         Type.Integer({
-          default: 20,
+          default: 60,
           description:
             'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. Completion is reported asynchronously by shepherd_watch.',
         })

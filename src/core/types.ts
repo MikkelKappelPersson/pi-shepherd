@@ -50,7 +50,7 @@ export const LifecycleDelegateParams = Type.Object({
   target: AgentIdSchema,
   task: Type.String({ description: 'Non-empty delegated task description.' }),
   timeout: Type.Optional(
-    Type.Integer({ default: 20, description: 'Optional task deadline in minutes.' })
+    Type.Integer({ default: 60, description: 'Optional task deadline in minutes.' })
   ),
 });
 
@@ -66,7 +66,7 @@ export const LifecyclePromptParams = Type.Object({
   }),
   timeout: Type.Optional(
     Type.Integer({
-      default: 20,
+      default: 60,
       description:
         'Optional readiness wait before submission; normally omit. It is capped at 15 seconds internally. Completion is reported asynchronously by shepherd_watch.',
     })

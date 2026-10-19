@@ -10,7 +10,7 @@ const ONE_MIN = 60_000;
 
 // Keep this test independent of the developer's persisted Shepherd settings.
 // In particular, a user-configured staleWaitThreshold must not change the
-// test's documented five-minute default.
+// test's documented thirty-minute default.
 const { createTempDirectory } = await import('./helpers/test-utils.mjs');
 const { rmSync } = await import('node:fs');
 const isolatedAgentDir = createTempDirectory('pi-shepherd-stale-wait-');
@@ -44,8 +44,8 @@ try {
     registry.setAgentState(planner, 'working');
     const taskId = enterWaiting(registry, scout, planner, 'What is the retry backoff?');
 
-    // 4.9 min in: under the default 5-min threshold -> no notification yet.
-    clock.advance(4.9 * ONE_MIN);
+    // 29.9 min in: under the default 30-min threshold -> no notification yet.
+    clock.advance(29.9 * ONE_MIN);
     await monitor.poll();
     assert.equal(infos.length, 0, 'no stale notification before the threshold is crossed');
     console.log('PASS no stale notification while below the threshold');
@@ -70,12 +70,12 @@ try {
     assert.equal(info.label, 'stale-scout');
     assert.match(info.description, /authentication failure/);
     assert.equal(typeof info.waitingSince, 'number');
-    assert.ok(info.elapsedMs >= 5 * ONE_MIN, 'elapsed wait reflects the threshold crossing');
+    assert.ok(info.elapsedMs >= 30 * ONE_MIN, 'elapsed wait reflects the threshold crossing');
     assert.equal(info.requestMessageId, 'msg-question-1');
     assert.equal(info.question, 'What is the retry backoff?');
     assert.equal(info.recipientId, planner.id);
     assert.equal(info.recipientState, 'working');
-    assert.equal(info.thresholdMinutes, 5, 'default threshold is 5 minutes');
+    assert.equal(info.thresholdMinutes, 30, 'default threshold is 30 minutes');
     console.log(
       'PASS the stale-wait notification carries task, owner, question, recipient, and elapsed time'
     );
@@ -95,7 +95,7 @@ try {
       targetAgentId: planner.id,
       text: 'And the max attempts?',
     });
-    clock.advance(5.5 * ONE_MIN);
+    clock.advance(30.5 * ONE_MIN);
     await monitor.poll();
     assert.equal(infos.length, 2, 'a new waiting episode produces its own notification');
     assert.equal(infos[1].requestMessageId, 'msg-question-2');

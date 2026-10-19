@@ -34,7 +34,18 @@ try {
     'user config path honors PI_CODING_AGENT_DIR'
   );
   assert.equal(DEFAULT_SETTINGS.projectScope, false, 'default project scope is inactive');
-  assert.equal(DEFAULT_SETTINGS.confirmProjectAgents, true, 'confirmation defaults on');
+  assert.equal(
+    DEFAULT_SETTINGS.confirmProjectAgents,
+    false,
+    'confirmation default is off'
+  );
+  assert.equal(DEFAULT_SETTINGS.stayOpen, true, 'keep-alive defaults on');
+  assert.equal(DEFAULT_SETTINGS.timeout, 60, 'default run timeout is 60 minutes');
+  assert.equal(
+    DEFAULT_SETTINGS.staleWaitThreshold,
+    30,
+    'default stale-wait threshold is 30 minutes'
+  );
   assert.equal(loadSettings().fieldnotes, true, 'missing fieldnotes defaults on');
   assert.equal(loadSettings().emojiSheep, true, 'missing sheep marker defaults on');
 
@@ -131,7 +142,7 @@ try {
   assert.equal(active.timeout, 30, 'active project timeout applies');
   assert.equal(active.fieldnotes, true, 'active project fieldnotes apply');
   assert.equal(active.emojiSheep, true, 'missing active field falls back to built-in default');
-  assert.equal(active.agentScope, 'user', 'missing active agent scope uses built-in default');
+  assert.equal(active.agentScope, 'both', 'missing active agent scope uses built-in default');
   assert.equal(
     active.confirmProjectAgents,
     false,

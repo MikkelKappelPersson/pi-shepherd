@@ -20,7 +20,7 @@ import {
   type ShepherdMessageEnvelope,
   type PublishResult,
 } from './messaging.ts';
-import { loadSettings } from '../../core/config.ts';
+import { DEFAULT_SETTINGS, loadSettings } from '../../core/config.ts';
 import {
   ensureHerdrRuntime,
   getHerdrWorkspaceId,
@@ -1424,7 +1424,7 @@ export class StaleWaitMonitor {
             task.cwd ?? this.registry.getAgent({ id: task.agentId }).handle.cwd ?? process.cwd()
           ).staleWaitThreshold;
         } catch {
-          return 5;
+          return DEFAULT_SETTINGS.staleWaitThreshold;
         }
       })();
       // A threshold below 1 minute disables stale-wait reminders entirely.
