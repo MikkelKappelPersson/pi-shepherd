@@ -225,9 +225,14 @@ Boundary continuation:
 - Aborted/errored runs return no continuation. In real pi an aborted run
   generally never reaches the boundary; this guard is defense-in-depth and
   the idle path is the actual catch-all.
-- If `event.context.canContinue` is false, the handler does not continue;
-  entries stay pending and are delivered later (idle wake or a future
-  boundary).
+- The pre-entry `event.context` is not authoritative, so the handler always
+  offers the continuation for a completed run with pending entries. pi
+  builds that snapshot from the entries that existed before the handler
+  ran, so it is non-continuable at a completed boundary; pi then commits
+  the returned drafts and decides. A committed `custom_message` projects
+  through `convertToLlm` as a user-role message, so the run continues. If
+  pi still declines, the entry is already committed (rendered, not lost).
+  See #16.
 - pi may discard a boundary result it considers invalid (the runner's
   `valid: false` window). Our entry is a well-formed
   `CustomMessageEntryDraft`, so this is a rare residual: entries are

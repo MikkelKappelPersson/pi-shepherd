@@ -110,3 +110,36 @@
   child-side `task_done_ack`; ledger persistence across sessions; a
   fallback when a watcher exists but its notification delivery is
   swallowed; clearing on `waitForTasks` retrieval.
+
+## Correction — 2026-10-19
+
+- **Defect (#16):** the `agent_before_settle` handler bailed out when
+  `event.context.canContinue` was false. pi builds that snapshot from the
+  entries that existed *before* the handler runs (`emitBoundary` in
+  `dist/core/extensions/runner.js`), so at a completed boundary it is
+  `finalRole === 'assistant'` and therefore always false: the primary
+  boundary route was dead code and only the 250ms idle wake ever delivered
+  a notice. `pi -p` lost notices entirely — the unref'd timer never fires
+  and `session_shutdown` clears the ledger.
+- **Fix:** `ccf339c` drops the pre-entry guard. The handler always returns
+  `{ entries: [entry], continue: true }` for a completed run with pending
+  entries; `_runBeforeSettleBoundary` in `dist/core/agent-session.js`
+  commits the drafts via `_commitBoundaryDrafts` and only then recomputes
+  `finalContext.canContinue` via `_buildBoundaryContext`, where a committed
+  `custom_message` projects through `convertToLlm` as a user-role message.
+- **Live evidence (real pi):** the `pi -p` probe logs
+  `canContinue=true pending=0` followed by exactly one continuation
+  (previously `canContinue=false pending=1` and the notice was discarded);
+  an unwatched child settling mid-turn is announced 61ms after the
+  turn-end marker. That is faster than the 250ms idle-wake debounce, so the
+  idle path cannot have produced it and the boundary route is demonstrably
+  the delivering path.
+- **This entry (#17)** corrects the test and spec contract that still
+  pinned the old behavior: the suite's busy-boundary fixture used a
+  synthetic `canContinue: true` (a pre-entry shape pi only emits when
+  queued or pending messages already exist) and asserted that
+  `canContinue: false` returns `undefined`; `spec.md` plus the plan/tasks
+  notes described the same pre-entry assumption. Fixtures now use pi's
+  real clean-boundary shape and assert the continuation, with a drift-guard
+  comment naming the pi internals; the post-commit gate stays covered by
+  the real-pi probe, not the hermetic suite.

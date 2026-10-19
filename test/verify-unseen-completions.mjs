@@ -379,12 +379,31 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   assert.equal(sent.length, 1, 'no idle wake fires while the Shepherd is busy');
   assert.equal(bridgeLedger.pending().length, 1);
 
+  // The completed-boundary fixtures below mirror pi's real pre-entry shape.
+  // `emitBoundary` (dist/core/extensions/runner.js) builds `event.context`
+  // from the entries accumulated BEFORE the handler runs; at a clean
+  // completed boundary that snapshot ends on the assistant's final turn, so
+  // `canContinue` is false even though the bridge's `custom_message` makes
+  // the run continuable.
+  // `_runBeforeSettleBoundary` (dist/core/agent-session.js) commits the
+  // returned drafts via `_commitBoundaryDrafts` and only then recomputes
+  // `finalContext.canContinue` via `_buildBoundaryContext`, where
+  // `canContinue = (hasNonSystemContext && finalRole !== 'assistant') ||
+  // pendingCustomContext || ...`. That post-commit gate is pi's and cannot be
+  // evaluated in this unit suite; it is covered by the real-pi probe, not
+  // here. Do not "fix" a fixture to `canContinue: true`: the pre-entry
+  // snapshot only reaches true when queued or pending messages already exist
+  // (agent-session.js:630-632), which is not the case this bridge handles
+  // (see #16/#17).
   const boundaryEvent = {
     type: 'agent_before_settle',
     outcome: 'completed',
-    context: { canContinue: true },
+    // The pre-entry snapshot is non-continuable at a clean completed
+    // boundary, so the bridge must still deliver.
+    context: { canContinue: false },
   };
   const boundary = (await fire('agent_before_settle', boundaryEvent, ctx))[0];
+  assert.ok(boundary, 'a completed boundary offers a continuation');
   assert.equal(boundary.continue, true, 'a completed boundary continues once');
   assert.equal(boundary.entries.length, 1);
   const entry = boundary.entries[0];
@@ -402,6 +421,38 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   );
   console.log('PASS a busy settlement is delivered once at the completed settle boundary');
 
+  // A non-continuable pre-entry snapshot never suppresses a completed
+  // boundary: the bridge offers the continuation, drains its entries, and
+  // leaves the post-commit decision to pi.
+  const a4b = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'bridge-busy-d2' });
+  const t4b = lifecycleRegistry.createTask(a4b, 'D2');
+  lifecycleRegistry.settleTask(t4b.id, { status: 'completed', text: 'done D2' });
+  const continuation = (
+    await fire(
+      'agent_before_settle',
+      { type: 'agent_before_settle', outcome: 'completed', context: { canContinue: false } },
+      ctx
+    )
+  )[0];
+  assert.ok(
+    continuation,
+    'a completed boundary with canContinue false still offers a continuation'
+  );
+  assert.equal(
+    continuation.continue,
+    true,
+    'a completed boundary always offers the continuation'
+  );
+  assert.equal(continuation.entries.length, 1);
+  assert.equal(continuation.entries[0].type, 'custom_message');
+  assert.deepEqual(continuation.entries[0].details.taskIds, [t4b.id]);
+  assert.equal(ledgerCount(bridgeLedger), 0, 'the delivered entries are drained');
+  assert.equal(sent.length, 1, 'the boundary delivers in-turn instead of via sendMessage');
+  console.log('PASS a completed boundary with canContinue false still continues');
+
+  // The aborted outcome returns before the context is consulted, so this
+  // fixture's `canContinue` value is irrelevant; it only pins that an aborted
+  // boundary never continues.
   const a4 = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'bridge-busy-d' });
   const t4 = lifecycleRegistry.createTask(a4, 'D');
   lifecycleRegistry.settleTask(t4.id, { status: 'completed', text: 'done D' });
@@ -417,25 +468,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     'an aborted run never continues'
   );
   assert.equal(ledgerCount(bridgeLedger), 1);
-  assert.equal(
-    (
-      await fire(
-        'agent_before_settle',
-        { type: 'agent_before_settle', outcome: 'completed', context: { canContinue: false } },
-        ctx
-      )
-    )[0],
-    undefined,
-    'canContinue false never continues'
-  );
-  assert.equal(ledgerCount(bridgeLedger), 1, 'undelivered entries stay pending');
   idleFlag.value = true;
   await fire('agent_settled', { type: 'agent_settled' }, ctx);
   await delay(60);
   assert.equal(sent.length, 2, 'the agent_settled transition wakes the pending batch once');
   assert.deepEqual(sent[1].message.details.taskIds, [t4.id]);
   assert.equal(bridgeLedger.pending().length, 0);
-  console.log('PASS aborted/no-continue boundaries leave entries pending for one idle wake');
+  console.log('PASS an aborted boundary leaves entries pending for one idle wake');
 
   // Session shutdown releases the observer subscription and clears state.
   await fire('session_shutdown', { type: 'session_shutdown' }, ctx);

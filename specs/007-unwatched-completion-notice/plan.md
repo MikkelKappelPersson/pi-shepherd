@@ -67,8 +67,9 @@ Phase 1) implements the same hook instead of duplicating the ledger.
     reset to idle.
   - `pi.on("agent_before_settle", event => ...)`:
     - return `undefined` unless `event.outcome === "completed"`,
-    - **and** `event.context.canContinue !== false`,
-    - **and** the ledger has pending entries;
+    - **and** the ledger has pending entries (no pre-entry
+      `event.context.canContinue` check: that snapshot predates our draft,
+      and pi recomputes `canContinue` after committing the drafts; #16),
     - build the `custom_message` entry, drain its task ids, and return
       `{ entries: [entry], continue: true }`.
   - `pi.registerMessageRenderer("shepherd.task.unseen", ...)` using
@@ -125,8 +126,9 @@ and `registerShepherdTools(pi)`, line ~447):
     `test/verify-parent-surface.mjs`): idle burst → exactly one
     `triggerTurn` send and no duplicates; busy settle → single
     `agent_before_settle` result with `continue: true`; second boundary →
-    `undefined`; `aborted` outcome → no continuation; `canContinue: false`
-    → none; late `shepherd_watch` clears (assert through the real watch
+    `undefined`; `aborted` outcome → no continuation; a completed boundary
+    with `canContinue: false` (pi's real pre-entry shape) → still
+    continues; late `shepherd_watch` clears (assert through the real watch
     action or a direct `clear`); close clears and reports; renderer
     registered; fake pi without `sendMessage` never throws; unsubscribe on
     `session_shutdown`.

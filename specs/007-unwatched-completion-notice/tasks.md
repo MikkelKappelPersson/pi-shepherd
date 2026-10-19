@@ -70,9 +70,11 @@ are complete. This spec is `007-unwatched-completion-notice`
 
 - [x] **2.2 Boundary continuation**
   - `pi.on("agent_before_settle", event)`: only when
-    `event.outcome === "completed"`, `event.context.canContinue !== false`,
-    and pending entries exist — build one `custom_message` entry, drain
-    those ids, return `{ entries: [entry], continue: true }`.
+    `event.outcome === "completed"` and pending entries exist — build one
+    `custom_message` entry, drain those ids, return
+    `{ entries: [entry], continue: true }`. No pre-entry
+    `event.context.canContinue` check: pi commits the drafts first and then
+    decides, so the pre-entry snapshot is not authoritative (#16).
   - Aborted/errored outcomes return nothing; entries stay pending.
   - Loop guard: drained entries never re-notify; a second boundary with no
     new entries returns `undefined`.
@@ -113,9 +115,10 @@ are complete. This spec is `007-unwatched-completion-notice`
     `test/verify-parent-surface.mjs`): idle burst → exactly one
     `triggerTurn` notice and no duplicates; busy settle → one boundary
     result with `continue: true`; second boundary → `undefined`; `aborted`
-    and `canContinue: false` outcomes → none; late `watch` clears; close
-    clears and reports; renderer registered; missing `sendMessage` never
-    throws; `session_shutdown` unsubscribes.
+    outcome → none; completed boundary with `canContinue: false` →
+    continues; late `watch` clears; close clears and reports; renderer
+    registered; missing `sendMessage` never throws; `session_shutdown`
+    unsubscribes.
   - Inject small `coalesceMs` and an isolated ledger for determinism.
   - Register `unseen-completions:test` in `package.json` and append it to
     the `test` chain.
