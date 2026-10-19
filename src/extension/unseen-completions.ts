@@ -11,8 +11,9 @@
  *    `pi.sendMessage(notice, { triggerTurn: true })` wake;
  *  - at the `agent_before_settle` boundary of a completed run, one
  *    `custom_message` entry plus `continue: true` for a single extra model
- *    request. Aborted or errored runs never continue; their entries stay
- *    pending for the idle wake.
+ *    request. We always offer the continuation and let pi's post-commit
+ *    `canContinue` check decide; aborted or errored runs never continue,
+ *    their entries stay pending for the idle wake.
  *
  * Wiring lives in `index.ts` (parent surface only, after the
  * `PI_SHEPHERD_SESSION` guard) so `registerShepherdTools` fake-pi suites are
@@ -173,7 +174,10 @@ export function configureUnseenCompletionBridge(
   pi.on('agent_before_settle', (event: any, ctx?: any) => {
     if (ctx !== undefined) capturedContext = ctx;
     if (event?.outcome !== 'completed') return undefined;
-    if (event?.context?.canContinue === false) return undefined;
+    // No pre-entry canContinue check: `event.context` is projected from the
+    // entries that existed before this handler's draft, so it is always
+    // `false` here. pi commits the drafts first and then recomputes
+    // `finalContext.canContinue`, so a `custom_message` makes it continuable.
     const settlements = ledger.pending();
     if (settlements.length === 0) return undefined;
     const taskIds = settlements.map(settlement => settlement.taskId);
