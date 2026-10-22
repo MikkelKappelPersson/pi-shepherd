@@ -11,9 +11,13 @@ node_modules/
 # Logs / temp
 *.log
 
-# Runtime artifact-backed delegation sessions (project config may be committed)
-.shepherd/*
-!.shepherd/config.json
+# Local development state for the package itself. This repo *is* pi-shepherd,
+# not a project that consumes it, so its own .shepherd/ (dev settings plus
+# runtime fieldnote sessions) is never published. User projects that want to
+# share a project config should instead use the pattern documented in README:
+#   .shepherd/*
+#   !.shepherd/config.json
+.shepherd/
 
 # Locally installed project skills
 .agents/skills/
