@@ -20,4 +20,6 @@ Implementation plans and design notes are kept separately from stable user docum
 - [Agent labels](plans/agent-labels.md)
 - [Settings scope (historical)](plans/settings-scope.md)
 - [Per-workspace settings specification](../specs/005-per-workspace-settings/spec.md)
+- [Remote machine sheep — intent](../specs/008-remote-machine-sheep/intent.md)
+- [Remote machine sheep — remote prerequisites](../specs/008-remote-machine-sheep/prerequisites.md)
 - [Tool surface split](plans/tool-surface-split.md)
