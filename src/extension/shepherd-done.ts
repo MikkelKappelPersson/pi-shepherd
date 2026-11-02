@@ -705,7 +705,19 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on('session_start', () => {
+  pi.on('session_start', (_event: any, ctx?: any) => {
+    // Show the agent identity (e.g. "writer" or "writer: draft") in the
+    // child pane's footer so a manually driven agent is recognizable.
+    const display = process.env.PI_SHEPHERD_AGENT_DISPLAY?.trim();
+    if (display && ctx?.hasUI) {
+      try {
+        const theme = ctx.ui?.theme;
+        const text = theme ? theme.fg('accent', `🐑 ${display}`) : `🐑 ${display}`;
+        ctx.ui?.setStatus?.('pi-shepherd-agent', text);
+      } catch {
+        // Footer status is best effort and must not prevent startup.
+      }
+    }
     if (pollTimer) return;
     ensureBroker();
     poll();
@@ -713,7 +725,12 @@ export default function (pi: ExtensionAPI) {
     (pollTimer as any).unref?.();
   });
 
-  pi.on('session_shutdown', () => {
+  pi.on('session_shutdown', (_event?: any, ctx?: any) => {
+    try {
+      ctx?.ui?.setStatus?.('pi-shepherd-agent', undefined);
+    } catch {
+      // Best effort cleanup.
+    }
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = undefined;
     broker = undefined;

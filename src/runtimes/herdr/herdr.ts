@@ -570,6 +570,8 @@ function sendEscapeInHerdr(paneId: string): void {
 const CHILD_SURFACE_TOOLS = ['shepherd_message', 'shepherd_done'];
 export function writePiLaunchFiles(opts: {
   name: string;
+  /** Task-specific instance label; combined with name for the child display. */
+  label?: string;
   task?: string;
   systemPrompt?: string;
   omitSystemPrompt?: boolean;
@@ -621,9 +623,12 @@ export function writePiLaunchFiles(opts: {
     args.push(`'@${taskFile}'`);
   }
 
+  const trimmedLabel = opts.label?.trim() ?? '';
+  const displayName = trimmedLabel ? `${opts.name}: ${trimmedLabel}` : opts.name;
   const launchScript = [
     '#!/bin/bash',
     `export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
+    `export PI_SHEPHERD_AGENT_DISPLAY=${shellQuote(displayName)}`,
     systemPromptFile
       ? `export PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE=${shellQuote(systemPromptFile)}`
       : 'unset PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE',
@@ -660,6 +665,8 @@ export function launchPiInPane(
   paneId: string,
   opts: {
     name: string;
+    /** Task-specific instance label; combined with name for the child display. */
+    label?: string;
     task?: string;
     stayOpen?: boolean;
     persistent?: boolean;

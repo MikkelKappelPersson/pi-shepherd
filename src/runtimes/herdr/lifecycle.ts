@@ -202,6 +202,7 @@ export async function startAgent(
     await waitForHerdrShellReady(paneId, { timeoutMs: 15_000 });
     const files = launchPiInPane(paneId, {
       name,
+      label,
       persistent: true,
       childBroker: { rootDir: broker.rootDir, ...childCapability },
       systemPrompt: found.systemPrompt,
