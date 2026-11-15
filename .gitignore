@@ -19,6 +19,4 @@ node_modules/
 #   !.shepherd/config.json
 .shepherd/
 
-# Locally installed project skills
-.agents/skills/
 skills-lock.json
