@@ -10,6 +10,9 @@
  * verify-parent-surface.mjs); this probe covers the status payload itself.
  */
 import assert from 'node:assert/strict';
+import { chmodSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { lifecycleRegistry } from '../src/core/orchestration.ts';
 import { statusAgent } from '../src/core/lifecycle.ts';
 import { doAction } from '../src/extension/shepherd.ts';
@@ -107,7 +110,38 @@ await withFakeDateNow(0, async clock => {
   });
   lifecycleRegistry.markStaleNotified(task);
 
-  const result = await doAction({ action: 'status', id: idle.id }, { cwd: process.cwd() });
+  // Phase 2: `shepherd_status` routes through the resolved runtime. Pin the
+  // sandbox user layer to the pane backend so this herdr-agent status keeps
+  // proving pane behavior deterministically (an explicit pin wins over
+  // caller detection). A pinned backend must be reachable, so a fake `herdr`
+  // answers `--version` + `status server` on a sandbox PATH (same precedent
+  // as the unseen-completions close test); the status path itself never
+  // shells out for these pane-less agents.
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousPath = process.env.PATH;
+  const statusSandbox = mkdtempSync(path.join(tmpdir(), 'pi-shepherd-status-'));
+  mkdirSync(path.join(statusSandbox, 'pi-shepherd'), { recursive: true });
+  mkdirSync(path.join(statusSandbox, 'bin'), { recursive: true });
+  writeFileSync(
+    path.join(statusSandbox, 'pi-shepherd', 'config.json'),
+    JSON.stringify({ backend: 'herdr' })
+  );
+  writeFileSync(
+    path.join(statusSandbox, 'bin', 'herdr'),
+    '#!/bin/sh\ncase "$1 $2" in\n  "status server") printf \'status: running\\n\' ;;\n  *) printf \'%s\\n\' \'{\"result\":{}}\' ;;\nesac\nexit 0\n'
+  );
+  chmodSync(path.join(statusSandbox, 'bin', 'herdr'), 0o755);
+  process.env.PI_CODING_AGENT_DIR = statusSandbox;
+  process.env.PATH = `${path.join(statusSandbox, 'bin')}${path.delimiter}${previousPath ?? ''}`;
+  let result;
+  try {
+    result = await doAction({ action: 'status', id: idle.id }, { cwd: process.cwd() });
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
   const details = result.details;
   assert.ok(details && typeof details === 'object', 'status result carries structured details');
   const status = details.status;

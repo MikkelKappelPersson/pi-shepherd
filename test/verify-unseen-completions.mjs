@@ -511,7 +511,35 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const t5 = lifecycleRegistry.createTask(a5, 'E');
   lifecycleRegistry.settleTask(t5.id, { status: 'completed', text: 'done E' });
   assert.equal(ledgerCount(unseenCompletionLedger), 1);
-  await doAction({ action: 'watch', id: t5.id }, { cwd: process.cwd() });
+  // Phase 2: `shepherd_watch` routes through the resolved runtime. Pin the
+  // sandbox user layer to the pane backend so this herdr-task watch keeps
+  // proving pane behavior deterministically (same precedent as the close
+  // test below: an explicit pin wins over caller detection). A pinned
+  // backend must be reachable, so a fake `herdr` answers on a sandbox PATH.
+  const previousWatchAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousWatchPath = process.env.PATH;
+  const watchSandbox = mkdtempSync(path.join(tmpdir(), 'pi-shepherd-unseen-watch-'));
+  mkdirSync(path.join(watchSandbox, 'pi-shepherd'), { recursive: true });
+  mkdirSync(path.join(watchSandbox, 'bin'), { recursive: true });
+  writeFileSync(
+    path.join(watchSandbox, 'pi-shepherd', 'config.json'),
+    JSON.stringify({ backend: 'herdr' })
+  );
+  writeFileSync(
+    path.join(watchSandbox, 'bin', 'herdr'),
+    '#!/bin/sh\ncase "$1 $2" in\n  "status server") printf \'status: running\\n\' ;;\n  *) printf \'%s\\n\' \'{\"result\":{}}\' ;;\nesac\nexit 0\n'
+  );
+  chmodSync(path.join(watchSandbox, 'bin', 'herdr'), 0o755);
+  process.env.PI_CODING_AGENT_DIR = watchSandbox;
+  process.env.PATH = `${path.join(watchSandbox, 'bin')}${path.delimiter}${previousWatchPath ?? ''}`;
+  try {
+    await doAction({ action: 'watch', id: t5.id }, { cwd: process.cwd() });
+  } finally {
+    if (previousWatchAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousWatchAgentDir;
+    if (previousWatchPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousWatchPath;
+  }
   assert.equal(
     unseenCompletionLedger.pending().length,
     0,

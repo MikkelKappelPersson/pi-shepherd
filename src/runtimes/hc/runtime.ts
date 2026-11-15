@@ -22,9 +22,12 @@
  *   completion sidecar, and idles efficiently on `hc wait --timeout`.
  * - `status`/`read` map onto `hc get`/`hc read`; `close` maps onto
  *   `hc kill` + `hc rm` for owned terminals only.
+ * - `message` with `expectsReply` opens a tracked reply with the same
+ *   `staleWaitThreshold` reminder and `timeout->blocked` settlement as the
+ *   pane backend; `status` reports `waitingOn` + `stale` identically.
  *
- * Deferred (later phases): resolver wiring, expectsReply/nudge parity,
- * fieldnotes bridge check, docs. This module intentionally imports nothing
+ * Phase 2 parity: resolver wiring, expectsReply/stale/blocked parity,
+ * fieldnotes bridge, docs. This module intentionally imports nothing
  * from the pane-based backend; shared transport-independent helpers arrive
  * re-exported through `./hc.ts`.
  */
@@ -45,8 +48,9 @@ import {
   resolveDelegatedModel,
   resolveDelegatedThinking,
 } from '../../core/discovery.ts';
-import { loadSettings } from '../../core/config.ts';
+import { DEFAULT_SETTINGS, loadSettings } from '../../core/config.ts';
 import { mintId, mintMessageId, normalizeHandleId } from '../../core/ids.ts';
+import { unseenCompletionLedger } from '../../core/unseen-completions.ts';
 import {
   createEnvelope,
   createParentBroker,
@@ -148,6 +152,8 @@ interface TaskRecord {
   pendingReplyDeadlineAt?: number;
   pendingReplyText?: string;
   pendingRequestIds: Set<string>;
+  /** Set when the stale-wait monitor has reminded for this wait episode. */
+  staleNotifiedAt?: number;
   result?: TaskResultInternal;
   onSettled?: (result: TaskResultInternal) => void;
   artifactSession?: ShepherdSession;
@@ -251,13 +257,448 @@ function ensureBroker(sessionId?: string): ParentBroker {
   return broker;
 }
 
+// ── Phase 2 parity: stale-wait monitor + non-blocking task watchers ──────
+// Mirrors the pane-based backend's stale-wait monitor and task-watcher
+// service over the module hc registries. The
+// monitor is information only (never a settlement); reply deadlines remain
+// the authoritative `blocked` settlement. Watchers are non-blocking: `watch`
+// registers synchronously and later completions arrive via the notifier,
+// exactly like the pane backend's task-watcher bridge.
+
+export interface HcStaleWaitInfo {
+  taskId: string;
+  agentId: string;
+  agent?: string;
+  label?: string;
+  description: string;
+  waitingSince: number;
+  elapsedMs: number;
+  requestMessageId: string;
+  question: string;
+  recipientId?: string;
+  recipientName?: string;
+  recipientState?: string;
+  thresholdMinutes: number;
+}
+
+export type HcStaleWaitNotifier = (info: HcStaleWaitInfo) => void | Promise<void>;
+
+class HcStaleWaitMonitor {
+  private timer?: ReturnType<typeof setInterval>;
+  private notifier?: HcStaleWaitNotifier;
+  private readonly intervalMs: number;
+
+  constructor(notifier?: HcStaleWaitNotifier, intervalMs = 1_000) {
+    this.notifier = notifier;
+    this.intervalMs = intervalMs;
+  }
+
+  kick(): void {
+    this.ensureStarted();
+    void this.poll();
+  }
+
+  shutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  setNotifier(notifier?: HcStaleWaitNotifier): void {
+    this.notifier = notifier;
+  }
+
+  private ensureStarted(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.poll(), this.intervalMs);
+    (this.timer as any).unref?.();
+  }
+
+  private maybeStop(): void {
+    const waiting = [...tasks.values()].some(t => t.state === 'waiting' && !t.result);
+    if (!waiting && this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+
+  async poll(): Promise<void> {
+    const now = Date.now();
+    const waiting = [...tasks.values()].filter(t => t.state === 'waiting' && !t.result);
+    if (waiting.length === 0) {
+      this.maybeStop();
+      return;
+    }
+    for (const task of waiting) {
+      const thresholdMinutes = (() => {
+        try {
+          const agent = agents.get(task.agentId);
+          return loadSettings(agent?.handle.cwd ?? process.cwd()).staleWaitThreshold;
+        } catch {
+          return DEFAULT_SETTINGS.staleWaitThreshold;
+        }
+      })();
+      if (thresholdMinutes < 1) continue;
+      if (now - (task.waitingSince ?? now) < thresholdMinutes * 60_000) continue;
+      if (task.staleNotifiedAt !== undefined) continue;
+      const elapsedMs = now - (task.waitingSince ?? now);
+      const owner = agents.get(task.agentId);
+      let recipientName: string | undefined;
+      let recipientState: string | undefined;
+      if (task.pendingReplyTargetAgentId) {
+        const recipient = agents.get(task.pendingReplyTargetAgentId);
+        if (recipient) {
+          recipientName = recipient.handle.label
+            ? `${recipient.handle.agent}: ${recipient.handle.label}`
+            : recipient.handle.agent;
+          recipientState = recipient.state;
+        }
+      }
+      const info: HcStaleWaitInfo = {
+        taskId: task.taskId,
+        agentId: task.agentId,
+        ...(owner ? { agent: owner.handle.agent, label: owner.handle.label } : {}),
+        description: task.description,
+        waitingSince: task.waitingSince ?? now,
+        elapsedMs,
+        requestMessageId: task.pendingReplyMessageId ?? '',
+        question: task.pendingReplyText ?? '',
+        ...(task.pendingReplyTargetAgentId ? { recipientId: task.pendingReplyTargetAgentId } : {}),
+        ...(recipientName ? { recipientName } : {}),
+        ...(recipientState ? { recipientState } : {}),
+        thresholdMinutes,
+      };
+      try {
+        task.staleNotifiedAt = Date.now();
+        const result = this.notifier?.(info);
+        if (result && typeof (result as Promise<void>).catch === 'function') {
+          (result as Promise<void>).catch(() => undefined);
+        }
+      } catch {
+        // Best effort; reply deadline stays authoritative.
+      }
+    }
+    this.maybeStop();
+  }
+}
+
+export const hcStaleWaitMonitor = new HcStaleWaitMonitor();
+
+export function configureHcStaleWaitNotifications(notifier?: HcStaleWaitNotifier): void {
+  hcStaleWaitMonitor.setNotifier(notifier);
+}
+
+export function shutdownHcStaleWaitMonitor(): void {
+  hcStaleWaitMonitor.shutdown();
+}
+
+// ── Non-blocking hc task watchers (shepherd_watch parity) ─────────────────
+// `HcRuntime.watch` blocks; the `shepherd_watch` tool must return at once
+// and deliver later completions via notification. This registry mirrors
+// `LifecycleRegistry.watchTasks` + `TaskWatcherService`: synchronous
+// registration with already-settled sync delivery, exactly-once later
+// delivery per task, and unseen-ledger feed for watcher-less settlements.
+
+export interface HcTaskWatcherRegistration {
+  watcherId: string;
+  taskIds: string[];
+  pending: string[];
+  completed: TaskResultInternal[];
+}
+
+export type HcTaskWatcherCompletion = TaskResultInternal & { agent?: string; label?: string };
+export type HcTaskWatcherCallback = (completion: HcTaskWatcherCompletion) => void;
+
+const hcWatchers = new Map<
+  string,
+  {
+    kind: 'task';
+    taskIds: string[];
+    pending: Set<string>;
+    callback?: HcTaskWatcherCallback | HcTaskWatcherCallback[];
+    delivered: Set<string>;
+  }
+>();
+const hcTaskWatchers = new Map<string, Set<string>>();
+
+function hcCompletionFor(taskId: string): HcTaskWatcherCompletion | undefined {
+  const record = tasks.get(taskId);
+  if (!record?.result) return undefined;
+  const agent = agents.get(record.agentId);
+  return {
+    ...record.result,
+    ...(agent ? { agent: agent.handle.agent, label: agent.handle.label } : {}),
+  };
+}
+
+/** Synchronous registration; already-settled tasks deliver immediately. */
+export function watchHcTasks(
+  handles: string | string[],
+  callback?: HcTaskWatcherCallback | HcTaskWatcherCallback[]
+): HcTaskWatcherRegistration {
+  const values = Array.isArray(handles) ? handles : [handles];
+  if (values.length === 0) {
+    throw new HcRuntimeError('invalid_handle', 'Expected one or more opaque task ids to watch.');
+  }
+  const taskIds = values.map(value => {
+    const id = handleId(value, 'TaskHandle');
+    const record = tasks.get(id);
+    if (!record) {
+      throw new HcRuntimeError(
+        'unknown_task',
+        `Unknown task id "${id}". Task ids are scoped to this parent session; use the id returned by shepherd_delegate, not an agent id or terminal address.`
+      );
+    }
+    return record.taskId;
+  });
+  if (new Set(taskIds).size !== taskIds.length) {
+    throw new HcRuntimeError('invalid_handle', 'A watcher cannot contain duplicate task ids.');
+  }
+  const watcherId = mintId('watch', generationId);
+  const pending = new Set<string>();
+  const completed: TaskResultInternal[] = [];
+  const deliver = (completion: HcTaskWatcherCompletion): void => {
+    if (Array.isArray(callback)) {
+      for (const one of callback) one(completion);
+    } else callback?.(completion);
+  };
+  for (const taskId of taskIds) {
+    const done = hcCompletionFor(taskId);
+    if (done) completed.push({ ...done });
+    else pending.add(taskId);
+  }
+  if (pending.size > 0) {
+    hcWatchers.set(watcherId, {
+      kind: 'task',
+      taskIds: [...taskIds],
+      pending,
+      callback,
+      delivered: new Set(),
+    });
+    for (const taskId of pending) {
+      let watchers = hcTaskWatchers.get(taskId);
+      if (!watchers) hcTaskWatchers.set(taskId, (watchers = new Set()));
+      watchers.add(watcherId);
+    }
+    // Synchronous already-settled delivery must still flow through the
+    // notifier path so `shepherd_watch` sees uniform completions.
+    for (const done of completed) {
+      try {
+        deliver({ ...done });
+      } catch {
+        /* delivery must not break registration */
+      }
+    }
+  }
+  return { watcherId, taskIds: [...taskIds], pending: [...pending], completed };
+}
+
+/** Deliver one settlement to watchers; returns whether anyone observed it. */
+function notifyHcTaskWatchers(result: TaskResultInternal): boolean {
+  const watcherIds = [...(hcTaskWatchers.get(result.taskId) ?? [])];
+  hcTaskWatchers.delete(result.taskId);
+  const agent = agents.get(result.agentId);
+  let hadWatchers = false;
+  for (const watcherId of watcherIds) {
+    const watcher = hcWatchers.get(watcherId);
+    if (!watcher || watcher.delivered.has(result.taskId)) continue;
+    watcher.delivered.add(result.taskId);
+    watcher.pending.delete(result.taskId);
+    try {
+      const delivery: HcTaskWatcherCompletion = {
+        ...result,
+        ...(agent ? { agent: agent.handle.agent, label: agent.handle.label } : {}),
+      };
+      const cb = watcher.callback;
+      if (Array.isArray(cb)) {
+        for (const one of cb) one(delivery);
+      } else cb?.(delivery);
+    } catch {
+      /* notification delivery must not break settlement */
+    }
+    if (watcher.callback !== undefined) hadWatchers = true;
+    if (watcher.pending.size === 0) hcWatchers.delete(watcherId);
+  }
+  return hadWatchers;
+}
+
+export type HcTaskWatcherNotifier = (notification: {
+  watcherId: string;
+  completions: HcTaskWatcherCompletion[];
+}) => void | Promise<void>;
+
+/** Coalescing non-blocking delivery bridge (mirrors TaskWatcherService). */
+class HcTaskWatcherService {
+  private notifier?: HcTaskWatcherNotifier;
+  private readonly coalesceMs: number;
+  private readonly queued = new Map<string, HcTaskWatcherCompletion[]>();
+  private readonly order = new Map<string, Map<string, number>>();
+  private readonly remaining = new Map<string, number>();
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  constructor(notifier?: HcTaskWatcherNotifier, coalesceMs = 25) {
+    this.notifier = notifier;
+    this.coalesceMs = coalesceMs;
+  }
+
+  setNotifier(notifier?: HcTaskWatcherNotifier): void {
+    this.notifier = notifier;
+  }
+
+  watch(handles: string | string[]): HcTaskWatcherRegistration {
+    let watcherId = '';
+    const registration = watchHcTasks(handles, completion => {
+      this.queue(watcherId, completion);
+    });
+    watcherId = registration.watcherId;
+    if (registration.pending.length > 0) {
+      this.order.set(
+        watcherId,
+        new Map(registration.taskIds.map((taskId, index) => [taskId, index]))
+      );
+      this.remaining.set(watcherId, registration.pending.length);
+    }
+    return registration;
+  }
+
+  shutdown(): void {
+    for (const timer of this.flushTimers.values()) clearTimeout(timer);
+    this.flushTimers.clear();
+    this.queued.clear();
+    this.order.clear();
+    this.remaining.clear();
+    hcWatchers.clear();
+    hcTaskWatchers.clear();
+  }
+
+  private queue(watcherId: string, completion: HcTaskWatcherCompletion): void {
+    if (!watcherId) return;
+    const list = this.queued.get(watcherId) ?? [];
+    list.push({ ...completion });
+    this.queued.set(watcherId, list);
+    const remaining = this.remaining.get(watcherId);
+    if (remaining !== undefined) this.remaining.set(watcherId, Math.max(0, remaining - 1));
+    if (!this.flushTimers.has(watcherId)) {
+      const timer = setTimeout(() => this.flush(watcherId), this.coalesceMs);
+      (timer as any).unref?.();
+      this.flushTimers.set(watcherId, timer);
+    }
+  }
+
+  private flush(watcherId: string): void {
+    this.flushTimers.delete(watcherId);
+    const completions = this.queued.get(watcherId);
+    this.queued.delete(watcherId);
+    if (!completions || completions.length === 0) return;
+    const order = this.order.get(watcherId);
+    if (order) {
+      completions.sort(
+        (left, right) =>
+          (order.get(left.taskId) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.taskId) ?? Number.MAX_SAFE_INTEGER)
+      );
+    }
+    if (this.remaining.get(watcherId) === 0) {
+      this.order.delete(watcherId);
+      this.remaining.delete(watcherId);
+    }
+    try {
+      const result = this.notifier?.({ watcherId, completions });
+      if (result && typeof (result as Promise<void>).catch === 'function') {
+        (result as Promise<void>).catch(() => undefined);
+      }
+    } catch {
+      // Durable result; missing bridge must not corrupt settlement.
+    }
+  }
+}
+
+export const hcTaskWatcherService = new HcTaskWatcherService();
+
+export function configureHcTaskWatcherNotifications(notifier?: HcTaskWatcherNotifier): void {
+  hcTaskWatcherService.setNotifier(notifier);
+}
+
+export function shutdownHcTaskWatchers(): void {
+  hcTaskWatcherService.shutdown();
+}
+
+/** True when the id names a known hc task (tool routing, not a contract). */
+export function isHcTaskId(id: unknown): boolean {
+  if (typeof id !== 'string' || !id) return false;
+  return tasks.has(id);
+}
+
+/**
+ * Tool-facing status view for an hc sheep: lifecycle state plus the active
+ * tracked task with the same fields the pane-backend tool reports (waiting
+ * age, pending request, waiting recipient, stale flag). Returns undefined
+ * task when no open task exists.
+ */
+export function describeHcStatusView(agentId: string): {
+  handle: { id: string; agent: string; label: string };
+  state: AgentState;
+  task?: {
+    id: string;
+    state: InternalTaskState;
+    description: string;
+    waitingSince?: number;
+    waitingMs?: number;
+    pendingRequestMessageId?: string;
+    waitingRecipient?: string;
+    stale?: boolean;
+  };
+} {
+  const id = handleId(agentId, 'AgentHandle');
+  const record = agents.get(id);
+  if (!record) {
+    throw new HcRuntimeError(
+      'unknown_handle',
+      `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result.`
+    );
+  }
+  let taskView: ReturnType<typeof describeHcStatusView>['task'];
+  const open = record.activeTaskId ? tasks.get(record.activeTaskId) : undefined;
+  if (open && !open.result) {
+    let waitingRecipient: string | undefined;
+    if (open.pendingReplyTargetAgentId) {
+      const recipient = agents.get(open.pendingReplyTargetAgentId);
+      waitingRecipient = recipient
+        ? recipient.handle.label
+          ? `${recipient.handle.agent}: ${recipient.handle.label}`
+          : recipient.handle.agent
+        : open.pendingReplyTargetAgentId;
+    }
+    taskView = {
+      id: open.taskId,
+      state: open.state,
+      description: open.description,
+      ...(open.waitingSince !== undefined
+        ? { waitingSince: open.waitingSince, waitingMs: Math.max(0, Date.now() - open.waitingSince) }
+        : {}),
+      ...(open.pendingReplyMessageId ? { pendingRequestMessageId: open.pendingReplyMessageId } : {}),
+      ...(waitingRecipient ? { waitingRecipient } : {}),
+      ...(open.staleNotifiedAt !== undefined ? { stale: true as const } : {}),
+    };
+  }
+  return {
+    handle: { id: record.handle.id, agent: record.handle.agent, label: record.handle.label },
+    state: record.state,
+    ...(taskView ? { task: taskView } : {}),
+  };
+}
+
 /**
  * Non-contract introspection for the resolver seam: display identity for a
  * known hc agent. Unknown ids throw, exactly like the registry lookups
  * behind every other method. Records are retained after close so a closed
  * sheep still describes itself (mirrors the pane-backend registry).
  */
-export function describeHcAgent(agentId: string): { id: string; agent: string; label: string } {
+export function describeHcAgent(agentId: string): {
+  id: string;
+  agent: string;
+  label: string;
+  model?: string;
+} {
   const id = handleId(agentId, 'AgentHandle');
   const record = agents.get(id);
   if (!record) {
@@ -266,7 +707,45 @@ export function describeHcAgent(agentId: string): { id: string; agent: string; l
       `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result. A terminal address is not an agent id.`
     );
   }
-  return { id: record.handle.id, agent: record.handle.agent, label: record.handle.label };
+  return {
+    id: record.handle.id,
+    agent: record.handle.agent,
+    label: record.handle.label,
+    ...(record.handle.model ? { model: record.handle.model } : {}),
+  };
+}
+
+/**
+ * Resolve a diagnostic read target to an opaque hc agent id: exact id first,
+ * then display identity (`agent`, `agent: label`, label), then owned
+ * terminal name/address. Returns undefined when nothing matches (the caller
+ * surfaces the backend's useful not-found error).
+ */
+export function resolveHcAgentId(target: string): string | undefined {
+  if (agents.has(target)) return target;
+  for (const record of agents.values()) {
+    const display = record.handle.label
+      ? `${record.handle.agent}: ${record.handle.label}`
+      : record.handle.agent;
+    if (
+      record.handle.agent === target ||
+      record.handle.label === target ||
+      display === target
+    ) {
+      return record.handle.id;
+    }
+  }
+  try {
+    const match = loadCreatedTerminals().find(t => t.terminalId === target || t.name === target);
+    if (match) {
+      for (const record of agents.values()) {
+        if (record.handle.terminalId === match.terminalId) return record.handle.id;
+      }
+    }
+  } catch {
+    /* registry read is best effort */
+  }
+  return undefined;
 }
 
 /**
@@ -362,6 +841,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     }
     record.pendingRequestIds.clear();
     record.waitingSince = undefined;
+    record.staleNotifiedAt = undefined;
     record.pendingReplyMessageId = undefined;
     record.pendingReplyTargetAgentId = undefined;
     record.pendingReplyDeadlineAt = undefined;
@@ -388,6 +868,24 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     } catch {
       /* artifact persistence must not break task settlement */
     }
+    // Non-blocking watcher delivery + unseen-ledger feed (pane parity):
+    // a settlement with an attached watcher notifies it; a watcher-less
+    // settlement (except cancellations) becomes an unseen completion.
+    try {
+      const hadWatchers = notifyHcTaskWatchers(result);
+      if (result.status !== 'cancelled') {
+        const agentHandle = agents.get(record.agentId)?.handle;
+        unseenCompletionLedger.record(
+          { ...result },
+          {
+            hadWatchers,
+            ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+          }
+        );
+      }
+    } catch {
+      /* observer feed must not break settlement */
+    }
     return { ...result };
   }
 
@@ -401,6 +899,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     if (record.state === 'waiting') {
       record.state = 'running';
       record.waitingSince = undefined;
+      record.staleNotifiedAt = undefined;
     }
     return true;
   }
@@ -431,6 +930,13 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     record.pendingRequestIds.add(request.messageId);
     record.state = 'waiting';
     record.waitingSince ??= Date.now();
+    // One stale reminder per wait episode (information only); the reply
+    // deadline below stays the authoritative settlement.
+    try {
+      hcStaleWaitMonitor.kick();
+    } catch {
+      /* monitor is best effort */
+    }
   }
 
   /** Best-effort rejected-completion diagnostic beside the broker store. */
@@ -578,6 +1084,26 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
         else applyMessageEnvelope(envelope);
       } catch {
         /* one bad envelope must not stop the drain */
+      }
+    }
+    settleDueReplyTimeouts();
+  }
+
+  /** Settle waiting tasks whose tracked-reply deadline has passed. */
+  function settleDueReplyTimeouts(now = Date.now()): void {
+    for (const record of tasks.values()) {
+      if (record.result) continue;
+      if (
+        record.state === 'waiting' &&
+        record.pendingReplyDeadlineAt !== undefined &&
+        now >= record.pendingReplyDeadlineAt
+      ) {
+        settleTask(record, {
+          status: 'blocked',
+          ok: false,
+          text: `Timed out waiting for a reply from ${record.pendingReplyTargetAgentId ?? 'the target agent'} (message ${record.pendingReplyMessageId ?? 'unknown'} never answered).`,
+          error: 'Tracked reply deadline reached.',
+        });
       }
     }
   }
@@ -842,6 +1368,10 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
       if (agent.state === 'closed') {
         throw new HcRuntimeError('closed_handle', `Agent "${agent.handle.id}" is closed.`);
       }
+      // Fresh correlation before routing: a reply that already landed
+      // resolves the wait here instead of leaving `status` stale.
+      drainBrokerInbox();
+      settleDueReplyTimeouts();
       // Correlated traffic goes through the mailbox so request/task state
       // matches the pane-based backend exactly.
       if (opts.taskId) {
@@ -1020,6 +1550,8 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
 
     async status(agentId) {
       const agent = canonicalAgent(agentId);
+      drainBrokerInbox();
+      settleDueReplyTimeouts();
       let proc: RuntimeProcState = 'unknown';
       if (agent.state === 'closed') {
         proc = 'unknown';
@@ -1032,6 +1564,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
         proc,
         task: open ? toTaskState(open.state) : 'done',
         ...(open?.pendingReplyMessageId ? { waitingOn: open.pendingReplyMessageId } : {}),
+        ...(open?.staleNotifiedAt !== undefined ? { stale: true } : {}),
       } as RuntimeStatus;
     },
 

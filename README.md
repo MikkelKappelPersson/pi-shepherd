@@ -247,6 +247,7 @@ Enter to cycle values, `/` to fuzzy-search, and `Esc` to close it.
 | **Use sheep emoji** (`emojiSheep`) | on, off | on | Show the animated `🐑` marker beside actively working agents; off uses a plain marker instead. |
 | **Default run timeout** (`timeout`) | `1`, `2`, `5`, `10`, `20`, `30`, or `60` minutes | `60` minutes | Set the default time limit before a Herdr run is reported as timed out. |
 | **Stale wait reminder** (`staleWaitThreshold`) | `off`, `1`, `2`, `5`, `10`, `15`, or `30` minutes | `30` minutes | A task waiting longer than this on a required reply raises one stale-wait reminder. `off` disables reminders; reminders never cancel or block the task. |
+| **Execution backend** (`backend`) | `auto`, `herdr`, `hc` | `auto` | Run where called from — Herdr TUI or hc app. A pin that can't be reached fails cleanly with a setup hint, never a silent fallback. App-side only; the model never decides. |
 
 The user layer is stored in `pi-shepherd/config.json` inside the active pi
 agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`). It stores

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-// Phase 1.2 backend matrix (spec 009): the same prompts behave the same on
+// Phase 2 backend matrix (spec 009): the same prompts behave the same on
 // both runtimes, raw native ids are refused as handles on both, and closing
 // what we did not create is refused before any kill primitive runs.
+// Phase 2 additions: non-blocking hc watchers reject like blocking watch,
+// the hc status view + read-target resolution refuse raw ids, the stale
+// monitor stays quiet with no waiting tasks, the timeout->blocked copy
+// matches the pane backend byte-for-byte, and the fieldnotes bridge shares
+// one `.shepherd/sessions` dir (temp project root, no live agent).
 //
 // No live spawn: every path below rejects (or proves ownership mechanics)
 // before any agent boots, so this stays deterministic with or without a
@@ -11,6 +16,13 @@
 // src/extension/shepherd.ts (delegate/close routed, rest concrete).
 import { currentParentBroker, shutdownParentBroker } from '../src/runtimes/herdr/lifecycle.ts';
 import { createHerdrRuntime } from '../src/runtimes/herdr/runtime.ts';
+import {
+  describeHcStatusView,
+  hcStaleWaitMonitor,
+  isHcTaskId,
+  resolveHcAgentId,
+  watchHcTasks,
+} from '../src/runtimes/hc/runtime.ts';
 import {
   isHcAvailable,
   loadCreatedTerminals,
@@ -128,6 +140,95 @@ try {
     console.log('INFO  hc unreachable: ownership-primitive block skipped');
   }
   await rejectsWithCode(() => herdr.close('w1:p1'), 'unknown_handle', 'pane close(w1:p1) refused before pane close');
+
+  // ── Phase 2 parity: non-blocking hc watchers reject like blocking watch ──
+  await rejectsWithCode(() => watchHcTasks([]), 'invalid_handle', 'hc watchHcTasks([]) rejected');
+  await rejectsWithCode(
+    () => watchHcTasks([ghostTask, ghostTask]),
+    'unknown_task',
+    'hc watchHcTasks duplicate-unknown rejected as unknown_task'
+  );
+  await rejectsWithCode(
+    () => watchHcTasks([ghostTask]),
+    'unknown_task',
+    'hc watchHcTasks unknown task rejected'
+  );
+  assert(!isHcTaskId(ghostTask), 'isHcTaskId false for unknown task');
+  assert(!isHcTaskId('t4'), 'isHcTaskId false for raw terminal address');
+  assert(!isHcTaskId('w1:p1'), 'isHcTaskId false for raw pane id');
+
+  // ── Phase 2 parity: status view + read-target resolution refuse raw ids ──
+  await rejectsWithCode(
+    async () => describeHcStatusView(ghostAgent),
+    'unknown_handle',
+    'describeHcStatusView unknown agent refused'
+  );
+  assert(resolveHcAgentId('t4') === undefined, 'resolveHcAgentId never resolves a raw terminal address');
+  assert(resolveHcAgentId('w1:p1') === undefined, 'resolveHcAgentId never resolves a raw pane id');
+  assert(resolveHcAgentId(ghostAgent) === undefined, 'resolveHcAgentId undefined for unknown agent');
+
+  // ── Phase 2 parity: stale monitor is information-only and idle-safe ─────
+  // With no waiting tasks the poll resolves quietly and never notifies.
+  let staleNotified = 0;
+  hcStaleWaitMonitor.setNotifier(() => {
+    staleNotified++;
+  });
+  await hcStaleWaitMonitor.poll();
+  assert(staleNotified === 0, 'stale monitor quiet with no waiting tasks');
+  hcStaleWaitMonitor.setNotifier(undefined);
+  hcStaleWaitMonitor.shutdown();
+
+  // ── Phase 2 parity: timeout->blocked copy matches the pane backend ──────
+  // Both backends settle an unanswered tracked reply as `blocked` with the
+  // same human-readable copy (returnCode 2); the hc path builds it in
+  // `settleDueReplyTimeouts` + `watch`, the pane path in
+  // `processParentBrokerMessages`. Assert the shared prefix byte-for-byte.
+  {
+    const fs = await import('node:fs');
+    const hcSource = fs.readFileSync(new URL('../src/runtimes/hc/runtime.ts', import.meta.url), 'utf8');
+    const paneSource = fs.readFileSync(
+      new URL('../src/runtimes/herdr/lifecycle.ts', import.meta.url),
+      'utf8'
+    );
+    const snippet = 'Timed out waiting for a reply from';
+    assert(hcSource.includes(snippet), 'hc runtime carries the blocked-reply copy');
+    assert(paneSource.includes(snippet), 'pane runtime carries the blocked-reply copy');
+    assert(
+      hcSource.includes('(message') && hcSource.includes('never answered).'),
+      'hc blocked copy names the unanswered message'
+    );
+  }
+
+  // ── Phase 2 parity: fieldnotes bridge shares one sessions dir ────────────
+  // Both runtimes persist through `src/core/artifact-sessions.ts`, rooted at
+  // `<projectRoot>/.shepherd/sessions`. Prove the bridge once here (temp
+  // project root, no live agent): reserve -> start -> finalize lands a
+  // completed note under the shared directory.
+  {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const sessions = await import('../src/core/artifact-sessions.ts');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hc-matrix-fieldnotes-'));
+    try {
+      const session = sessions.resolveOrCreateParentArtifactSession({
+        parentPiSessionId: 'hc-matrix-test',
+        projectRoot: tmp,
+      });
+      const [artifact] = sessions.reserveArtifacts(session, [
+        { agent: 'worker', mode: 'single', task: 'matrix probe' },
+      ]);
+      sessions.markArtifactStarted(session, artifact, { taskId: 't-probe', agentId: 'a-probe' });
+      sessions.finalizeArtifact(session, artifact, { status: 'completed', output: 'ok' });
+      const dir = path.join(tmp, '.shepherd', 'sessions');
+      assert(fs.existsSync(dir), 'fieldnotes sessions dir exists under project root');
+      assert(fs.existsSync(artifact.filePath), 'finalized artifact file exists');
+      const moc = fs.readFileSync(session.mocPath, 'utf8');
+      assert(moc.includes('completed'), 'fieldnotes index records the completed note');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
 } finally {
   if (previousOwner === undefined) delete process.env.PI_SHEPHERD_OWNER_SESSION;
   else process.env.PI_SHEPHERD_OWNER_SESSION = previousOwner;

@@ -43,12 +43,26 @@ import {
 } from '../runtimes/herdr/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from '../core/config.ts';
 import { detectCaller } from '../runtimes/detect.ts';
-import { resolveBackend, type ResolvedBackend } from '../runtimes/backend.ts';
+import {
+  HC_SETUP_HINT,
+  resolveBackend,
+  type ResolvedBackend,
+} from '../runtimes/backend.ts';
 import { unseenCompletionLedger } from '../core/unseen-completions.ts';
 import { lifecycleRegistry, LifecycleError } from '../runtimes/herdr/orchestration.ts';
 import { createHerdrRuntime } from '../runtimes/herdr/runtime.ts';
-import { createHcRuntime, describeHcAgent } from '../runtimes/hc/runtime.ts';
+import {
+  configureHcStaleWaitNotifications,
+  configureHcTaskWatcherNotifications,
+  createHcRuntime,
+  describeHcAgent,
+  describeHcStatusView,
+  hcTaskWatcherService,
+  isHcTaskId,
+  resolveHcAgentId,
+} from '../runtimes/hc/runtime.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
+import { isHcAvailable } from '../runtimes/hc/hc.ts';
 import {
   resolveOrCreateParentArtifactSession,
   type ShepherdSession,
@@ -269,7 +283,7 @@ function commandBackend(ctx: ShepherdContext): ResolvedBackend {
 }
 
 /** Display identity for an hc sheep; falls back to the raw id like displayAgentName. */
-function hcAgentIdentity(id: string): { id: string; agent: string; label: string } {
+function hcAgentIdentity(id: string): { id: string; agent: string; label: string; model?: string } {
   try {
     return describeHcAgent(id);
   } catch {
@@ -766,6 +780,106 @@ function configureTaskWatcherBridge(pi: ExtensionAPI): void {
   });
 }
 
+/**
+ * Hc task-watcher bridge (Phase 2 parity): same customType, summary shape,
+ * and steer/triggerTurn delivery as the pane-backend task bridge. Hc
+ * completions already carry display identity from the hc watcher registry.
+ */
+function configureHcTaskWatcherBridge(pi: ExtensionAPI): void {
+  registerTaskCompletionRenderer(pi);
+  configureHcTaskWatcherNotifications(notification => {
+    if (!taskWatcherParentSessionActive) return;
+    const summary = notification.completions
+      .map(completion => {
+        const identity = completion.label
+          ? `${completion.agent ?? completion.agentId}: ${completion.label}`
+          : (completion.agent ?? completion.agentId);
+        return `${identity} ${completion.status}`;
+      })
+      .join(', ');
+    const content = `shepherd_watcher completion${notification.completions.length === 1 ? '' : 's'}: ${summary}`;
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.task.completion',
+          content,
+          display: true,
+          details: notification,
+        },
+        { deliverAs: 'steer', triggerTurn: true }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the completion stays retrievable via status.
+    }
+  });
+}
+
+/**
+ * Hc stale-wait bridge (Phase 2 parity): same customType, body, and
+ * followUp/no-wake delivery as the pane-backend stale bridge. The reminder
+ * is information only; the reply deadline stays authoritative.
+ */
+function configureHcStaleWaitBridge(pi: ExtensionAPI): void {
+  registerStaleWaitRenderer(pi);
+  configureHcStaleWaitNotifications(info => {
+    if (!staleWaitParentSessionActive) return;
+    const owner = info.label
+      ? `${info.agent ?? info.agentId}: ${info.label}`
+      : (info.agent ?? info.agentId);
+    const recipient = info.recipientName
+      ? `${info.recipientName}${info.recipientState ? ` (${info.recipientState})` : ''}`
+      : 'the target agent';
+    const body = [
+      `Waiting ${formatElapsedMs(info.elapsedMs)} for a reply (stale after ${info.thresholdMinutes} min).`,
+      `Task: ${info.taskId}`,
+      `Owner: ${owner} - ${info.description}`,
+      `Question: ${info.question}`,
+      `Pending request: ${info.requestMessageId} (waiting on ${recipient})`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const actions = [
+      "Reply to the recipient on the owner's behalf via shepherd_message (set replyTo to the pending request).",
+      `Or nudge ${recipient} with shepherd_message (targetId = recipient).`,
+      "Or let the task's reply deadline settle it as blocked (shepherd_delegate timeout).",
+    ].join('\n');
+    const content = formatToolResultText({
+      content: [{ type: 'text' as const, text: body }],
+      details: {
+        call: {
+          name: 'shepherd_message (possible follow-up)',
+          arguments: { taskId: info.taskId, replyTo: info.requestMessageId },
+        },
+        taskId: info.taskId,
+        agentId: info.agentId,
+        elapsedMs: info.elapsedMs,
+        requestMessageId: info.requestMessageId,
+        action: actions,
+        returnValue: info,
+      },
+    });
+    try {
+      const sendResult: any = pi.sendMessage(
+        {
+          customType: 'shepherd.stale.wait',
+          content,
+          display: true,
+          details: info,
+        },
+        { deliverAs: 'followUp', triggerTurn: false }
+      );
+      if (sendResult && typeof sendResult.catch === 'function') {
+        sendResult.catch(() => undefined);
+      }
+    } catch {
+      // Delivery is best effort; the reply deadline is the authoritative outcome.
+    }
+  });
+}
+
 /** Narrow extension-owned bridge from core watcher completions to pi.
  * Also wires child-originated messages (Phase 6) into the parent session.
  */
@@ -922,10 +1036,15 @@ export async function doAction(
   signal?: AbortSignal,
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
-  // Phase 1.2: delegate/close (the 1:1 contract calls) go through the
-  // resolved runtime; every other action stays on pane-based primitives
-  // until parity is proven (see commandBackend). Adapters are stateless,
-  // so one per action is enough.
+  // Phase 2 (spec 009): all lifecycle calls go through the resolved
+  // runtime. `delegate`/`close` were routed first (Phase 1.2); `spawn`,
+  // `message`, `status`, `read`, and `watch` join them now that parity is
+  // proven (expectsReply/stale/blocked/read-tail/done-nudge, fieldnotes
+  // bridge). Per-command resolve: the explicit `backend` pin wins, otherwise
+  // run where called from. Native ids never cross backends: each runtime
+  // only honors ids from its own registry, so a pane id is junk to hc and
+  // a terminal address is junk to panes. Adapters are stateless, so one per
+  // action is enough.
   const runtime = createHerdrRuntime({
     cwd: ctx.cwd,
     model: ctx.model,
@@ -965,6 +1084,39 @@ export async function doAction(
           placement: a.placement,
         },
       });
+      if (backend === 'hc') {
+        const hcRuntime = createHcRuntime({
+          cwd: ctx.cwd,
+          model: ctx.model,
+          thinkingLevel: ctx.thinkingLevel,
+          hasUI: ctx.hasUI,
+          ui: ctx.ui,
+          sessionId: ctx.sessionManager?.getSessionId(),
+          artifactSession,
+        });
+        const id = await hcRuntime.spawn(
+          { name: a.agent } as any,
+          { cwd: a.cwd, label: a.label, placement: a.placement }
+        );
+        const hcHandle = hcAgentIdentity(id);
+        return textResult(
+          `shepherd_spawn spawned ${hcHandle.label ? `${hcHandle.agent}: ${hcHandle.label}` : hcHandle.agent}`,
+          {
+            id,
+            agent: hcHandle.agent,
+            label: hcHandle.label,
+            model: hcHandle.model ?? null,
+            returnValue: {
+              id,
+              agent: hcHandle.agent,
+              label: hcHandle.label,
+              model: hcHandle.model ?? null,
+            },
+            fieldnote: artifactSession?.sessionRelativePath ?? null,
+            ...(artifactSession ? { artifactSession } : {}),
+          }
+        );
+      }
       const handle = await startAgent(
         a.agent,
         {
@@ -1021,6 +1173,48 @@ export async function doAction(
     }
     case 'message': {
       const a: any = args;
+      if (backend === 'hc') {
+        const messageId = await resolvedRuntime.message(a.target, a.message, {
+          taskId: a.taskId ?? a.id,
+          threadId: a.threadId,
+          replyTo: a.replyTo,
+          expectsReply: a.expectsReply,
+          delivery: a.delivery,
+        });
+        const hcHandle = hcAgentIdentity(a.target);
+        const display = hcHandle.label ? `${hcHandle.agent}: ${hcHandle.label}` : hcHandle.agent;
+        // Task correlation mirrors the pane path: an expectsReply request
+        // parks the task in `waiting`; a plain correlated message reports
+        // the task's current state.
+        let targetTaskState: string | undefined;
+        const correlatedId = a.taskId ?? a.id;
+        if (correlatedId) {
+          try {
+            const view = describeHcStatusView(a.target);
+            if (view.task && view.task.id === correlatedId) targetTaskState = view.task.state;
+          } catch {
+            /* display hint is best effort */
+          }
+        }
+        if (!targetTaskState && a.expectsReply && correlatedId) targetTaskState = 'waiting';
+        return textResult(
+          `Message queued to ${display}` +
+            (targetTaskState ? ` (task ${targetTaskState})` : ''),
+          {
+            id: messageId,
+            messageId,
+            returnValue: {
+              messageId,
+              accepted: true,
+              delivery: a.delivery ?? 'followUp',
+              ...(a.expectsReply && correlatedId ? { requestId: messageId } : {}),
+              targetId: hcHandle.id,
+            },
+            ...(a.expectsReply && correlatedId ? { requestId: messageId } : {}),
+            ...(targetTaskState ? { targetTaskState } : {}),
+          }
+        );
+      }
       const result = sendParentMessage({
         target: a.target,
         message: a.message,
@@ -1076,6 +1270,37 @@ export async function doAction(
           'invalid_handle',
           'Expected one or more task (or legacy prompt) ids to watch.'
         );
+      }
+      if (backend === 'hc') {
+        // Hc tasks never mix with legacy prompt ids; every id must name a
+        // known hc task (opaque ids never cross backends).
+        for (const id of ids) {
+          if (!isHcTaskId(id)) {
+            throw new LifecycleError(
+              'invalid_handle',
+              `Unknown watcher target "${id}". Pass a task id from shepherd_delegate; agent ids and terminal addresses are not valid watcher targets.`
+            );
+          }
+        }
+        if (new Set(ids).size !== ids.length) {
+          throw new LifecycleError(
+            'invalid_handle',
+            'A watcher cannot contain duplicate task ids.'
+          );
+        }
+        const registration = hcTaskWatcherService.watch(ids);
+        unseenCompletionLedger.clear(registration.taskIds);
+        const summary =
+          registration.pending.length > 0
+            ? `watching ${registration.pending.length} task${registration.pending.length === 1 ? '' : 's'} asynchronously`
+            : 'watch registered; all tasks were already settled';
+        return textResult(summary, {
+          watcherId: registration.watcherId,
+          taskIds: registration.taskIds,
+          pending: registration.pending,
+          completed: registration.completed,
+          returnValue: registration,
+        });
       }
       // A tracker id is a task first; anything else must be a known prompt id.
       // Agent ids and Herdr pane ids are rejected with a clear error here so
@@ -1134,6 +1359,36 @@ export async function doAction(
     }
     case 'status': {
       const a: any = args;
+      if (backend === 'hc') {
+        const view = describeHcStatusView(a.id ?? a.handle);
+        const publicResult = {
+          id: view.handle.id,
+          state: view.state,
+          ...(view.task
+            ? {
+                task: {
+                  id: view.task.id,
+                  state: view.task.state,
+                  ...(view.task.waitingMs !== undefined
+                    ? { waitingMs: view.task.waitingMs }
+                    : {}),
+                  ...(view.task.pendingRequestMessageId
+                    ? { pendingRequest: view.task.pendingRequestMessageId }
+                    : {}),
+                  ...(view.task.waitingRecipient
+                    ? { waitingOn: view.task.waitingRecipient }
+                    : {}),
+                  ...(view.task.stale ? { stale: true } : {}),
+                },
+              }
+            : {}),
+        };
+        const taskNote = view.task ? `; task ${view.task.id} ${view.task.state}` : '';
+        return textResult(`agent ${view.state}${taskNote}.`, {
+          status: publicResult,
+          returnValue: publicResult,
+        });
+      }
       const result = statusAgent(a.id ?? a.handle);
       const publicResult = {
         id: result.handle.id,
@@ -1168,17 +1423,21 @@ export async function doAction(
       const a: any = args;
       const id = a.id ?? a.handle;
       await resolvedRuntime.close(id);
-      // The unseen ledger feeds off the pane-backend settlement stream; hc
-      // settlements join it with message/status/read parity (Phase 2), so an
-      // hc close reports its display identity without touching the ledger.
       if (backend === 'hc') {
         const hcHandle = hcAgentIdentity(id);
+        const cleared = unseenCompletionLedger.clearForAgent(hcHandle.id);
+        const clearedNote =
+          cleared.length > 0
+            ? `; cleared ${cleared.length} unseen completion(s): ${cleared.join(', ')}`
+            : '';
         return textResult(
-          `closed ${hcHandle.label ? `${hcHandle.agent}: ${hcHandle.label}` : hcHandle.agent}`,
+          `closed ${hcHandle.label ? `${hcHandle.agent}: ${hcHandle.label}` : hcHandle.agent}${clearedNote}`,
           {
             id: hcHandle.id,
+            ...(cleared.length > 0 ? { clearedUnseenCompletions: cleared } : {}),
             returnValue: {
               id: hcHandle.id,
+              ...(cleared.length > 0 ? { clearedUnseenCompletions: cleared } : {}),
             },
           }
         );
@@ -1233,6 +1492,41 @@ export async function doAction(
       const target = args.name?.trim();
       if (!target) return textResult('Provide a name/pane target (action=read).', {});
       const lines = args.lines ?? 40;
+      if (backend === 'hc') {
+        // Hc terminals have no pane sources; `lines` tails the terminal.
+        // Accept an opaque agent id, a display identity, or an owned
+        // terminal name. Raw terminal addresses never resolve here: they
+        // are not opaque ids (see the resolver seam).
+        const agentId = resolveHcAgentId(target);
+        if (!agentId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Could not read "${target}": unknown hc agent, terminal, or name.`,
+              },
+            ],
+            details: { target, error: 'unknown hc read target' },
+          };
+        }
+        try {
+          const tail = await resolvedRuntime.read(agentId, { lines });
+          return textResult((tail as string).trim() || '(no terminal output)', {
+            target,
+            lines,
+          });
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Could not read "${target}": ${error?.message ?? String(error)}`,
+              },
+            ],
+            details: { target, error: String(error?.message ?? error) },
+          };
+        }
+      }
       const source = args.source ?? 'recent-unwrapped';
       // Resolve a shepherd pane by its recorded paneId or label (same as
       // prompt/close) so `read scout` works after a lifecycle start.
@@ -1336,11 +1630,32 @@ async function executeShepherd(
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   // Watch registration/unregistration operate on the parent lifecycle
-  // registry and remain useful even if Herdr briefly disappears. The watcher
-  // will resume polling when the runtime is reachable again.
-  if (!isHerdrAvailable() && label !== 'watch') {
-    const failure = unavailableResult(label, args);
-    throw new Error(formatToolResultText(failure) ?? HERDR_SETUP_HINT);
+  // registry and remain useful even if the backend briefly disappears. The
+  // watcher will resume polling when the runtime is reachable again.
+  // Phase 2: gate on the resolved backend, not always Herdr. An hc caller
+  // with a pinned-but-unreachable backend gets the resolver's clean refusal
+  // (with setup hint, no fallback) instead of a stale Herdr gate.
+  if (label !== 'watch') {
+    let backend: ResolvedBackend;
+    try {
+      backend = commandBackend({ cwd: ctx?.cwd ?? process.cwd() } as any);
+    } catch (error: any) {
+      const failure = unavailableResult(label, args);
+      const hint = String(error?.message ?? error);
+      throw new Error(
+        (formatToolResultText({ ...failure, details: { ...(failure.details as any), error: hint } }) ?? hint)
+      );
+    }
+    if (backend === 'hc') {
+      if (!isHcAvailable()) {
+        throw new Error(
+          `Herd ${label} failed (return code 1): backend "hc" is unreachable. ${HC_SETUP_HINT}`
+        );
+      }
+    } else if (!isHerdrAvailable()) {
+      const failure = unavailableResult(label, args);
+      throw new Error(formatToolResultText(failure) ?? HERDR_SETUP_HINT);
+    }
   }
   try {
     const result = await doAction(args, ctx, signal, onUpdate);
@@ -1380,6 +1695,8 @@ export function registerShepherdTools(pi: ExtensionAPI) {
   configurePromptWatcherBridge(pi);
   configureTaskWatcherBridge(pi);
   configureStaleWaitBridge(pi);
+  configureHcTaskWatcherBridge(pi);
+  configureHcStaleWaitBridge(pi);
   pi.registerTool({
     name: 'shepherd',
     label: 'Shepherd (manage Herdr agents)',
