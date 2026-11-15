@@ -67,6 +67,7 @@
     "backend:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-backend.mjs",
     "hc-matrix:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-hc-matrix.mjs",
     "hc-poll:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-hc-poll.mjs",
+    "smoke:poll": "node --experimental-strip-types --disable-warning=ExperimentalWarning .agents/skills/smoke-test/scripts/live-smoke-poll.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",
     "show:shepherd-orchestrator": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-orchestrator.mjs",
     "extract:system-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/extract-pi-system-prompt.mjs",
