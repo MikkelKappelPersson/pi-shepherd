@@ -269,10 +269,9 @@ function displayAgentName(agentId: string): string {
 }
 
 /**
- * Phase 1.2 resolver seam (spec 009): delegate/close — the two calls that
- * map 1:1 onto the runtime contract — go through the resolved runtime.
- * spawn/message/status/read (plus legacy prompt/watch) stay on the
- * pane-based concrete runtime with this comment until parity is proven.
+ * Resolver seam (spec 009): per-command resolve, Phase 2 routes spawn/
+ * delegate/message/status/read/watch/close through the resolved runtime
+ * (legacy prompt stays pane-only: deprecated compat, hc callers use delegate).
  * Per-command resolve: the explicit `backend` pin wins, otherwise run where
  * called from. Native ids never cross backends: each runtime only honors
  * ids from its own registry, so a pane id is junk to hc and a terminal
