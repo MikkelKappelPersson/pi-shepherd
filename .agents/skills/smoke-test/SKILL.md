@@ -9,6 +9,17 @@ Live proof that delegated work settles and the parent hears about it.
 Deterministic suites (`npm test`) are the pre-gate — run them first.
 Smokes are the live complement, not a replacement.
 
+What's in this skill:
+
+- **Track A — Shepherd-driven smoke** (below): the spawn → delegate →
+  watch → status → close sequence, same on both backends, with
+  message-free and idle-wake variants.
+- **Track B — direct-runtime poll probe** (below): `scripts/live-smoke-poll.mjs`,
+  runnable headless via `npm run smoke:poll` (hc only, ~3–4 min).
+- **`references/forensics.md`**: broker before/after snapshots, junk-store
+  checks, timing interpretation, herdr pane notes.
+- **Backend differences table** (bottom): hc vs herdr at a glance.
+
 ## Track A — Shepherd-driven smoke (both backends)
 
 Same tool-call sequence on either backend; only the setup differs.
