@@ -1206,7 +1206,7 @@ export async function doAction(
             returnValue: {
               messageId,
               accepted: true,
-              delivery: a.delivery ?? 'followUp',
+              delivery: a.delivery ?? 'steer',
               ...(a.expectsReply && correlatedId ? { requestId: messageId } : {}),
               targetId: hcHandle.id,
             },
@@ -1891,7 +1891,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       ),
       delivery: Type.Optional(
         Type.Union([Type.Literal('followUp'), Type.Literal('steer')], {
-          description: 'Delivery mode; followUp is the default, steer is for urgent input.',
+          description: 'Delivery mode; steer is the default, followUp queues passively behind the current turn.',
         })
       ),
     }),

@@ -197,7 +197,7 @@ await withTempDirectory('pi-shepherd-message-routing-', async root => {
     assert.equal(scoutInbox.length, 1);
     assert.equal(scoutInbox[0].content, 'Any progress so far?');
     assert.equal(scoutInbox[0].senderId, broker.parentId);
-    assert.equal(scoutInbox[0].delivery, 'followUp');
+    assert.equal(scoutInbox[0].delivery, 'steer'); // 012: steer is the default; pass followUp explicitly for passive FYI
     console.log('PASS parent-to-child message is queued without altering task state');
 
     // ── Parent -> child: expectsReply puts the task into waiting ──────────

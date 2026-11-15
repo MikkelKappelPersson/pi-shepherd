@@ -214,7 +214,10 @@ function incomingMessageText(message: ShepherdMessageEnvelope): string {
 }
 
 function deliveryMode(value: unknown): ShepherdDelivery {
-  return value === 'steer' ? 'steer' : 'followUp';
+  // Steer is the default: sheep are task-driven, so an agent-authored
+  // message is almost always actionable. Pass followUp explicitly for
+  // passive FYI traffic. (012 steer default.)
+  return value === 'followUp' ? 'followUp' : 'steer';
 }
 
 function deliveryOptions(message: ShepherdMessageEnvelope): {

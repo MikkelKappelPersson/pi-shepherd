@@ -612,7 +612,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
         threadId: input.threadId,
         replyTo: input.replyTo,
         expectsReply: true,
-        delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
+        delivery: input.delivery === 'followUp' ? 'followUp' : 'steer',
         content: input.message,
         createdAt: Date.now(),
       }
@@ -650,7 +650,7 @@ export function sendParentMessage(input: ParentMessageInput): ParentMessageResul
       threadId: input.threadId,
       replyTo: input.replyTo,
       ...(replyDeadline !== undefined ? { deadlineAt: replyDeadline } : {}),
-      delivery: input.delivery === 'steer' ? 'steer' : 'followUp',
+      delivery: input.delivery === 'followUp' ? 'followUp' : 'steer',
       content: input.message,
     }
   );

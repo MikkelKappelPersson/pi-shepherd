@@ -1581,7 +1581,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
               threadId: opts.threadId,
               replyTo: opts.replyTo,
               expectsReply: true,
-              delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+              delivery: opts.delivery === 'followUp' ? 'followUp' : 'steer',
               content: msg,
               createdAt: Date.now(),
             }
@@ -1611,7 +1611,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
             taskId: opts.taskId,
             threadId: opts.threadId,
             replyTo: opts.replyTo,
-            delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+            delivery: opts.delivery === 'followUp' ? 'followUp' : 'steer',
             content: msg,
           }
         );
@@ -1634,7 +1634,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
             messageId: mintMessageId(),
             threadId: opts.threadId,
             replyTo: opts.replyTo,
-            delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+            delivery: opts.delivery === 'followUp' ? 'followUp' : 'steer',
             content: msg,
           }
         );
@@ -1648,9 +1648,9 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
       const messageId = mintMessageId();
       try {
         await hcExec(
-          opts.delivery === 'steer'
-            ? ['send', agent.handle.terminalId, msg, '--force', '--json']
-            : ['send', agent.handle.terminalId, msg, '--json']
+          opts.delivery === 'followUp'
+            ? ['send', agent.handle.terminalId, msg, '--json']
+            : ['send', agent.handle.terminalId, msg, '--force', '--json']
         );
       } catch (error) {
         throw new Error(

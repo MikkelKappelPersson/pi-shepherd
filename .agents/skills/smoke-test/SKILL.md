@@ -104,7 +104,8 @@ and lets the incoming message wake it.
    Task: stand by, reply via `shepherd_message` (`replyTo` the
    request, text = the code word), then `shepherd_done`.
 3. `shepherd_message` to the exact agent id with
-   `delivery: "steer"` and `expectsReply: true` (plus the task id),
+   `expectsReply: true` (plus the task id; `delivery: "steer"` is now
+   the default and may be omitted),
    text "request: report code word `mango-<pid>`". Steer, not
    followUp — a followUp to an idle child sat queued for minutes
    (observed live). The request wakes the child; the task waits.
