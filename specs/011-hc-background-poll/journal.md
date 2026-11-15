@@ -74,3 +74,22 @@ the agent is known IS the settlement signal.
 
 Single commit on `feat/011-hc-background-poll`, fast-forward merged to
 `main`. 010's branch is already merged; 011 builds directly on it.
+
+## Review follow-up (reviewer: review-010-011, same day)
+
+- Critical 1 (shutdown wiring): `stopHcInboxPoller()` is now called
+  from both `shutdownHcStaleWaitMonitor` and `shutdownHcTaskWatchers`
+  (they are currently caller-less export seams; the wiring honors the
+  contract for when they are called). Unref + quiescence remain the
+  live guarantees.
+- Critical 2 (real settlement): new `hcInjectTestAgent` /
+  `hcInjectTestTask` (/Remove) seams drive a real known-task settle
+  through the tick and the 010 observer, plus the keep-alive converse
+  (open task keeps the poller alive; removal restores quiescence).
+- Warning (b) delegate-start: covered by the live smoke (poller
+  observed running right after `delegate`), not the unit suite —
+  `delegate` needs a live child, so the suite asserts register
+  semantics and the smoke asserts the wiring.
+- Warning (d): `writeTaskDoneDiagnostic` and `applyTaskDoneEnvelope`
+  now take the drain's `active` broker; diagnostics land beside the
+  drained store, never the module-cached one.

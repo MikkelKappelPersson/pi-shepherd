@@ -14,9 +14,15 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
+  describeHcStatusView,
   drainHcInboxForSession,
+  hcInjectTestAgent,
+  hcInjectTestTask,
   hcInboxPollerStateForTests,
+  hcRemoveTestAgent,
+  hcRemoveTestTask,
   isHcInboxPollerRunning,
+  onTaskSettled as onHcTaskSettled,
   pollHcInboxOnce,
   registerHcPollSession,
   stopHcInboxPoller,
@@ -146,6 +152,100 @@ stopHcInboxPoller();
   );
   stopHcInboxPoller();
   console.log('PASS latest registration wins (single session per process)');
+}
+
+// Real settlement: a queued done for a KNOWN task settles it through the
+// 010 observer path (not just a dropped diagnostic).
+{
+  const SESS_C = `hc-poll-test-c-${Date.now()}`;
+  const agentId = 'shepherd-agent-hc-poll-real';
+  const taskId = 'shepherd-task-hc-poll-real';
+  hcInjectTestAgent({
+    handle: { id: agentId, agent: 'worker', label: 'poll-real' },
+    state: 'working',
+    activeTaskId: taskId,
+  });
+  hcInjectTestTask({
+    taskId,
+    agentId,
+    description: 'real settle via tick',
+    state: 'running',
+    createdAt: Date.now(),
+    pendingRequestIds: new Set(),
+  });
+  const seen = [];
+  const off = onHcTaskSettled((result, context) => seen.push({ result, context }));
+  registerHcPollSession(SESS_C);
+  assert.equal(drainHcInboxForSession(SESS_C), true, 'broker materialized for real-settle');
+  const dir = brokerDirForSession(SESS_C);
+  const manifest = JSON.parse(readFileSync(path.join(dir, 'broker.json'), 'utf8'));
+  writeFileSync(
+    path.join(dir, 'parent', 'inbox', `0000000000000003-hc-poll-real.json`),
+    JSON.stringify({
+      kind: 'task_done',
+      messageId: 'shepherd-message-hc-poll-real',
+      taskId,
+      senderId: agentId,
+      targetId: manifest.parentId,
+      sessionId: manifest.sessionId,
+      brokerId: manifest.brokerId,
+      status: 'completed',
+      summary: 'real-ok',
+      schemaVersion: 1,
+      delivery: 'followUp',
+      createdAt: Date.now(),
+    }),
+    'utf8'
+  );
+  pollHcInboxOnce();
+  off();
+  assert.deepEqual(readdirSync(path.join(dir, 'parent', 'inbox')), [], 'real done consumed');
+  assert.equal(seen.length, 1, 'the 010 observer fired exactly once');
+  assert.equal(seen[0].result.status, 'completed', 'settled completed');
+  assert.equal(seen[0].result.text, 'real-ok', 'settlement text carried through');
+  assert.equal(
+    describeHcStatusView(agentId).task,
+    undefined,
+    'settled task leaves the status view (agent still known)'
+  );
+  assert.equal(isHcInboxPollerRunning(), false, 'settlement restores quiescence');
+  hcRemoveTestTask(taskId);
+  hcRemoveTestAgent(agentId);
+  cleanupSession(SESS_C);
+  console.log('PASS tick settles a queued done for a known task through the observer');
+}
+
+// Keep-alive converse: an open task keeps the poller running across ticks.
+{
+  const SESS_D = `hc-poll-test-d-${Date.now()}`;
+  const agentId = 'shepherd-agent-hc-poll-open';
+  const taskId = 'shepherd-task-hc-poll-open';
+  hcInjectTestAgent({
+    handle: { id: agentId, agent: 'worker', label: 'poll-open' },
+    state: 'working',
+    activeTaskId: taskId,
+  });
+  hcInjectTestTask({
+    taskId,
+    agentId,
+    description: 'open keeps poller alive',
+    state: 'running',
+    createdAt: Date.now(),
+    pendingRequestIds: new Set(),
+  });
+  registerHcPollSession(SESS_D);
+  pollHcInboxOnce();
+  assert.equal(
+    isHcInboxPollerRunning(),
+    true,
+    'an unsettled task keeps the poller alive'
+  );
+  hcRemoveTestTask(taskId);
+  hcRemoveTestAgent(agentId);
+  pollHcInboxOnce();
+  assert.equal(isHcInboxPollerRunning(), false, 'removing the task restores quiescence');
+  cleanupSession(SESS_D);
+  console.log('PASS open task keeps the poller alive; removal restores quiescence');
 }
 
 // Cleanup: no timer left running, no test broker stores left behind.

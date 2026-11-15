@@ -380,11 +380,10 @@ function openPendingRequest(
   }
 }
 
-/** Best-effort rejected-completion diagnostic beside the broker store. */
-function writeTaskDoneDiagnostic(kind: string, envelope: ShepherdMessageEnvelope, reason: string): void {
-  if (!broker) return;
+/** Best-effort rejected-completion diagnostic beside the drain's own store. */
+function writeTaskDoneDiagnostic(active: ParentBroker, kind: string, envelope: ShepherdMessageEnvelope, reason: string): void {
   try {
-    const dir = path.join(broker.rootDir, 'rejected');
+    const dir = path.join(active.rootDir, 'rejected');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, `task-done-${kind}-${Date.now()}.json`),
@@ -402,7 +401,7 @@ function writeTaskDoneDiagnostic(kind: string, envelope: ShepherdMessageEnvelope
  * sender's own task is re-anchored on the sender's active task, and a
  * completion with no resolvable task is dropped observably.
  */
-function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInternal | undefined {
+function applyTaskDoneEnvelope(active: ParentBroker, envelope: ShepherdMessageEnvelope): TaskResultInternal | undefined {
   if (envelope.kind !== 'task_done' || !envelope.status) return undefined;
   let record: TaskRecord | undefined;
   if (envelope.taskId) record = tasks.get(envelope.taskId);
@@ -426,7 +425,7 @@ function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInt
   }
   if (!effective) effective = senderActiveTask;
   if (!effective || senderAgentId === undefined) {
-    writeTaskDoneDiagnostic('dropped', envelope, 'no active task matches the sender');
+    writeTaskDoneDiagnostic(active, 'dropped', envelope, 'no active task matches the sender');
     return undefined;
   }
   if (envelope.status === 'completed' && effective.pendingRequestIds.size > 0) return undefined;
@@ -443,7 +442,7 @@ function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInt
       error: envelope.error,
     });
   } catch {
-    writeTaskDoneDiagnostic('dropped', envelope, `settlement of "${effective.taskId}" was rejected`);
+    writeTaskDoneDiagnostic(active, 'dropped', envelope, `settlement of "${effective.taskId}" was rejected`);
     return undefined;
   }
 }
@@ -524,7 +523,7 @@ function drainHcSessionInbox(sessionId?: string): void {
   }
   for (const envelope of envelopes) {
     try {
-      if (envelope.kind === 'task_done') applyTaskDoneEnvelope(envelope);
+      if (envelope.kind === 'task_done') applyTaskDoneEnvelope(active, envelope);
       else applyMessageEnvelope(active, envelope);
     } catch {
       /* one bad envelope must not stop the drain */
@@ -623,6 +622,20 @@ export function drainHcInboxForSession(sessionId?: string): boolean {
   if (!id) return false;
   drainHcSessionInbox(id);
   return true;
+}
+
+/** Test seam (011 suite): isolated agent/task fixtures for real-settlement ticks. */
+export function hcInjectTestAgent(agent: AgentRecord): void {
+  agents.set(agent.handle.id, agent);
+}
+export function hcInjectTestTask(task: TaskRecord): void {
+  tasks.set(task.taskId, task);
+}
+export function hcRemoveTestAgent(agentId: string): void {
+  agents.delete(agentId);
+}
+export function hcRemoveTestTask(taskId: string): void {
+  tasks.delete(taskId);
 }
 
 /** Test seam: lifecycle + unref visibility without wall-clock waits. */
@@ -777,6 +790,7 @@ export function configureHcStaleWaitNotifications(notifier?: HcStaleWaitNotifier
 
 export function shutdownHcStaleWaitMonitor(): void {
   hcStaleWaitMonitor.shutdown();
+  stopHcInboxPoller();
 }
 
 // ── Non-blocking hc task watchers (shepherd_watch parity) ─────────────────
@@ -1074,6 +1088,7 @@ export function configureHcTaskWatcherNotifications(notifier?: HcTaskWatcherNoti
 
 export function shutdownHcTaskWatchers(): void {
   hcTaskWatcherService.shutdown();
+  stopHcInboxPoller();
 }
 
 /** True when the id names a known hc task (tool routing, not a contract). */

@@ -93,6 +93,17 @@ background tick uses the session-keyed broker; if no session broker
 can be resolved (no session context — e.g., after shutdown), the tick
 skips instead of minting a fallback store.
 
+Deliberate asymmetry (review resolution): `registerHcPollSession`
+resolves through `ownerSessionKey` and never skips — the tick must poll
+the same store the tool drains use (explicit id, env session, or the
+process fallback). `drainHcInboxForSession` skips on blank ids instead:
+a read path must never create state. Consequence: env-session runtimes
+get background drains with no matching drain-first reads (the
+registered key still matches the tool-call store, so settlement is
+correct; only the read-side freshness guarantee rests on the tick
+alone). Rejected-completion diagnostics are written beside the drain's
+own `active` broker, never the module-cached one.
+
 ### 4. Verification: deterministic, no live spawn
 
 - Unit-tick seam: the poller exposes start/stop plus a synchronous
