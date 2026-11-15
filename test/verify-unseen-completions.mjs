@@ -541,6 +541,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 case "$1 $2" in
   "agent get") printf '{"result":{"agent":{"pane_id":"%s","agent_status":"idle"}}}\\n' "$3" ;;
   "pane list") printf '%s\\n' '{"result":{"panes":[]}}' ;;
+  "status server") printf 'status: running\\n' ;;
   *) printf '%s\\n' '{"result":{}}' ;;
 esac
 exit 0
@@ -551,6 +552,16 @@ exit 0
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ''}`;
   process.env.PI_CODING_AGENT_DIR = agentDir;
+  // Phase 1.2: doAction close routes through the resolved runtime. Pin the
+  // sandbox user layer to the pane backend so this fake-herdr world keeps
+  // proving pane-close behavior deterministically (the fake answers
+  // --version and a running `status server`, so the pin resolves). This
+  // doubles as the e2e proof that an explicit backend pin wins over
+  // caller detection.
+  writeFileSync(
+    path.join(agentDir, 'pi-shepherd', 'config.json'),
+    JSON.stringify({ backend: 'herdr' })
+  );
   try {
     const a6 = lifecycleRegistry.registerAgent({ agent: 'worker', label: 'bridge-close-f', paneId });
     const t6 = lifecycleRegistry.createTask(a6, 'F');

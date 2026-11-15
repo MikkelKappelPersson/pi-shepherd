@@ -262,11 +262,35 @@ assert(DEFAULT_SETTINGS.backend === 'auto', 'DEFAULT_SETTINGS.backend is auto');
     live = `throw: ${String(e && e.message).slice(0, 80)}...`;
   }
   console.log(`INFO  live detectCaller()=${caller} resolveBackend(auto)=${live}`);
-  // Phase 0 has no hc runtime dir yet: app resolution must be a clean
-  // refusal downstream, never a cross-spawn. This file only proves the
-  // resolver mapping; live spawn refusal is checked via shepherd_* + hc.
+  // Phase 1.1 scaffold: src/runtimes/hc/ exists with the spawn/read surface
+  // but stays unwired from the resolver (wiring is 1.2), so app resolution
+  // is still a clean refusal downstream, never a cross-spawn. This file
+  // still only proves the resolver mapping; live spawn proof goes through
+  // shepherd_* + hc.
   const fs = await import('node:fs');
-  assert(!fs.existsSync('src/runtimes/hc'), 'Phase 0 has no src/runtimes/hc/ yet');
+  assert(fs.existsSync('src/runtimes/hc/hc.ts'), 'Phase 1.1 hc.ts scaffold exists');
+  assert(fs.existsSync('src/runtimes/hc/runtime.ts'), 'Phase 1.1 runtime.ts scaffold exists');
+  const hcRuntimeSource = fs.readFileSync('src/runtimes/hc/runtime.ts', 'utf8');
+  assert(
+    !hcRuntimeSource.includes('herdr'),
+    'hc runtime drives hc terminals only (no pane-backend import)'
+  );
+  const hc = await import('../src/runtimes/hc/hc.ts');
+  for (const fn of [
+    'isHcAvailable',
+    'hcExec',
+    'recordCreatedTerminal',
+    'pruneStaleCreatedTerminals',
+    'writePiLaunchFiles',
+    'launchPiInHcTerminal',
+  ]) {
+    assert(typeof hc[fn] === 'function', `hc.ts exports ${fn}`);
+  }
+  const { createHcRuntime } = await import('../src/runtimes/hc/runtime.ts');
+  const hcRuntime = createHcRuntime({ cwd: process.cwd() });
+  for (const method of ['spawn', 'delegate', 'message', 'watch', 'status', 'close', 'read']) {
+    assert(typeof hcRuntime[method] === 'function', `hc runtime implements ${method}`);
+  }
 }
 
 if (failures) process.exit(1);

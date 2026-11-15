@@ -42,9 +42,12 @@ import {
   configureParentMessageNotifications,
 } from '../runtimes/herdr/lifecycle.ts';
 import { fieldnotesEnabled, loadSettings } from '../core/config.ts';
+import { detectCaller } from '../runtimes/detect.ts';
+import { resolveBackend, type ResolvedBackend } from '../runtimes/backend.ts';
 import { unseenCompletionLedger } from '../core/unseen-completions.ts';
 import { lifecycleRegistry, LifecycleError } from '../runtimes/herdr/orchestration.ts';
 import { createHerdrRuntime } from '../runtimes/herdr/runtime.ts';
+import { createHcRuntime, describeHcAgent } from '../runtimes/hc/runtime.ts';
 import { formatShepherdCommand, omitMaterializedDefaults } from './cli.ts';
 import {
   resolveOrCreateParentArtifactSession,
@@ -248,6 +251,29 @@ function displayAgentName(agentId: string): string {
     return handle.label ? `${handle.agent}: ${handle.label}` : handle.agent;
   } catch {
     return agentId;
+  }
+}
+
+/**
+ * Phase 1.2 resolver seam (spec 009): delegate/close — the two calls that
+ * map 1:1 onto the runtime contract — go through the resolved runtime.
+ * spawn/message/status/read (plus legacy prompt/watch) stay on the
+ * pane-based concrete runtime with this comment until parity is proven.
+ * Per-command resolve: the explicit `backend` pin wins, otherwise run where
+ * called from. Native ids never cross backends: each runtime only honors
+ * ids from its own registry, so a pane id is junk to hc and a terminal
+ * address is junk to panes.
+ */
+function commandBackend(ctx: ShepherdContext): ResolvedBackend {
+  return resolveBackend(loadSettings(ctx.cwd).backend, detectCaller());
+}
+
+/** Display identity for an hc sheep; falls back to the raw id like displayAgentName. */
+function hcAgentIdentity(id: string): { id: string; agent: string; label: string } {
+  try {
+    return describeHcAgent(id);
+  } catch {
+    return { id, agent: id, label: '' };
   }
 }
 
@@ -896,9 +922,10 @@ export async function doAction(
   signal?: AbortSignal,
   onUpdate?: (partial: AgentToolResult<Record<string, unknown>>) => void
 ): Promise<AgentToolResult<Record<string, unknown>>> {
-  // Lifecycle calls that map 1:1 to the runtime contract go through the Herdr
-  // adapter; calls that need richer results or callbacks stay on their
-  // primitives. The adapter is stateless, so one per action is enough.
+  // Phase 1.2: delegate/close (the 1:1 contract calls) go through the
+  // resolved runtime; every other action stays on pane-based primitives
+  // until parity is proven (see commandBackend). Adapters are stateless,
+  // so one per action is enough.
   const runtime = createHerdrRuntime({
     cwd: ctx.cwd,
     model: ctx.model,
@@ -907,6 +934,18 @@ export async function doAction(
     ui: ctx.ui,
     sessionId: ctx.sessionManager?.getSessionId(),
   });
+  const backend = commandBackend(ctx);
+  const resolvedRuntime =
+    backend === 'hc'
+      ? createHcRuntime({
+          cwd: ctx.cwd,
+          model: ctx.model,
+          thinkingLevel: ctx.thinkingLevel,
+          hasUI: ctx.hasUI,
+          ui: ctx.ui,
+          sessionId: ctx.sessionManager?.getSessionId(),
+        })
+      : runtime;
   switch (args.action) {
     case 'spawn': {
       const a: any = args;
@@ -960,8 +999,11 @@ export async function doAction(
       if (!Number.isFinite(timeoutMinutes) || timeoutMinutes <= 0) {
         throw new Error('Delegated task timeout must be a positive number of minutes.');
       }
-      const taskId = await runtime.delegate(a.target, a.task, { timeoutMin: timeoutMinutes });
-      const agent = lifecycleRegistry.getAgent(a.target).handle;
+      const taskId = await resolvedRuntime.delegate(a.target, a.task, {
+        timeoutMin: timeoutMinutes,
+      });
+      const agent =
+        backend === 'hc' ? hcAgentIdentity(a.target) : lifecycleRegistry.getAgent(a.target).handle;
       return textResult(
         `Delegated task to ${agent.agent}${agent.label ? `: ${agent.label}` : ''}`,
         {
@@ -1125,7 +1167,22 @@ export async function doAction(
     case 'close': {
       const a: any = args;
       const id = a.id ?? a.handle;
-      await runtime.close(id);
+      await resolvedRuntime.close(id);
+      // The unseen ledger feeds off the pane-backend settlement stream; hc
+      // settlements join it with message/status/read parity (Phase 2), so an
+      // hc close reports its display identity without touching the ledger.
+      if (backend === 'hc') {
+        const hcHandle = hcAgentIdentity(id);
+        return textResult(
+          `closed ${hcHandle.label ? `${hcHandle.agent}: ${hcHandle.label}` : hcHandle.agent}`,
+          {
+            id: hcHandle.id,
+            returnValue: {
+              id: hcHandle.id,
+            },
+          }
+        );
+      }
       const handle = lifecycleRegistry.getAgent(id).handle;
       const cleared = unseenCompletionLedger.clearForAgent(handle.id);
       const clearedNote =

@@ -1,0 +1,1092 @@
+/**
+ * hc implementation of the Shepherd runtime contract.
+ *
+ * Thin delegation layer over the hc terminal primitives in `./hc.ts`: it
+ * introduces no new behavior beyond mapping the backend-neutral contract onto
+ * `hc run / send / read / wait / kill` plus the shared parent-owned mailbox.
+ * Every id accepted or returned here is an opaque lifecycle id; terminal
+ * addresses stay internal to registry lookups (`read` resolves a handle to
+ * its terminal only for the diagnostic tail).
+ *
+ * Channel split (documented, not magic):
+ * - `spawn` boots pi via `hc run --bg` from the shared launch files.
+ * - `delegate` publishes a tracked task envelope into the mailbox — the
+ *   child extension polls its inbox, exactly like on the pane-based backend.
+ *   Task text is never pasted into the terminal: typing into a live agent
+ *   would corrupt its input.
+ * - `message` without a task id pastes text with `hc send` (an untracked
+ *   poke, the send/Enter analogue of a native prompt). Correlated traffic
+ *   (taskId / expectsReply / replyTo) goes through the mailbox so reply
+ *   correlation and waiting state stay identical on both backends.
+ * - `watch` drains the mailbox for `task_done` envelopes, observes the
+ *   completion sidecar, and idles efficiently on `hc wait --timeout`.
+ * - `status`/`read` map onto `hc get`/`hc read`; `close` maps onto
+ *   `hc kill` + `hc rm` for owned terminals only.
+ *
+ * Deferred (later phases): resolver wiring, expectsReply/nudge parity,
+ * fieldnotes bridge check, docs. This module intentionally imports nothing
+ * from the pane-based backend; shared transport-independent helpers arrive
+ * re-exported through `./hc.ts`.
+ */
+
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import type { ShepherdSession } from '../../core/artifact-sessions.ts';
+import {
+  finalizeArtifact,
+  markArtifactStarted,
+  reserveArtifacts,
+  type ArtifactReservation,
+} from '../../core/artifact-sessions.ts';
+import type { AgentThinkingLevel } from '../../core/discovery.ts';
+import {
+  discoverAgents,
+  resolveDelegatedModel,
+  resolveDelegatedThinking,
+} from '../../core/discovery.ts';
+import { loadSettings } from '../../core/config.ts';
+import { mintId, mintMessageId, normalizeHandleId } from '../../core/ids.ts';
+import {
+  createEnvelope,
+  createParentBroker,
+  hcExec,
+  launchPiInHcTerminal,
+  loadCreatedTerminals,
+  pollParentInbox,
+  publishFromParent,
+  readCompletionSignal,
+  readHcTerminalTail,
+  readLastAssistantText,
+  registerChild,
+  removeCreatedTerminalDir,
+  forgetCreatedTerminal,
+  killHcTerminal,
+  unregisterChild,
+  waitForHcAgentDetected,
+  HcError,
+  type ChildCapability,
+  type ParentBroker,
+  type ShepherdMessageEnvelope,
+} from './hc.ts';
+import type {
+  AgentHandle,
+  Completion,
+  MessageId,
+  RuntimeProcState,
+  RuntimeStatus,
+  RuntimeTaskState,
+  ShepherdRuntime,
+  SpawnPlacement,
+  TaskId,
+} from '../runtime.ts';
+
+/** Execution context captured by the adapter for the parent session it serves. */
+export interface HcRuntimeContext {
+  cwd?: string;
+  model?: { provider: string; id: string };
+  thinkingLevel?: AgentThinkingLevel;
+  hasUI?: boolean;
+  ui?: any;
+  sessionId?: string;
+  /** Parent fieldnotes session, resolved by the calling surface. */
+  artifactSession?: ShepherdSession;
+}
+
+export class HcRuntimeError extends Error {
+  readonly code:
+    | 'unknown_handle'
+    | 'closed_handle'
+    | 'active_task'
+    | 'unknown_task'
+    | 'task_agent_mismatch'
+    | 'invalid_handle'
+    | 'invalid_target'
+    | 'invalid_task'
+    | 'invalid_transition'
+    | 'timeout';
+  constructor(code: HcRuntimeError['code'], message: string) {
+    super(message);
+    this.name = 'HcRuntimeError';
+    this.code = code;
+  }
+}
+
+type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'failed' | 'closed';
+
+interface AgentRecord {
+  handle: {
+    id: string;
+    agent: string;
+    label: string;
+    model?: string;
+    terminalId?: string;
+    cwd?: string;
+  };
+  state: AgentState;
+  activeTaskId?: string;
+  completionSignalPath?: string;
+  completionResultPath?: string;
+  artifactSession?: ShepherdSession;
+  childCapability?: ChildCapability;
+  baselineCompletionSignalId?: string;
+}
+
+type InternalTaskState = 'created' | 'running' | 'waiting' | 'completed' | 'blocked' | 'failed' | 'cancelled' | 'timed_out';
+
+interface TaskRecord {
+  taskId: string;
+  agentId: string;
+  description: string;
+  state: InternalTaskState;
+  createdAt: number;
+  deadlineAt?: number;
+  timeoutId?: ReturnType<typeof setTimeout>;
+  waitingSince?: number;
+  pendingReplyMessageId?: string;
+  pendingReplyTargetAgentId?: string;
+  pendingReplyDeadlineAt?: number;
+  pendingReplyText?: string;
+  pendingRequestIds: Set<string>;
+  result?: TaskResultInternal;
+  onSettled?: (result: TaskResultInternal) => void;
+  artifactSession?: ShepherdSession;
+  artifact?: ArtifactReservation;
+}
+
+interface TaskResultInternal {
+  taskId: string;
+  agentId: string;
+  status: 'completed' | 'blocked' | 'failed' | 'cancelled' | 'timed_out';
+  ok: boolean;
+  returnCode: number;
+  text?: string;
+  error?: string;
+  completedAt: number;
+}
+
+function validateAgentLabel(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value !== 'string') throw new Error('Agent label must be a string.');
+  const label = value.trim();
+  if (!label) return '';
+  if (label.length > 64) throw new Error('Agent label must be at most 64 characters.');
+  if (!/^[\p{L}\p{N} _.-]+$/u.test(label) || label.includes(':'))
+    throw new Error(
+      'Agent label may contain only letters, numbers, spaces, _, -, and .; colons and control characters are not allowed.'
+    );
+  return label;
+}
+
+function formatAgentName(agent: string, label?: string): string {
+  const trimmed = label?.trim() ?? '';
+  return trimmed ? `${agent}: ${trimmed}` : agent;
+}
+
+function handleId(input: unknown, kind: 'AgentHandle' | 'TaskHandle'): string {
+  const normalized = normalizeHandleId(input, kind);
+  if (!normalized.ok) throw new HcRuntimeError('invalid_handle', normalized.message);
+  return normalized.id;
+}
+
+function toProcState(state: string | undefined): RuntimeProcState {
+  if (state === 'working') return 'working';
+  if (state === 'idle') return 'idle';
+  return 'unknown';
+}
+
+function toTaskState(state: InternalTaskState): RuntimeTaskState {
+  switch (state) {
+    case 'created':
+    case 'running':
+      return 'running';
+    case 'waiting':
+      return 'waiting';
+    case 'completed':
+      return 'done';
+    case 'blocked':
+      return 'blocked';
+    case 'failed':
+    case 'cancelled':
+    case 'timed_out':
+      return 'failed';
+  }
+}
+
+const TERMINAL_TASK_STATES: ReadonlySet<InternalTaskState> = new Set([
+  'completed',
+  'blocked',
+  'failed',
+  'cancelled',
+  'timed_out',
+]);
+
+// ── Module-singleton registries ─────────────────────────────────────────
+// The adapter is stateless (one per action is enough): agents, tasks, and
+// the parent mailbox live here, exactly like the pane backend's lifecycle
+// registry. The owned-terminals file stays the cross-process source of
+// truth for ownership (close/prune). `generationId` namespaces minted
+// opaque ids for this process; there is no session rotation (unlike the
+// pane backend's beginSession) because one extension process serves one
+// parent session at a time here.
+const generationId = randomUUID().slice(0, 8);
+const agents = new Map<string, AgentRecord>();
+const tasks = new Map<string, TaskRecord>();
+let broker: ParentBroker | undefined;
+let brokerOwnerKey: string | undefined;
+
+function ownerSessionKey(sessionId?: string): string {
+  return (
+    sessionId?.trim() ||
+    process.env.PI_SHEPHERD_OWNER_SESSION?.trim() ||
+    `hc-parent-${generationId}`
+  );
+}
+
+function ensureBroker(sessionId?: string): ParentBroker {
+  const key = ownerSessionKey(sessionId);
+  if (broker && !broker.closed && brokerOwnerKey === key) return broker;
+  broker = createParentBroker(key);
+  brokerOwnerKey = key;
+  return broker;
+}
+
+/**
+ * Non-contract introspection for the resolver seam: display identity for a
+ * known hc agent. Unknown ids throw, exactly like the registry lookups
+ * behind every other method. Records are retained after close so a closed
+ * sheep still describes itself (mirrors the pane-backend registry).
+ */
+export function describeHcAgent(agentId: string): { id: string; agent: string; label: string } {
+  const id = handleId(agentId, 'AgentHandle');
+  const record = agents.get(id);
+  if (!record) {
+    throw new HcRuntimeError(
+      'unknown_handle',
+      `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result. A terminal address is not an agent id.`
+    );
+  }
+  return { id: record.handle.id, agent: record.handle.agent, label: record.handle.label };
+}
+
+/**
+ * Build the hc runtime adapter for one parent session context. Stateless:
+ * registries live at module scope so per-action instances share sheep.
+ */
+export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime {
+  const cwd = context.cwd ?? process.cwd();
+  const sessionId = context.sessionId;
+
+  function canonicalAgent(input: unknown): AgentRecord {
+    const id = handleId(input, 'AgentHandle');
+    const record = agents.get(id);
+    if (!record)
+      throw new HcRuntimeError(
+        'unknown_handle',
+        `Unknown agent id "${id}". Lifecycle ids are scoped to this parent session; use the id from the latest spawn result. A terminal address is not an agent id.`
+      );
+    return record;
+  }
+
+  function taskRecord(input: unknown): TaskRecord {
+    const id = handleId(input, 'TaskHandle');
+    const record = tasks.get(id);
+    if (!record) {
+      throw new HcRuntimeError(
+        'unknown_task',
+        `Unknown task id "${id}". Task ids are scoped to this parent session; use the id returned by shepherd_delegate, not an agent id or terminal address.`
+      );
+    }
+    return record;
+  }
+
+  function toCompletion(result: TaskResultInternal): Completion {
+    const agent = agents.get(result.agentId);
+    return {
+      taskId: result.taskId,
+      agentId: result.agentId,
+      status: result.status,
+      ok: result.ok,
+      returnCode: result.returnCode,
+      ...(result.text !== undefined ? { text: result.text } : {}),
+      ...(result.error !== undefined ? { error: result.error } : {}),
+      completedAt: result.completedAt,
+      ...(agent ? { agent: agent.handle.agent } : {}),
+      ...(agent && agent.handle.label ? { label: agent.handle.label } : {}),
+    };
+  }
+
+  function finalizeTaskArtifact(record: TaskRecord, result: TaskResultInternal): void {
+    const { artifactSession, artifact } = record;
+    if (!artifactSession || !artifact) return;
+    const status =
+      result.status === 'timed_out'
+        ? 'timed-out'
+        : result.status === 'cancelled'
+          ? 'cancelled'
+          : result.status === 'completed'
+            ? 'completed'
+            : 'failed';
+    finalizeArtifact(artifactSession, artifact, { status, output: result.text, error: result.error });
+  }
+
+  function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }): TaskResultInternal {
+    if (record.result) return { ...record.result };
+    const completedAt = settlement.completedAt ?? Date.now();
+    const ok = settlement.status === 'completed' && settlement.ok !== false;
+    const defaultReturnCode =
+      settlement.status === 'cancelled'
+        ? 130
+        : settlement.status === 'timed_out'
+          ? 124
+          : settlement.status === 'blocked'
+            ? 2
+            : ok
+              ? 0
+              : 1;
+    const result: TaskResultInternal = {
+      taskId: record.taskId,
+      agentId: record.agentId,
+      status: settlement.status,
+      ok,
+      returnCode: settlement.returnCode ?? defaultReturnCode,
+      ...(settlement.text !== undefined ? { text: settlement.text } : {}),
+      ...(settlement.error !== undefined ? { error: settlement.error } : {}),
+      completedAt,
+    };
+    record.result = result;
+    record.state = settlement.status;
+    if (record.timeoutId) {
+      clearTimeout(record.timeoutId);
+      record.timeoutId = undefined;
+    }
+    record.pendingRequestIds.clear();
+    record.waitingSince = undefined;
+    record.pendingReplyMessageId = undefined;
+    record.pendingReplyTargetAgentId = undefined;
+    record.pendingReplyDeadlineAt = undefined;
+    record.pendingReplyText = undefined;
+    try {
+      record.onSettled?.({ ...result });
+    } catch {
+      /* artifact persistence must not break task settlement */
+    }
+    const agent = agents.get(record.agentId);
+    if (agent?.activeTaskId === record.taskId) {
+      agent.activeTaskId = undefined;
+      if (agent.state !== 'closed') {
+        agent.state =
+          settlement.status === 'completed'
+            ? 'done'
+            : settlement.status === 'blocked'
+              ? 'blocked'
+              : 'failed';
+      }
+    }
+    try {
+      finalizeTaskArtifact(record, result);
+    } catch {
+      /* artifact persistence must not break task settlement */
+    }
+    return { ...result };
+  }
+
+  function resolveReplyForTask(record: TaskRecord, replyTo: string): boolean {
+    if (record.result || replyTo !== record.pendingReplyMessageId) return false;
+    record.pendingRequestIds.delete(record.pendingReplyMessageId!);
+    record.pendingReplyMessageId = undefined;
+    record.pendingReplyTargetAgentId = undefined;
+    record.pendingReplyDeadlineAt = undefined;
+    record.pendingReplyText = undefined;
+    if (record.state === 'waiting') {
+      record.state = 'running';
+      record.waitingSince = undefined;
+    }
+    return true;
+  }
+
+  function openPendingRequest(
+    record: TaskRecord,
+    request: { messageId: string; targetAgentId?: string; deadlineAt?: number; text?: string }
+  ): void {
+    if (record.result) {
+      throw new HcRuntimeError(
+        'invalid_transition',
+        `Task "${record.taskId}" is already ${record.state}.`
+      );
+    }
+    if (record.pendingReplyMessageId !== undefined) {
+      throw new HcRuntimeError(
+        'invalid_task',
+        `Task "${record.taskId}" already has an outstanding tracked reply (${record.pendingReplyMessageId}).`
+      );
+    }
+    if (record.state === 'created') record.state = 'running';
+    record.pendingReplyMessageId = request.messageId;
+    record.pendingReplyTargetAgentId = request.targetAgentId;
+    record.pendingReplyText = request.text;
+    if (request.deadlineAt !== undefined && Number.isFinite(request.deadlineAt)) {
+      record.pendingReplyDeadlineAt = request.deadlineAt;
+    }
+    record.pendingRequestIds.add(request.messageId);
+    record.state = 'waiting';
+    record.waitingSince ??= Date.now();
+  }
+
+  /** Best-effort rejected-completion diagnostic beside the broker store. */
+  function writeTaskDoneDiagnostic(kind: string, envelope: ShepherdMessageEnvelope, reason: string): void {
+    if (!broker) return;
+    try {
+      const dir = path.join(broker.rootDir, 'rejected');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, `task-done-${kind}-${Date.now()}.json`),
+        JSON.stringify({ at: Date.now(), reason, envelope }, null, 2),
+        'utf8'
+      );
+    } catch {
+      /* diagnostics must never break broker polling */
+    }
+  }
+
+  /**
+   * Apply one explicit child completion to the task registry. The envelope
+   * sender is broker-authenticated; a task id that does not resolve to the
+   * sender's own task is re-anchored on the sender's active task, and a
+   * completion with no resolvable task is dropped observably.
+   */
+  function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInternal | undefined {
+    if (envelope.kind !== 'task_done' || !envelope.status) return undefined;
+    let record: TaskRecord | undefined;
+    if (envelope.taskId) record = tasks.get(envelope.taskId);
+    let senderAgentId: string | undefined;
+    for (const agent of agents.values()) {
+      if (agent.handle.id === envelope.senderId) {
+        senderAgentId = agent.handle.id;
+        break;
+      }
+    }
+    let senderActiveTask: TaskRecord | undefined;
+    if (senderAgentId !== undefined) {
+      const sender = agents.get(senderAgentId);
+      const candidate = sender?.activeTaskId ? tasks.get(sender.activeTaskId) : undefined;
+      if (candidate && !candidate.result) senderActiveTask = candidate;
+    }
+    if (record && record.result) return { ...record.result };
+    let effective = record;
+    if (record && senderAgentId !== undefined && record.agentId !== senderAgentId) {
+      effective = senderActiveTask;
+    }
+    if (!effective) effective = senderActiveTask;
+    if (!effective || senderAgentId === undefined) {
+      writeTaskDoneDiagnostic('dropped', envelope, 'no active task matches the sender');
+      return undefined;
+    }
+    if (envelope.status === 'completed' && effective.pendingRequestIds.size > 0) return undefined;
+    try {
+      if (effective.agentId !== senderAgentId) {
+        throw new HcRuntimeError(
+          'task_agent_mismatch',
+          `Agent "${senderAgentId}" does not own task "${effective.taskId}".`
+        );
+      }
+      return settleTask(effective, {
+        status: envelope.status,
+        text: envelope.summary ?? envelope.content,
+        error: envelope.error,
+      });
+    } catch {
+      writeTaskDoneDiagnostic('dropped', envelope, `settlement of "${effective.taskId}" was rejected`);
+      return undefined;
+    }
+  }
+
+  function applyMessageEnvelope(envelope: ShepherdMessageEnvelope): void {
+    const active = ensureBroker();
+    switch (envelope.kind) {
+      case 'runtime': {
+        if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
+          const record = tasks.get(envelope.taskId);
+          if (record) resolveReplyForTask(record, envelope.replyTo);
+          return;
+        }
+        if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
+          const record = tasks.get(envelope.taskId);
+          if (record && !record.result && record.pendingReplyMessageId !== envelope.replyTo) {
+            try {
+              openPendingRequest(record, {
+                messageId: envelope.replyTo,
+                targetAgentId: envelope.requestTargetId,
+                text: envelope.summary ?? envelope.content,
+              });
+            } catch {
+              /* one outstanding request per task; keep the first */
+            }
+          }
+        }
+        return;
+      }
+      case 'reply': {
+        if (envelope.replyTo && envelope.taskId) {
+          const record = tasks.get(envelope.taskId);
+          if (record && resolveReplyForTask(record, envelope.replyTo)) {
+            if (record.agentId !== envelope.senderId) {
+              const owner = agents.get(record.agentId);
+              if (owner?.handle.terminalId) {
+                try {
+                  const relayed = createEnvelope(
+                    { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+                    {
+                      kind: 'reply',
+                      targetId: owner.handle.id,
+                      messageId: mintMessageId(),
+                      taskId: envelope.taskId,
+                      threadId: envelope.threadId,
+                      replyTo: envelope.replyTo,
+                      originSenderId: envelope.senderId,
+                      delivery: envelope.delivery,
+                      content: envelope.content,
+                    }
+                  );
+                  publishFromParent(active, relayed);
+                } catch {
+                  /* relay is best effort; the requester task already resolved */
+                }
+              }
+            }
+          }
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** Drain the parent mailbox; task completions settle the registry. */
+  function drainBrokerInbox(): void {
+    const active = ensureBroker(sessionId);
+    let envelopes: ShepherdMessageEnvelope[];
+    try {
+      envelopes = pollParentInbox(active);
+    } catch {
+      return;
+    }
+    for (const envelope of envelopes) {
+      try {
+        if (envelope.kind === 'task_done') applyTaskDoneEnvelope(envelope);
+        else applyMessageEnvelope(envelope);
+      } catch {
+        /* one bad envelope must not stop the drain */
+      }
+    }
+  }
+
+  async function terminalState(terminalId: string): Promise<{ live: boolean; agentState?: string }> {
+    try {
+      const rec = (await hcExec(['get', terminalId, '--json'])) as any;
+      const agentState =
+        typeof rec?.status?.state === 'string' ? (rec.status.state as string) : undefined;
+      return { live: rec?.state === 'live', agentState };
+    } catch (error) {
+      if (error instanceof HcError && error.kind === 'not_found') return { live: false };
+      return { live: true };
+    }
+  }
+
+  async function settleFromSignal(record: TaskRecord): Promise<TaskResultInternal | undefined> {
+    const agent = agents.get(record.agentId);
+    const signalPath = agent?.completionSignalPath;
+    if (!signalPath) return undefined;
+    const signal: any = readCompletionSignal(signalPath);
+    if (!signal?.signalId) return undefined;
+    if (signal.taskId !== undefined && signal.taskId !== record.taskId) return undefined;
+    if (signal.taskId === undefined && signal.signalId === agent?.baselineCompletionSignalId) {
+      return undefined;
+    }
+    const status = signal.type === 'error' ? 'failed' : 'completed';
+    let text: string | undefined =
+      typeof signal.summary === 'string' && signal.summary ? signal.summary : undefined;
+    if (!text && agent?.completionResultPath) {
+      const last = readLastAssistantText(agent.completionResultPath).trim();
+      if (last) text = last;
+    }
+    if (!text && agent?.handle.terminalId) {
+      const tail = (await readHcTerminalTail(agent.handle.terminalId)).trim();
+      if (tail) text = tail;
+    }
+    return settleTask(record, {
+      status: status as 'completed' | 'failed',
+      ...(text !== undefined ? { text } : {}),
+      ...(signal.errorMessage !== undefined ? { error: String(signal.errorMessage) } : {}),
+    });
+  }
+
+  return {
+    async spawn(def, opts) {
+      const label = validateAgentLabel(opts.label);
+      const spawnCwd = opts.cwd ?? cwd;
+      const settings = loadSettings(spawnCwd);
+      // Placement is accepted and ignored: hc terminals have no panes/tabs;
+      // the sheep always starts as a background terminal in the cwd.
+      const _placement: SpawnPlacement | undefined = opts.placement;
+      void _placement;
+      const discovered = discoverAgents(spawnCwd, settings.agentScope, {
+        includeBundled: settings.includeBundledAgents,
+      }).agents;
+      const found = discovered.find(a => a.name === def.name);
+      if (!found) {
+        const available = discovered.map(a => a.name).join(', ');
+        const suggestion = discovered.find(
+          a => a.name.toLowerCase() === def.name.trim().toLowerCase()
+        );
+        throw new Error(
+          `Unknown agent "${def.name}" in ${settings.agentScope} scope.` +
+            (suggestion ? ` Did you mean "${suggestion.name}"?` : '') +
+            (available ? ` Available agents: ${available}.` : ' No agents are available.') +
+            ' Call shepherd with action "agents" to list exact names.'
+        );
+      }
+      if (found.source === 'project' && settings.confirmProjectAgents && context.hasUI) {
+        const ok = await context.ui.confirm(
+          'Run project-local agent?',
+          `Agent: ${def.name}\nSource: ${found.filePath}`
+        );
+        if (!ok) throw new Error('Project-local agent was not approved.');
+      }
+      const display = formatAgentName(found.name, label);
+      if (
+        label &&
+        [...agents.values()].some(
+          a => formatAgentName(a.handle.agent, a.handle.label) === display
+        )
+      ) {
+        throw new Error(`Duplicate agent label "${display}".`);
+      }
+      const active = ensureBroker(sessionId);
+      const reservedAgentId = mintId('agent', generationId);
+      const childCapability = registerChild(active, reservedAgentId);
+      const delegatedModel = resolveDelegatedModel(found.model, context.model);
+      const delegatedThinking = resolveDelegatedThinking(found.thinking, context.thinkingLevel);
+      let launched: { terminalId: string; dir: string; sessionFile: string; scriptFile: string } | undefined;
+      try {
+        launched = launchPiInHcTerminal(found.name, {
+          name: found.name,
+          label,
+          cwd: spawnCwd,
+          persistent: true,
+          childBroker: { rootDir: active.rootDir, ...childCapability },
+          systemPrompt: found.systemPrompt,
+          omitSystemPrompt: found.omitSystemPrompt,
+          omitPiDocumentation: found.omitPiDocumentation === true,
+          omitContextFiles: found.omitContextFiles === true,
+          model: delegatedModel,
+          thinking: delegatedThinking,
+          tools: found.tools,
+        });
+        const ready = await waitForHcAgentDetected(launched.terminalId, { timeoutMs: 20_000 });
+        if (!ready.detected) {
+          const output = (await readHcTerminalTail(launched.terminalId)).trim();
+          const suffix = ready.exitCode === undefined ? '' : ` (return code ${ready.exitCode})`;
+          throw Object.assign(
+            new Error(`Agent "${found.name}" did not become ready${suffix}.${output ? `\n${output}` : ''}`),
+            { returnCode: ready.exitCode ?? 1, code: 'agent_not_ready' }
+          );
+        }
+      } catch (error) {
+        if (launched) {
+          try {
+            killHcTerminal(launched.terminalId);
+          } catch {}
+          removeCreatedTerminalDir(launched.terminalId);
+          forgetCreatedTerminal(launched.terminalId);
+        }
+        try {
+          unregisterChild(active, reservedAgentId);
+        } catch {}
+        throw error;
+      }
+      const id = reservedAgentId;
+      const signalPath = `${launched!.sessionFile}.exit`;
+      const baseline = readCompletionSignal(signalPath)?.signalId;
+      agents.set(id, {
+        handle: {
+          id,
+          agent: found.name,
+          label,
+          ...(delegatedModel ? { model: delegatedModel } : {}),
+          terminalId: launched.terminalId,
+          cwd: spawnCwd,
+        },
+        state: 'idle',
+        completionSignalPath: signalPath,
+        completionResultPath: launched.sessionFile,
+        artifactSession: context.artifactSession,
+        childCapability,
+        baselineCompletionSignalId: baseline,
+      });
+      return id;
+    },
+
+    async delegate(agentId, task, opts) {
+      if (typeof task !== 'string' || !task.trim())
+        throw new HcRuntimeError('invalid_task', 'Delegated task description must not be empty.');
+      const agent = canonicalAgent(agentId);
+      if (agent.state === 'closed') {
+        throw new HcRuntimeError('closed_handle', `Agent "${agent.handle.id}" is closed.`);
+      }
+      if (!agent.handle.terminalId) throw new Error('Agent handle has no terminal.');
+      const detected = await waitForHcAgentDetected(agent.handle.terminalId, { timeoutMs: 15_000 });
+      if (!detected.detected) throw new Error(`Agent "${agent.handle.id}" is not detected.`);
+      if (agent.activeTaskId) {
+        throw new HcRuntimeError(
+          'active_task',
+          `Agent "${agent.handle.id}" already has an active tracked task (${agent.activeTaskId}).`
+        );
+      }
+      const active = ensureBroker(sessionId);
+      if (!agent.childCapability) {
+        agent.childCapability = registerChild(active, agent.handle.id);
+      }
+      const createdAt = Date.now();
+      const id = mintId('task', generationId);
+      const deadlineAt =
+        opts.timeoutMin !== undefined ? createdAt + opts.timeoutMin * 60_000 : undefined;
+      if (deadlineAt !== undefined && !Number.isFinite(deadlineAt)) {
+        throw new HcRuntimeError('invalid_task', 'Task timeout must be a finite number.');
+      }
+      // `requestId` has no mailbox dedup equivalent: a retried submit is a
+      // second call by design here.
+      void opts.requestId;
+      const record: TaskRecord = {
+        taskId: id,
+        agentId: agent.handle.id,
+        description: task.trim(),
+        state: 'created',
+        createdAt,
+        ...(deadlineAt !== undefined ? { deadlineAt } : {}),
+        pendingRequestIds: new Set(),
+        artifactSession: context.artifactSession ?? agent.artifactSession,
+      };
+      tasks.set(id, record);
+      agent.activeTaskId = id;
+      agent.baselineCompletionSignalId = agent.completionSignalPath
+        ? (readCompletionSignal(agent.completionSignalPath)?.signalId ??
+          agent.baselineCompletionSignalId)
+        : undefined;
+      if (deadlineAt !== undefined) {
+        const delay = Math.max(0, deadlineAt - Date.now());
+        record.timeoutId = setTimeout(() => {
+          if (!record.result) {
+            settleTask(record, { status: 'timed_out', error: 'Tracked task deadline reached.' });
+          }
+        }, delay);
+        (record.timeoutId as any).unref?.();
+      }
+      const session = record.artifactSession;
+      try {
+        if (session) {
+          const artifact = reserveArtifacts(session, [
+            { agent: agent.handle.agent, mode: 'single', task },
+          ])[0];
+          markArtifactStarted(session, artifact, { taskId: id, agentId: agent.handle.id });
+          record.artifactSession = session;
+          record.artifact = artifact;
+          record.onSettled = result => finalizeTaskArtifact(record, result);
+        }
+        const envelope = createEnvelope(
+          { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+          {
+            kind: 'task',
+            targetId: agent.handle.id,
+            taskId: id,
+            delivery: 'followUp',
+            content: task,
+          }
+        );
+        publishFromParent(active, envelope);
+        record.state = 'running';
+        return id;
+      } catch (error) {
+        settleTask(record, {
+          status: 'failed',
+          error: String((error as any)?.message ?? error),
+        });
+        throw new Error(`Task submission failed: ${String((error as any)?.message ?? error)}`);
+      }
+    },
+
+    async message(target, msg, opts): Promise<MessageId> {
+      if (typeof msg !== 'string' || !msg.trim()) {
+        throw new HcRuntimeError('invalid_task', 'Message content must not be empty.');
+      }
+      if (target === 'parent') {
+        throw new HcRuntimeError(
+          'invalid_handle',
+          'hc runtime adapter cannot address "parent": child-to-parent messages use the child broker surface.'
+        );
+      }
+      const active = ensureBroker(sessionId);
+      let agent: AgentRecord;
+      try {
+        agent = canonicalAgent(target);
+      } catch (error) {
+        if (error instanceof HcRuntimeError && error.code === 'unknown_handle') {
+          throw new HcRuntimeError(
+            'invalid_target',
+            `Unknown message target "${target}". shepherd_message requires the exact opaque agent id returned by shepherd_spawn (for example "shepherd-agent-..."); do not use an agent name such as "planner", a display label, a terminal address, or a placeholder such as "<planner agent ID>".`
+          );
+        }
+        throw error;
+      }
+      if (agent.state === 'closed') {
+        throw new HcRuntimeError('closed_handle', `Agent "${agent.handle.id}" is closed.`);
+      }
+      // Correlated traffic goes through the mailbox so request/task state
+      // matches the pane-based backend exactly.
+      if (opts.taskId) {
+        const record = taskRecord(opts.taskId);
+        if (record.agentId !== agent.handle.id) {
+          throw new HcRuntimeError(
+            'task_agent_mismatch',
+            `Task "${opts.taskId}" is owned by another agent than the message target.`
+          );
+        }
+        if (opts.expectsReply) {
+          const replyDeadline =
+            Date.now() + loadSettings(agent.handle.cwd ?? cwd).timeout * 60_000;
+          const provisional = createEnvelope(
+            { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+            {
+              kind: 'message',
+              targetId: agent.handle.id,
+              messageId: mintMessageId(),
+              taskId: opts.taskId,
+              threadId: opts.threadId,
+              replyTo: opts.replyTo,
+              expectsReply: true,
+              delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+              content: msg,
+              createdAt: Date.now(),
+            }
+          );
+          openPendingRequest(record, {
+            messageId: provisional.messageId,
+            targetAgentId: agent.handle.id,
+            deadlineAt: replyDeadline,
+            text: msg,
+          });
+          try {
+            const accepted = publishFromParent(active, provisional);
+            return accepted.messageId;
+          } catch (error) {
+            try {
+              resolveReplyForTask(record, provisional.messageId);
+            } catch {}
+            throw error;
+          }
+        }
+        const envelope = createEnvelope(
+          { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+          {
+            kind: opts.replyTo ? 'reply' : 'message',
+            targetId: agent.handle.id,
+            messageId: mintMessageId(),
+            taskId: opts.taskId,
+            threadId: opts.threadId,
+            replyTo: opts.replyTo,
+            delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+            content: msg,
+          }
+        );
+        const accepted = publishFromParent(active, envelope);
+        if (opts.replyTo) {
+          try {
+            resolveReplyForTask(record, opts.replyTo);
+          } catch {
+            /* non-tracked replies stay deliverable as ordinary correlation */
+          }
+        }
+        return accepted.messageId;
+      }
+      if (opts.replyTo) {
+        const envelope = createEnvelope(
+          { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+          {
+            kind: 'reply',
+            targetId: agent.handle.id,
+            messageId: mintMessageId(),
+            threadId: opts.threadId,
+            replyTo: opts.replyTo,
+            delivery: opts.delivery === 'steer' ? 'steer' : 'followUp',
+            content: msg,
+          }
+        );
+        const accepted = publishFromParent(active, envelope);
+        return accepted.messageId;
+      }
+      // Untracked text goes straight to the terminal (paste + Enter), the
+      // analogue of a native prompt poke. A fresh id is minted for the
+      // receipt; there is no mailbox correlation to resolve later.
+      if (!agent.handle.terminalId) throw new Error('Agent handle has no terminal.');
+      const messageId = mintMessageId();
+      try {
+        await hcExec(
+          opts.delivery === 'steer'
+            ? ['send', agent.handle.terminalId, msg, '--force', '--json']
+            : ['send', agent.handle.terminalId, msg, '--json']
+        );
+      } catch (error) {
+        throw new Error(
+          `Message send failed: ${error instanceof HcError ? `${error.kind}: ${error.message}` : String((error as any)?.message ?? error)}`
+        );
+      }
+      return messageId;
+    },
+
+    async watch(taskIds) {
+      const values = Array.isArray(taskIds) ? taskIds : [taskIds];
+      if (values.length === 0)
+        throw new HcRuntimeError('invalid_handle', 'Expected one or more opaque task ids to watch.');
+      const ids = values.map(value => taskRecord(value).taskId);
+      if (new Set(ids).size !== ids.length) {
+        throw new HcRuntimeError('invalid_handle', 'A wait cannot contain duplicate task ids.');
+      }
+      const overallTimeoutMs = 1_200_000;
+      const deadline = Date.now() + overallTimeoutMs;
+      for (;;) {
+        drainBrokerInbox();
+        const now = Date.now();
+        for (const id of ids) {
+          const record = tasks.get(id)!;
+          if (record.result) continue;
+          if (record.deadlineAt !== undefined && now >= record.deadlineAt) {
+            settleTask(record, { status: 'timed_out', error: 'Tracked task deadline reached.' });
+            continue;
+          }
+          if (
+            record.state === 'waiting' &&
+            record.pendingReplyDeadlineAt !== undefined &&
+            now >= record.pendingReplyDeadlineAt
+          ) {
+            settleTask(record, {
+              status: 'blocked',
+              ok: false,
+              text: `Timed out waiting for a reply from ${record.pendingReplyTargetAgentId ?? 'the target agent'} (message ${record.pendingReplyMessageId ?? 'unknown'} never answered).`,
+              error: 'Tracked reply deadline reached.',
+            });
+            continue;
+          }
+          const settled = await settleFromSignal(record);
+          if (settled) continue;
+          const agent = agents.get(record.agentId);
+          if (agent?.handle.terminalId) {
+            const { live } = await terminalState(agent.handle.terminalId);
+            if (!live) {
+              const retry = await settleFromSignal(record);
+              if (!retry) {
+                settleTask(record, {
+                  status: 'failed',
+                  error: 'Agent terminal ended before the task completed.',
+                });
+              }
+            }
+          }
+        }
+        if (ids.every(id => tasks.get(id)?.result)) break;
+        if (Date.now() >= deadline) {
+          const pending = ids.filter(id => !tasks.get(id)?.result);
+          throw new HcRuntimeError(
+            'timeout',
+            `Timed out after 20 minutes waiting for ${pending.length} unsettled task${pending.length === 1 ? '' : 's'}. The tasks keep running; watch them later with shepherd_watch.`
+          );
+        }
+        // Idle efficiently on the first unsettled terminal; a check-in (or a
+        // finished terminal, which returns at once) simply re-runs the drain.
+        const firstOpen = ids.map(id => tasks.get(id)!).find(r => !r.result);
+        const terminalId = firstOpen ? agents.get(firstOpen.agentId)?.handle.terminalId : undefined;
+        if (terminalId) {
+          try {
+            await hcExec(['wait', terminalId, '--timeout', '3', '--json']);
+          } catch {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        } else {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+      return ids.map(id => toCompletion(tasks.get(id)!.result!));
+    },
+
+    async status(agentId) {
+      const agent = canonicalAgent(agentId);
+      let proc: RuntimeProcState = 'unknown';
+      if (agent.state === 'closed') {
+        proc = 'unknown';
+      } else if (agent.handle.terminalId) {
+        proc = toProcState((await terminalState(agent.handle.terminalId)).agentState);
+      }
+      const record = agent.activeTaskId ? tasks.get(agent.activeTaskId) : undefined;
+      const open = record && !record.result ? record : undefined;
+      return {
+        proc,
+        task: open ? toTaskState(open.state) : 'done',
+        ...(open?.pendingReplyMessageId ? { waitingOn: open.pendingReplyMessageId } : {}),
+      } as RuntimeStatus;
+    },
+
+    async close(agentId) {
+      const agent = canonicalAgent(agentId);
+      const record = agents.get(agent.handle.id)!;
+      if (
+        !record.handle.terminalId ||
+        !loadCreatedTerminals().some(t => t.terminalId === record.handle.terminalId)
+      )
+        throw new Error('Refusing to close an unowned terminal.');
+      const terminalId = record.handle.terminalId;
+      if (record.activeTaskId) {
+        const task = tasks.get(record.activeTaskId);
+        if (task && !task.result) {
+          settleTask(task, { status: 'cancelled', error: 'Agent was closed.' });
+        }
+        record.activeTaskId = undefined;
+      }
+      record.state = 'closed';
+      const active = ensureBroker(sessionId);
+      try {
+        unregisterChild(active, record.handle.id);
+      } catch {
+        /* best effort */
+      }
+      try {
+        killHcTerminal(terminalId);
+      } catch {
+        throw new Error('Could not close agent terminal.');
+      }
+      removeCreatedTerminalDir(terminalId);
+      forgetCreatedTerminal(terminalId);
+    },
+
+    async read(agentId, opts) {
+      const agent = canonicalAgent(agentId);
+      if (!agent.handle.terminalId) {
+        throw new HcRuntimeError(
+          'unknown_handle',
+          `Agent "${agent.handle.id}" has no terminal to read.`
+        );
+      }
+      const tail = await readHcTerminalTail(agent.handle.terminalId);
+      const limit = opts?.lines;
+      if (limit === undefined || !Number.isFinite(limit) || limit <= 0) return tail;
+      const count = Math.trunc(limit);
+      if (count <= 0) return '';
+      const lines = tail.split('\n');
+      while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+      return lines.slice(-count).join('\n');
+    },
+  };
+}
+
+// Re-export the context type for resolver wiring (Phase 1.2) without
+// reaching into this module's closure.
+export type { AgentHandle, TaskId };
