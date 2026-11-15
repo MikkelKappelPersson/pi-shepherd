@@ -256,6 +256,395 @@ function ensureBroker(sessionId?: string): ParentBroker {
   return broker;
 }
 
+function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }, options: HcSettleTaskOptions = {}): TaskResultInternal {
+  if (record.result) return { ...record.result };
+  const completedAt = settlement.completedAt ?? Date.now();
+  const ok = settlement.status === 'completed' && settlement.ok !== false;
+  const defaultReturnCode =
+    settlement.status === 'cancelled'
+      ? 130
+      : settlement.status === 'timed_out'
+        ? 124
+        : settlement.status === 'blocked'
+          ? 2
+          : ok
+            ? 0
+            : 1;
+  const result: TaskResultInternal = {
+    taskId: record.taskId,
+    agentId: record.agentId,
+    status: settlement.status,
+    ok,
+    returnCode: settlement.returnCode ?? defaultReturnCode,
+    ...(settlement.text !== undefined ? { text: settlement.text } : {}),
+    ...(settlement.error !== undefined ? { error: settlement.error } : {}),
+    completedAt,
+  };
+  record.result = result;
+  record.state = settlement.status;
+  if (record.timeoutId) {
+    clearTimeout(record.timeoutId);
+    record.timeoutId = undefined;
+  }
+  record.pendingRequestIds.clear();
+  record.waitingSince = undefined;
+  record.staleNotifiedAt = undefined;
+  record.pendingReplyMessageId = undefined;
+  record.pendingReplyTargetAgentId = undefined;
+  record.pendingReplyDeadlineAt = undefined;
+  record.pendingReplyText = undefined;
+  try {
+    record.onSettled?.({ ...result });
+  } catch {
+    /* artifact persistence must not break task settlement */
+  }
+  const agent = agents.get(record.agentId);
+  if (agent?.activeTaskId === record.taskId) {
+    agent.activeTaskId = undefined;
+    if (agent.state !== 'closed') {
+      agent.state =
+        settlement.status === 'completed'
+          ? 'done'
+          : settlement.status === 'blocked'
+            ? 'blocked'
+            : 'failed';
+    }
+  }
+  try {
+    finalizeTaskArtifact(record, result);
+  } catch {
+    /* artifact persistence must not break task settlement */
+  }
+  // Non-blocking watcher delivery + observer feed (pane parity): the
+  // bridge owns the only ledger `record` call sites, so this path only
+  // notifies watchers and then observers. The bridge records the
+  // observation and schedules the idle wake, exactly like Herdr.
+  const hadWatchers = notifyHcTaskWatchers(result);
+  const agentHandle = agents.get(record.agentId)?.handle;
+  const settlementContext: HcTaskSettlementContext = {
+    hadWatchers,
+    ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+    ...(options.source !== undefined ? { source: options.source } : {}),
+  };
+  notifyHcTaskSettledObservers(result, settlementContext);
+  return { ...result };
+}
+
+function resolveReplyForTask(record: TaskRecord, replyTo: string): boolean {
+  if (record.result || replyTo !== record.pendingReplyMessageId) return false;
+  record.pendingRequestIds.delete(record.pendingReplyMessageId!);
+  record.pendingReplyMessageId = undefined;
+  record.pendingReplyTargetAgentId = undefined;
+  record.pendingReplyDeadlineAt = undefined;
+  record.pendingReplyText = undefined;
+  if (record.state === 'waiting') {
+    record.state = 'running';
+    record.waitingSince = undefined;
+    record.staleNotifiedAt = undefined;
+  }
+  return true;
+}
+
+function openPendingRequest(
+  record: TaskRecord,
+  request: { messageId: string; targetAgentId?: string; deadlineAt?: number; text?: string }
+): void {
+  if (record.result) {
+    throw new HcRuntimeError(
+      'invalid_transition',
+      `Task "${record.taskId}" is already ${record.state}.`
+    );
+  }
+  if (record.pendingReplyMessageId !== undefined) {
+    throw new HcRuntimeError(
+      'invalid_task',
+      `Task "${record.taskId}" already has an outstanding tracked reply (${record.pendingReplyMessageId}).`
+    );
+  }
+  if (record.state === 'created') record.state = 'running';
+  record.pendingReplyMessageId = request.messageId;
+  record.pendingReplyTargetAgentId = request.targetAgentId;
+  record.pendingReplyText = request.text;
+  if (request.deadlineAt !== undefined && Number.isFinite(request.deadlineAt)) {
+    record.pendingReplyDeadlineAt = request.deadlineAt;
+  }
+  record.pendingRequestIds.add(request.messageId);
+  record.state = 'waiting';
+  record.waitingSince ??= Date.now();
+  // One stale reminder per wait episode (information only); the reply
+  // deadline below stays the authoritative settlement.
+  try {
+    hcStaleWaitMonitor.kick();
+  } catch {
+    /* monitor is best effort */
+  }
+}
+
+/** Best-effort rejected-completion diagnostic beside the broker store. */
+function writeTaskDoneDiagnostic(kind: string, envelope: ShepherdMessageEnvelope, reason: string): void {
+  if (!broker) return;
+  try {
+    const dir = path.join(broker.rootDir, 'rejected');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `task-done-${kind}-${Date.now()}.json`),
+      JSON.stringify({ at: Date.now(), reason, envelope }, null, 2),
+      'utf8'
+    );
+  } catch {
+    /* diagnostics must never break broker polling */
+  }
+}
+
+/**
+ * Apply one explicit child completion to the task registry. The envelope
+ * sender is broker-authenticated; a task id that does not resolve to the
+ * sender's own task is re-anchored on the sender's active task, and a
+ * completion with no resolvable task is dropped observably.
+ */
+function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInternal | undefined {
+  if (envelope.kind !== 'task_done' || !envelope.status) return undefined;
+  let record: TaskRecord | undefined;
+  if (envelope.taskId) record = tasks.get(envelope.taskId);
+  let senderAgentId: string | undefined;
+  for (const agent of agents.values()) {
+    if (agent.handle.id === envelope.senderId) {
+      senderAgentId = agent.handle.id;
+      break;
+    }
+  }
+  let senderActiveTask: TaskRecord | undefined;
+  if (senderAgentId !== undefined) {
+    const sender = agents.get(senderAgentId);
+    const candidate = sender?.activeTaskId ? tasks.get(sender.activeTaskId) : undefined;
+    if (candidate && !candidate.result) senderActiveTask = candidate;
+  }
+  if (record && record.result) return { ...record.result };
+  let effective = record;
+  if (record && senderAgentId !== undefined && record.agentId !== senderAgentId) {
+    effective = senderActiveTask;
+  }
+  if (!effective) effective = senderActiveTask;
+  if (!effective || senderAgentId === undefined) {
+    writeTaskDoneDiagnostic('dropped', envelope, 'no active task matches the sender');
+    return undefined;
+  }
+  if (envelope.status === 'completed' && effective.pendingRequestIds.size > 0) return undefined;
+  try {
+    if (effective.agentId !== senderAgentId) {
+      throw new HcRuntimeError(
+        'task_agent_mismatch',
+        `Agent "${senderAgentId}" does not own task "${effective.taskId}".`
+      );
+    }
+    return settleTask(effective, {
+      status: envelope.status,
+      text: envelope.summary ?? envelope.content,
+      error: envelope.error,
+    });
+  } catch {
+    writeTaskDoneDiagnostic('dropped', envelope, `settlement of "${effective.taskId}" was rejected`);
+    return undefined;
+  }
+}
+
+// The drain's broker is threaded through: resolving a *separate* broker
+// here (bare `ensureBroker()`) would mint a fallback-keyed store, orphan
+// the session mailbox, and address reply relays to a store the child
+// never polls.
+function applyMessageEnvelope(active: ParentBroker, envelope: ShepherdMessageEnvelope): void {
+  switch (envelope.kind) {
+    case 'runtime': {
+      if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
+        const record = tasks.get(envelope.taskId);
+        if (record) resolveReplyForTask(record, envelope.replyTo);
+        return;
+      }
+      if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
+        const record = tasks.get(envelope.taskId);
+        if (record && !record.result && record.pendingReplyMessageId !== envelope.replyTo) {
+          try {
+            openPendingRequest(record, {
+              messageId: envelope.replyTo,
+              targetAgentId: envelope.requestTargetId,
+              text: envelope.summary ?? envelope.content,
+            });
+          } catch {
+            /* one outstanding request per task; keep the first */
+          }
+        }
+      }
+      return;
+    }
+    case 'reply': {
+      if (envelope.replyTo && envelope.taskId) {
+        const record = tasks.get(envelope.taskId);
+        if (record && resolveReplyForTask(record, envelope.replyTo)) {
+          if (record.agentId !== envelope.senderId) {
+            const owner = agents.get(record.agentId);
+            if (owner?.handle.terminalId) {
+              try {
+                const relayed = createEnvelope(
+                  { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
+                  {
+                    kind: 'reply',
+                    targetId: owner.handle.id,
+                    messageId: mintMessageId(),
+                    taskId: envelope.taskId,
+                    threadId: envelope.threadId,
+                    replyTo: envelope.replyTo,
+                    originSenderId: envelope.senderId,
+                    delivery: envelope.delivery,
+                    content: envelope.content,
+                  }
+                );
+                publishFromParent(active, relayed);
+              } catch {
+                /* relay is best effort; the requester task already resolved */
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+/** Drain the parent mailbox; task completions settle the registry. */
+function drainHcSessionInbox(sessionId?: string): void {
+  const active = ensureBroker(sessionId);
+  let envelopes: ShepherdMessageEnvelope[];
+  try {
+    envelopes = pollParentInbox(active);
+  } catch {
+    return;
+  }
+  for (const envelope of envelopes) {
+    try {
+      if (envelope.kind === 'task_done') applyTaskDoneEnvelope(envelope);
+      else applyMessageEnvelope(active, envelope);
+    } catch {
+      /* one bad envelope must not stop the drain */
+    }
+  }
+  settleDueReplyTimeouts();
+}
+
+/** Settle waiting tasks whose tracked-reply deadline has passed. */
+function settleDueReplyTimeouts(now = Date.now()): void {
+  for (const record of tasks.values()) {
+    if (record.result) continue;
+    if (
+      record.state === 'waiting' &&
+      record.pendingReplyDeadlineAt !== undefined &&
+      now >= record.pendingReplyDeadlineAt
+    ) {
+      settleTask(record, {
+        status: 'blocked',
+        ok: false,
+        text: `Timed out waiting for a reply from ${record.pendingReplyTargetAgentId ?? 'the target agent'} (message ${record.pendingReplyMessageId ?? 'unknown'} never answered).`,
+        error: 'Tracked reply deadline reached.',
+      });
+    }
+  }
+}
+
+// ── 011: background inbox poll ──────────────────────────────────────────
+// Herdr parity: the pane backend polls the parent inbox every 250 ms, so
+// completions settle while the Shepherd is idle. hc drains only inside
+// tool calls; this timer pumps the same session-keyed drain in the
+// background. The tick never settles directly and never mints a broker:
+// unresolvable sessions are skipped, never fallback-keyed.
+const HC_DRAIN_POLL_MS = 250;
+// Single session: the hc runtime is single-session-per-process (the module
+// `generationId` is baked into every agent/task id), so the poller tracks
+// one session key. A set would alternate `ensureBroker` keys and mint a
+// fresh store on every drain instead of polling the live mailbox.
+let hcPollSession: string | undefined;
+let hcDrainTimer: ReturnType<typeof setInterval> | undefined;
+
+function startHcInboxPoller(): void {
+  if (hcDrainTimer) return;
+  hcDrainTimer = setInterval(() => {
+    try {
+      pollHcInboxOnce();
+    } catch {
+      /* a tick must never break the host turn */
+    }
+  }, HC_DRAIN_POLL_MS);
+  (hcDrainTimer as any).unref?.();
+}
+
+export function stopHcInboxPoller(): void {
+  if (hcDrainTimer) clearInterval(hcDrainTimer);
+  hcDrainTimer = undefined;
+}
+
+export function isHcInboxPollerRunning(): boolean {
+  return hcDrainTimer !== undefined;
+}
+
+/**
+ * Register a session with possibly-open work; starts the poller. Resolves
+ * through `ownerSessionKey` exactly like the drains, so the tick always
+ * polls the same store the tool calls use (explicit id, env session, or
+ * the process fallback — never skipped, never a different key).
+ */
+export function registerHcPollSession(sessionId?: string): void {
+  hcPollSession = ownerSessionKey(sessionId);
+  startHcInboxPoller();
+}
+
+/** One synchronous poll pass over the registered session, then stop at quiescence. */
+export function pollHcInboxOnce(): void {
+  if (hcPollSession !== undefined) {
+    try {
+      drainHcSessionInbox(hcPollSession);
+    } catch {
+      /* a bad session drain must not stop the pass */
+    }
+  }
+  for (const record of tasks.values()) {
+    if (!record.result) return;
+  }
+  stopHcInboxPoller();
+}
+
+/**
+ * Drain-first entry for read paths (`watch` registration, `status` view):
+ * returns false without touching anything when no session resolves, so a
+ * read can never mint a fallback-keyed broker.
+ */
+export function drainHcInboxForSession(sessionId?: string): boolean {
+  const id = sessionId?.trim();
+  if (!id) return false;
+  drainHcSessionInbox(id);
+  return true;
+}
+
+/** Test seam: lifecycle + unref visibility without wall-clock waits. */
+export function hcInboxPollerStateForTests(): {
+  running: boolean;
+  session: string | undefined;
+  unrefed: boolean | undefined;
+} {
+  let unrefed: boolean | undefined;
+  try {
+    unrefed =
+      hcDrainTimer === undefined
+        ? undefined
+        : typeof (hcDrainTimer as any).hasRef === 'function'
+          ? !(hcDrainTimer as any).hasRef()
+          : undefined;
+  } catch {
+    unrefed = undefined;
+  }
+  return { running: hcDrainTimer !== undefined, session: hcPollSession, unrefed };
+}
+
 // ── Phase 2 parity: stale-wait monitor + non-blocking task watchers ──────
 // Mirrors the pane-based backend's stale-wait monitor and task-watcher
 // service over the module hc registries. The
@@ -874,300 +1263,9 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     finalizeArtifact(artifactSession, artifact, { status, output: result.text, error: result.error });
   }
 
-  function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }, options: HcSettleTaskOptions = {}): TaskResultInternal {
-    if (record.result) return { ...record.result };
-    const completedAt = settlement.completedAt ?? Date.now();
-    const ok = settlement.status === 'completed' && settlement.ok !== false;
-    const defaultReturnCode =
-      settlement.status === 'cancelled'
-        ? 130
-        : settlement.status === 'timed_out'
-          ? 124
-          : settlement.status === 'blocked'
-            ? 2
-            : ok
-              ? 0
-              : 1;
-    const result: TaskResultInternal = {
-      taskId: record.taskId,
-      agentId: record.agentId,
-      status: settlement.status,
-      ok,
-      returnCode: settlement.returnCode ?? defaultReturnCode,
-      ...(settlement.text !== undefined ? { text: settlement.text } : {}),
-      ...(settlement.error !== undefined ? { error: settlement.error } : {}),
-      completedAt,
-    };
-    record.result = result;
-    record.state = settlement.status;
-    if (record.timeoutId) {
-      clearTimeout(record.timeoutId);
-      record.timeoutId = undefined;
-    }
-    record.pendingRequestIds.clear();
-    record.waitingSince = undefined;
-    record.staleNotifiedAt = undefined;
-    record.pendingReplyMessageId = undefined;
-    record.pendingReplyTargetAgentId = undefined;
-    record.pendingReplyDeadlineAt = undefined;
-    record.pendingReplyText = undefined;
-    try {
-      record.onSettled?.({ ...result });
-    } catch {
-      /* artifact persistence must not break task settlement */
-    }
-    const agent = agents.get(record.agentId);
-    if (agent?.activeTaskId === record.taskId) {
-      agent.activeTaskId = undefined;
-      if (agent.state !== 'closed') {
-        agent.state =
-          settlement.status === 'completed'
-            ? 'done'
-            : settlement.status === 'blocked'
-              ? 'blocked'
-              : 'failed';
-      }
-    }
-    try {
-      finalizeTaskArtifact(record, result);
-    } catch {
-      /* artifact persistence must not break task settlement */
-    }
-    // Non-blocking watcher delivery + observer feed (pane parity): the
-    // bridge owns the only ledger `record` call sites, so this path only
-    // notifies watchers and then observers. The bridge records the
-    // observation and schedules the idle wake, exactly like Herdr.
-    const hadWatchers = notifyHcTaskWatchers(result);
-    const agentHandle = agents.get(record.agentId)?.handle;
-    const settlementContext: HcTaskSettlementContext = {
-      hadWatchers,
-      ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
-      ...(options.source !== undefined ? { source: options.source } : {}),
-    };
-    notifyHcTaskSettledObservers(result, settlementContext);
-    return { ...result };
-  }
-
-  function resolveReplyForTask(record: TaskRecord, replyTo: string): boolean {
-    if (record.result || replyTo !== record.pendingReplyMessageId) return false;
-    record.pendingRequestIds.delete(record.pendingReplyMessageId!);
-    record.pendingReplyMessageId = undefined;
-    record.pendingReplyTargetAgentId = undefined;
-    record.pendingReplyDeadlineAt = undefined;
-    record.pendingReplyText = undefined;
-    if (record.state === 'waiting') {
-      record.state = 'running';
-      record.waitingSince = undefined;
-      record.staleNotifiedAt = undefined;
-    }
-    return true;
-  }
-
-  function openPendingRequest(
-    record: TaskRecord,
-    request: { messageId: string; targetAgentId?: string; deadlineAt?: number; text?: string }
-  ): void {
-    if (record.result) {
-      throw new HcRuntimeError(
-        'invalid_transition',
-        `Task "${record.taskId}" is already ${record.state}.`
-      );
-    }
-    if (record.pendingReplyMessageId !== undefined) {
-      throw new HcRuntimeError(
-        'invalid_task',
-        `Task "${record.taskId}" already has an outstanding tracked reply (${record.pendingReplyMessageId}).`
-      );
-    }
-    if (record.state === 'created') record.state = 'running';
-    record.pendingReplyMessageId = request.messageId;
-    record.pendingReplyTargetAgentId = request.targetAgentId;
-    record.pendingReplyText = request.text;
-    if (request.deadlineAt !== undefined && Number.isFinite(request.deadlineAt)) {
-      record.pendingReplyDeadlineAt = request.deadlineAt;
-    }
-    record.pendingRequestIds.add(request.messageId);
-    record.state = 'waiting';
-    record.waitingSince ??= Date.now();
-    // One stale reminder per wait episode (information only); the reply
-    // deadline below stays the authoritative settlement.
-    try {
-      hcStaleWaitMonitor.kick();
-    } catch {
-      /* monitor is best effort */
-    }
-  }
-
-  /** Best-effort rejected-completion diagnostic beside the broker store. */
-  function writeTaskDoneDiagnostic(kind: string, envelope: ShepherdMessageEnvelope, reason: string): void {
-    if (!broker) return;
-    try {
-      const dir = path.join(broker.rootDir, 'rejected');
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(
-        path.join(dir, `task-done-${kind}-${Date.now()}.json`),
-        JSON.stringify({ at: Date.now(), reason, envelope }, null, 2),
-        'utf8'
-      );
-    } catch {
-      /* diagnostics must never break broker polling */
-    }
-  }
-
-  /**
-   * Apply one explicit child completion to the task registry. The envelope
-   * sender is broker-authenticated; a task id that does not resolve to the
-   * sender's own task is re-anchored on the sender's active task, and a
-   * completion with no resolvable task is dropped observably.
-   */
-  function applyTaskDoneEnvelope(envelope: ShepherdMessageEnvelope): TaskResultInternal | undefined {
-    if (envelope.kind !== 'task_done' || !envelope.status) return undefined;
-    let record: TaskRecord | undefined;
-    if (envelope.taskId) record = tasks.get(envelope.taskId);
-    let senderAgentId: string | undefined;
-    for (const agent of agents.values()) {
-      if (agent.handle.id === envelope.senderId) {
-        senderAgentId = agent.handle.id;
-        break;
-      }
-    }
-    let senderActiveTask: TaskRecord | undefined;
-    if (senderAgentId !== undefined) {
-      const sender = agents.get(senderAgentId);
-      const candidate = sender?.activeTaskId ? tasks.get(sender.activeTaskId) : undefined;
-      if (candidate && !candidate.result) senderActiveTask = candidate;
-    }
-    if (record && record.result) return { ...record.result };
-    let effective = record;
-    if (record && senderAgentId !== undefined && record.agentId !== senderAgentId) {
-      effective = senderActiveTask;
-    }
-    if (!effective) effective = senderActiveTask;
-    if (!effective || senderAgentId === undefined) {
-      writeTaskDoneDiagnostic('dropped', envelope, 'no active task matches the sender');
-      return undefined;
-    }
-    if (envelope.status === 'completed' && effective.pendingRequestIds.size > 0) return undefined;
-    try {
-      if (effective.agentId !== senderAgentId) {
-        throw new HcRuntimeError(
-          'task_agent_mismatch',
-          `Agent "${senderAgentId}" does not own task "${effective.taskId}".`
-        );
-      }
-      return settleTask(effective, {
-        status: envelope.status,
-        text: envelope.summary ?? envelope.content,
-        error: envelope.error,
-      });
-    } catch {
-      writeTaskDoneDiagnostic('dropped', envelope, `settlement of "${effective.taskId}" was rejected`);
-      return undefined;
-    }
-  }
-
-  // The drain's broker is threaded through: resolving a *separate* broker
-  // here (bare `ensureBroker()`) would mint a fallback-keyed store, orphan
-  // the session mailbox, and address reply relays to a store the child
-  // never polls.
-  function applyMessageEnvelope(active: ParentBroker, envelope: ShepherdMessageEnvelope): void {
-    switch (envelope.kind) {
-      case 'runtime': {
-        if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
-          const record = tasks.get(envelope.taskId);
-          if (record) resolveReplyForTask(record, envelope.replyTo);
-          return;
-        }
-        if (envelope.requestOpen === true && envelope.taskId && envelope.replyTo) {
-          const record = tasks.get(envelope.taskId);
-          if (record && !record.result && record.pendingReplyMessageId !== envelope.replyTo) {
-            try {
-              openPendingRequest(record, {
-                messageId: envelope.replyTo,
-                targetAgentId: envelope.requestTargetId,
-                text: envelope.summary ?? envelope.content,
-              });
-            } catch {
-              /* one outstanding request per task; keep the first */
-            }
-          }
-        }
-        return;
-      }
-      case 'reply': {
-        if (envelope.replyTo && envelope.taskId) {
-          const record = tasks.get(envelope.taskId);
-          if (record && resolveReplyForTask(record, envelope.replyTo)) {
-            if (record.agentId !== envelope.senderId) {
-              const owner = agents.get(record.agentId);
-              if (owner?.handle.terminalId) {
-                try {
-                  const relayed = createEnvelope(
-                    { sessionId: active.sessionId, brokerId: active.brokerId, senderId: active.parentId },
-                    {
-                      kind: 'reply',
-                      targetId: owner.handle.id,
-                      messageId: mintMessageId(),
-                      taskId: envelope.taskId,
-                      threadId: envelope.threadId,
-                      replyTo: envelope.replyTo,
-                      originSenderId: envelope.senderId,
-                      delivery: envelope.delivery,
-                      content: envelope.content,
-                    }
-                  );
-                  publishFromParent(active, relayed);
-                } catch {
-                  /* relay is best effort; the requester task already resolved */
-                }
-              }
-            }
-          }
-        }
-        return;
-      }
-      default:
-        return;
-    }
-  }
-
-  /** Drain the parent mailbox; task completions settle the registry. */
+  /** Closure thin wrapper: tool-call drains keep their exact behavior. */
   function drainBrokerInbox(): void {
-    const active = ensureBroker(sessionId);
-    let envelopes: ShepherdMessageEnvelope[];
-    try {
-      envelopes = pollParentInbox(active);
-    } catch {
-      return;
-    }
-    for (const envelope of envelopes) {
-      try {
-        if (envelope.kind === 'task_done') applyTaskDoneEnvelope(envelope);
-        else applyMessageEnvelope(active, envelope);
-      } catch {
-        /* one bad envelope must not stop the drain */
-      }
-    }
-    settleDueReplyTimeouts();
-  }
-
-  /** Settle waiting tasks whose tracked-reply deadline has passed. */
-  function settleDueReplyTimeouts(now = Date.now()): void {
-    for (const record of tasks.values()) {
-      if (record.result) continue;
-      if (
-        record.state === 'waiting' &&
-        record.pendingReplyDeadlineAt !== undefined &&
-        now >= record.pendingReplyDeadlineAt
-      ) {
-        settleTask(record, {
-          status: 'blocked',
-          ok: false,
-          text: `Timed out waiting for a reply from ${record.pendingReplyTargetAgentId ?? 'the target agent'} (message ${record.pendingReplyMessageId ?? 'unknown'} never answered).`,
-          error: 'Tracked reply deadline reached.',
-        });
-      }
-    }
+    drainHcSessionInbox(sessionId);
   }
 
   async function terminalState(terminalId: string): Promise<{ live: boolean; agentState?: string }> {
@@ -1357,6 +1455,8 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
         artifactSession: context.artifactSession ?? agent.artifactSession,
       };
       tasks.set(id, record);
+      // 011: the background poll covers this session while work is open.
+      registerHcPollSession(sessionId);
       agent.activeTaskId = id;
       agent.baselineCompletionSignalId = agent.completionSignalPath
         ? (readCompletionSignal(agent.completionSignalPath)?.signalId ??

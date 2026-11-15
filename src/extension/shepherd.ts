@@ -57,6 +57,7 @@ import {
   createHcRuntime,
   describeHcAgent,
   describeHcStatusView,
+  drainHcInboxForSession,
   hcTaskWatcherService,
   isHcTaskId,
   resolveHcAgentId,
@@ -1287,6 +1288,14 @@ export async function doAction(
             'A watcher cannot contain duplicate task ids.'
           );
         }
+        // 011 drain-first: settle anything already queued so an
+        // already-settled task reports `completed`, never stale `pending`.
+        // Never throws, never mints a broker: unresolvable sessions skip.
+        try {
+          drainHcInboxForSession(ctx.sessionManager?.getSessionId());
+        } catch {
+          /* reads stay best-effort */
+        }
         const registration = hcTaskWatcherService.watch(ids);
         unseenCompletionLedger.clear(registration.taskIds);
         const summary =
@@ -1359,6 +1368,12 @@ export async function doAction(
     case 'status': {
       const a: any = args;
       if (backend === 'hc') {
+        // 011 drain-first: same freshness guarantee as `watch` above.
+        try {
+          drainHcInboxForSession(ctx.sessionManager?.getSessionId());
+        } catch {
+          /* reads stay best-effort */
+        }
         const view = describeHcStatusView(a.id ?? a.handle);
         const publicResult = {
           id: view.handle.id,

@@ -21,7 +21,7 @@ pi-shepherd exposes these structured tools to the Shepherd. Lifecycle IDs are op
 | `shepherd_watch` | `id`: task ID(s) (preferred) or legacy prompt ID(s) | Register a non-blocking completion watcher; completions arrive as steered notifications. An unwatched settlement surfaces at the next settle boundary or as one coalesced idle wake (identical wording on Herdr and hc; only opaque ids differ). |
 | `shepherd_close` | `id`: agent ID | Close an owned agent, cancel its active task (and unresolved prompt), and clear pending requests. |
 
-`shepherd_watch` is the explicit observation point: watching an already-settled task returns its result synchronously, and a pending watch delivers steered notifications as tasks settle. An unwatched settlement is still surfaced at the next settle boundary (one extra model request) while the Shepherd is busy, or as one coalesced idle wake; the notice names the `shepherd_watch` call that retrieves the full results. This holds on both backends: Herdr pane settles and hc terminal settles use identical notice wording.
+`shepherd_watch` is the explicit observation point: watching an already-settled task returns its result synchronously, and a pending watch delivers steered notifications as tasks settle. An unwatched settlement is still surfaced at the next settle boundary (one extra model request) while the Shepherd is busy, or as one coalesced idle wake; the notice names the `shepherd_watch` call that retrieves the full results. This holds on both backends: Herdr pane settles and hc terminal settles use identical notice wording. On hc, `shepherd_watch` registration and the status view drain first, and a 250 ms background poll keeps the registry fresh while work is open.
 
 Example:
 
