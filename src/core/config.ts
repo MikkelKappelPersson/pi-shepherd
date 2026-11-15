@@ -3,9 +3,12 @@
  *
  * The user file stores personal values. The project file is anchored at the
  * current cwd and, when it carries `projectScope: true`, is a self-contained
- * source for project-overridable values. `confirmProjectAgents` is deliberately
- * user-owned because a repository must not be able to change its trust gate;
- * built-in defaults run project-local agents without a prompt.
+ * source for project-overridable values. `confirmProjectAgents` and `backend`
+ * are deliberately user-owned: a repository must not be able to change its
+ * trust gate or force a runtime for everyone; built-in defaults run
+ * project-local agents without a prompt and `auto` runs where called from.
+ * `backend` is app-side only — no `shepherd_*` tool schema, prompt snippet,
+ * or result mentions it, and the model never decides the runtime.
  */
 
 import * as fs from 'node:fs';
@@ -13,7 +16,9 @@ import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { AgentScope } from './discovery.ts';
 
-/** Fields that a project config may own. */
+/** Fields that a project config may own.
+ * `confirmProjectAgents` and `backend` stay user-owned: a repository must
+ * not force a trust gate or a runtime for everyone. */
 const PROJECT_FIELDS = [
   'agentScope',
   'includeBundledAgents',
@@ -26,9 +31,18 @@ const PROJECT_FIELDS = [
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 
-/** Fields stored in the trusted user config. */
-const USER_FIELDS = [...PROJECT_FIELDS, 'confirmProjectAgents'] as const;
+/** Fields stored in the trusted user config.
+ * `confirmProjectAgents` and `backend` are user-owned (see above). */
+const USER_FIELDS = [...PROJECT_FIELDS, 'confirmProjectAgents', 'backend'] as const;
 type UserField = (typeof USER_FIELDS)[number];
+
+/** Execution backend pin. App-side only; the model never decides.
+ * `auto` runs where called from (see `detectCaller`), `herdr`/`hc` pin to
+ * one runtime and fail cleanly when it is unreachable (no fallback). */
+export type BackendSetting = 'auto' | 'herdr' | 'hc';
+
+/** Concrete runtime selected by `resolveBackend`. Never `auto`. */
+export type ResolvedBackend = 'herdr' | 'hc';
 
 export interface ShepherdSettings {
   /** True when the current cwd's project file is the active source. */
@@ -39,6 +53,8 @@ export interface ShepherdSettings {
   includeBundledAgents: boolean;
   /** User-owned security gate for project-local agent definitions (default off). */
   confirmProjectAgents: boolean;
+  /** User-owned backend pin (default auto). Project files cannot force it. */
+  backend: BackendSetting;
   /** Keep the Herdr tab open after completion. */
   keepOpen: boolean;
   /** Keep the child pi process alive after completion. */
@@ -58,6 +74,7 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
   agentScope: 'both',
   includeBundledAgents: true,
   confirmProjectAgents: false,
+  backend: 'auto',
   keepOpen: true,
   stayOpen: true,
   fieldnotes: true,
@@ -100,6 +117,8 @@ function validField(field: UserField, raw: Record<string, unknown>): unknown {
   switch (field) {
     case 'agentScope':
       return validAgentScope(value);
+    case 'backend':
+      return value === 'auto' || value === 'herdr' || value === 'hc' ? value : undefined;
     case 'timeout':
       return validTimeout(value);
     case 'staleWaitThreshold':
@@ -116,15 +135,15 @@ function validField(field: UserField, raw: Record<string, unknown>): unknown {
 
 /**
  * Parse one config layer, retaining only validated fields that were present.
- * `confirmProjectAgents` and all scope keys in a project file are intentionally
- * excluded from project-owned values.
+ * `confirmProjectAgents` and `backend` in a project file are intentionally
+ * excluded from project-owned values (user-owned precedence).
  */
 function validateLayer(raw: unknown, projectLayer: boolean): Partial<ShepherdSettings> | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
   const record = raw as Record<string, unknown>;
   const partial: Partial<ShepherdSettings> = {};
   for (const field of USER_FIELDS) {
-    if (projectLayer && field === 'confirmProjectAgents') continue;
+    if (projectLayer && (field === 'confirmProjectAgents' || field === 'backend')) continue;
     const value = validField(field, record);
     if (value !== undefined) (partial as Record<string, unknown>)[field] = value;
   }
@@ -203,7 +222,8 @@ function migrateLegacySettingsFile(newFile: string): void {
 
 /**
  * Resolve settings for one workspace. An active project file starts from built-in
- * defaults; only the user-owned confirmation gate comes from the user layer.
+ * defaults; only the user-owned confirmation gate and backend pin come from
+ * the user layer (a project file can never force a runtime for everyone).
  */
 export function loadSettings(cwd?: string): ShepherdSettings {
   const userFile = userConfigFile();
@@ -222,6 +242,7 @@ export function loadSettings(cwd?: string): ShepherdSettings {
     ...project,
     projectScope: true,
     confirmProjectAgents: user.confirmProjectAgents,
+    backend: user.backend,
   };
 }
 

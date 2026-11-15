@@ -1,7 +1,7 @@
 /**
  * Settings menu for pi-shepherd, rendered inline like pi's own `/settings`.
  * Project scope is per-workspace; the project file is self-contained and the
- * project-agent confirmation gate remains user-owned.
+ * project-agent confirmation gate plus the backend pin remain user-owned.
  */
 
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
@@ -20,6 +20,7 @@ import {
 
 const TIMEOUT_CHOICES = [1, 2, 5, 10, 20, 30, 60];
 const STALE_WAIT_CHOICES = [0, 1, 2, 5, 10, 15, 30];
+const BACKEND_CHOICES = ['auto', 'herdr', 'hc'] as const;
 const TIMEOUT_DISPLAY = (minutes: number) => `${minutes} min`;
 const STALE_WAIT_DISPLAY = (minutes: number) =>
   minutes === 0 ? 'off (no reminders)' : `${minutes} min`;
@@ -66,6 +67,12 @@ function applyValue(settings: ShepherdSettings, id: string, value: string): Shep
       if (Number.isFinite(minutes) && minutes >= 0) next.staleWaitThreshold = minutes;
       break;
     }
+    case 'backend': {
+      if (value === 'auto' || value === 'herdr' || value === 'hc') {
+        next.backend = value;
+      }
+      break;
+    }
   }
   return next;
 }
@@ -104,6 +111,7 @@ function refreshItems(items: SettingItem[], settings: ShepherdSettings, cwd: str
   items[7].values = emojiSheepValues;
   items[8].currentValue = TIMEOUT_DISPLAY(settings.timeout);
   items[9].currentValue = STALE_WAIT_DISPLAY(settings.staleWaitThreshold);
+  items[10].currentValue = settings.backend;
 }
 
 /** Render and drive the settings menu. */
@@ -188,6 +196,14 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
         currentValue: STALE_WAIT_DISPLAY(settings.staleWaitThreshold),
         values: STALE_WAIT_CHOICES.map(STALE_WAIT_DISPLAY),
       },
+      {
+        id: 'backend',
+        label: 'Backend',
+        description:
+          'Execution backend. auto runs where called from (Herdr TUI or hc app). App-side only; the model never decides.',
+        currentValue: settings.backend,
+        values: [...BACKEND_CHOICES],
+      },
     ];
 
     refreshItems(items, settings, cwd);
@@ -221,12 +237,20 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
                 'info'
               );
             }
-          } else if (id === 'confirmProjectAgents') {
-            // This field is always persisted in the trusted user layer,
-            // even when the menu is showing active project settings.
+          } else if (id === 'confirmProjectAgents' || id === 'backend') {
+            // These fields are always persisted in the trusted user layer,
+            // even when the menu is showing active project settings. A
+            // project file can never force a trust gate or a runtime.
             const userSettings = loadSettings();
             saveSettings(
-              { ...userSettings, confirmProjectAgents: next.confirmProjectAgents },
+              {
+                ...userSettings,
+                confirmProjectAgents:
+                  id === 'confirmProjectAgents'
+                    ? next.confirmProjectAgents
+                    : userSettings.confirmProjectAgents,
+                backend: id === 'backend' ? next.backend : userSettings.backend,
+              },
               'user'
             );
           } else {
@@ -246,7 +270,9 @@ export async function openSettings(ctx: ExtensionCommandContext): Promise<void> 
                 ? `${id} = ${value} (takes effect next pi session)`
                 : id === 'confirmProjectAgents'
                   ? `${id} = ${value} (user-only security setting)`
-                  : `${id} = ${value}`;
+                  : id === 'backend'
+                    ? `${id} = ${value} (user-only; model never decides)`
+                    : `${id} = ${value}`;
           ctx.ui?.notify?.(note, 'info');
         } catch (error) {
           ctx.ui?.notify?.(
