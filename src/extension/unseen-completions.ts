@@ -2,10 +2,10 @@
  * Parent-side bridge for tracked-task settlements that had no watcher
  * attached.
  *
- * Registers the `shepherd.task.unseen` renderer, subscribes to the lifecycle
- * registry's settlement observer for the duration of a parent pi session
- * (idempotent across repeated `session_start`), and delivers exactly one
- * notice per batch:
+ * Registers the `shepherd.task.unseen` renderer, subscribes through the
+ * active runtime's settlement registry for the duration of a parent pi
+ * session (idempotent across repeated `session_start`), and delivers
+ * exactly one notice per batch:
  *
  *  - while the Shepherd is idle, a debounced
  *    `pi.sendMessage(notice, { triggerTurn: true })` wake;
@@ -26,7 +26,10 @@ import {
   type UnseenCompletionLedger,
   type UnseenSettlement,
 } from '../core/unseen-completions.ts';
-import { lifecycleRegistry } from '../runtimes/herdr/orchestration.ts';
+import { resolveBackend } from '../runtimes/backend.ts';
+import { detectCaller } from '../runtimes/detect.ts';
+import { loadSettings } from '../core/config.ts';
+import { subscribeToTaskSettlements } from '../runtimes/settle-observations.ts';
 import { renderShepherdNotification } from './shepherd.ts';
 
 /** Debounce between a recorded settlement and the idle wake. */
@@ -147,7 +150,20 @@ export function configureUnseenCompletionBridge(
 
   const subscribe = (): void => {
     if (unsubscribe) return;
-    unsubscribe = lifecycleRegistry.onTaskSettled((result, context) => {
+    // Resolve the active backend per command (same resolver as doAction).
+    // A parent session may settle tasks on either backend across commands,
+    // so subscribe to both registries; the resolved backend is diagnostics
+    // only and never narrows the subscription. Either way the bridge owns
+    // the only `record` call sites: each settlement flows observer → record
+    // → scheduleIdleWake, identically on Herdr and hc.
+    try {
+      const cwd =
+        typeof capturedContext?.cwd === 'string' ? capturedContext.cwd : process.cwd();
+      void resolveBackend(loadSettings(cwd).backend, detectCaller());
+    } catch {
+      /* no reachable backend: still subscribe broadly so tests stay green */
+    }
+    unsubscribe = subscribeToTaskSettlements((result, context) => {
       if (ledger.record(result, context)) scheduleIdleWake();
     });
   };

@@ -50,7 +50,6 @@ import {
 } from '../../core/discovery.ts';
 import { DEFAULT_SETTINGS, loadSettings } from '../../core/config.ts';
 import { mintId, mintMessageId, normalizeHandleId } from '../../core/ids.ts';
-import { unseenCompletionLedger } from '../../core/unseen-completions.ts';
 import {
   createEnvelope,
   createParentBroker,
@@ -934,12 +933,10 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     } catch {
       /* artifact persistence must not break task settlement */
     }
-    // Non-blocking watcher delivery + unseen-ledger feed (pane parity):
-    // a settlement with an attached watcher notifies it; a watcher-less
-    // settlement (except cancellations) becomes an unseen completion.
-    // Phase 0: the direct ledger write stays until the bridge subscribes
-    // through the active runtime (Phase 1); the observer hook below fires
-    // with the same context so tests and the future bridge observe it.
+    // Non-blocking watcher delivery + observer feed (pane parity): the
+    // bridge owns the only ledger `record` call sites, so this path only
+    // notifies watchers and then observers. The bridge records the
+    // observation and schedules the idle wake, exactly like Herdr.
     const hadWatchers = notifyHcTaskWatchers(result);
     const agentHandle = agents.get(record.agentId)?.handle;
     const settlementContext: HcTaskSettlementContext = {
@@ -947,13 +944,6 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
       ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
       ...(options.source !== undefined ? { source: options.source } : {}),
     };
-    try {
-      if (result.status !== 'cancelled') {
-        unseenCompletionLedger.record({ ...result }, { ...settlementContext });
-      }
-    } catch {
-      /* observer feed must not break settlement */
-    }
     notifyHcTaskSettledObservers(result, settlementContext);
     return { ...result };
   }
