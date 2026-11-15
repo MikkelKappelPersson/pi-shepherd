@@ -97,7 +97,7 @@ extension subscribes through the active runtime's registry"). The hc
 direct-ledger write is removed; hc settles flow through observer →
 `ledger.record` → `scheduleIdleWake`, exactly like Herdr.
 
-### 3. Timeout-vs-done race: deadline wins, transcript remains
+### 3. Timeout-vs-done race: inbox drains before the deadline wins
 
 A tracked reply deadline (`shepherd_delegate` `timeout`) and a child
 `shepherd_done` racing each other settle the task exactly once, on both
@@ -107,10 +107,19 @@ backends:
   (Herdr `settleTask` early-return on non-running state; hc `if
   (record.result)` guard) makes the second settle a no-op — same rule as
   today, now asserted for both runtimes.
-- In practice the deadline usually wins: the timeout path settles
-  `timed_out`/`blocked` while a late `shepherd_done` arrives at an
-  already-terminal task and is ignored (child sees the settled state, not
-  a second completion).
+- The deadline timer MUST drain the parent inbox before settling. hc
+  `drainBrokerInbox()` runs only on tool calls (`message`/`watch`/
+  `status`/`read`/`close`) — an idle parent with no watch makes none,
+  so a `task_done` envelope can sit in the broker inbox while the bare
+  `setTimeout(deadline)` fires `timed_out` first. The fix: the deadline
+  callback drains first and settles timeout only if still no result.
+  A done already in the inbox before the deadline then wins (it was
+  truly first); a done arriving after keeps losing (correct first-wins).
+  The `watch`-loop deadline check already drains first — the timer is
+  brought to the same order.
+- In practice a late `shepherd_done` still loses: it arrives at an
+  already-terminal task and is ignored (child sees the settled state,
+  not a second completion).
 - The losing side's work is not lost: the agent transcript remains
   readable via `shepherd_read`, and the winning settlement's text/error
   names the outcome. No unseen entry is recorded for the ignored loser

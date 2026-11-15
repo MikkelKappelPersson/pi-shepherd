@@ -99,3 +99,21 @@ the later implementation.
   - `npm test` green with all existing suites untouched.
   - Record scope, evidence, and the landing note in a `journal.md`
     before merging (follow the 007 journal precedent).
+
+## Phase 3 — deadline drains inbox before settling timeout (live bug)
+
+- [ ] **3.1 Drain-first deadline timer on hc**
+  - In `src/runtimes/hc/runtime.ts` delegate deadline `setTimeout`:
+    call `drainBrokerInbox()` first, settle `timed_out` only if the
+    record still has no result (mirrors the `watch`-loop
+    drain-then-check order). No other behavior change.
+  - Done-in-inbox-before-deadline wins; genuinely late done still
+    loses (first-wins by arrival). `delegate-submission-failure` path
+    unchanged.
+
+- [ ] **3.2 Regression test (deterministic, no live spawn)**
+  - Inbox has queued `task_done` + expired deadline → `completed`,
+    no timeout entry. Empty inbox + expired deadline → `timed_out`
+    unseen entry. Late done after terminal timeout ignored, transcript
+    readable, single winner-only entry.
+  - `npm test` green, existing suites untouched.
