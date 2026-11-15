@@ -12,6 +12,12 @@ done | sort > /tmp/smoke-before.txt
 comm -13 /tmp/smoke-before.txt /tmp/smoke-after.txt   # new dirs: expect only the session broker
 ```
 
+Reload nuance: each process lifetime mints one broker dir per
+session, so a reload between snapshots legitimately shows one new
+session dir (same sessionId, new brokerId; the old dir is inert —
+no process or timer references it). Take both snapshots within one
+process lifetime, and expect exactly one live store.
+
 ## hc: junk check
 
 Any new dir whose `broker.json` sessionId starts with `hc-parent-`
