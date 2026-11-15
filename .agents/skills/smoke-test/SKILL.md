@@ -18,6 +18,9 @@ What's in this skill:
   runnable headless via `npm run smoke:poll` (hc only, ~3–4 min).
 - **`references/forensics.md`**: broker before/after snapshots, junk-store
   checks, timing interpretation, herdr pane notes.
+- **Track C — messaging smoke** (below): parent→child→parent
+  `expectsReply` round trip, then peer→peer ping/pong between two
+  sheep with the parent out of the middle.
 - **Backend differences table** (bottom): hc vs herdr at a glance.
 
 ## Track A — Shepherd-driven smoke (both backends)
@@ -75,6 +78,67 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning \
 It asserts: poller running while work is open, done arrives, settle
 lag after arrival is poll-bounded (< 10 s, not deadline-bound), no
 junk stores, close clean.
+
+## Track C — messaging smoke (both backends)
+
+Covers what Tracks A/B don't: a real parent→child request with a
+correlated reply, and a real peer→peer exchange with the parent out
+of the middle. Needs real children (wakes + broker relay are the
+point), so this is Shepherd-driven only — no script version. ~5 min.
+
+Wake semantics to rely on: a message with `expectsReply` and any
+message with `replyTo` wake a waiting agent automatically; a plain
+`followUp` with neither only queues. So every leg that must wake
+someone is a request or a reply, never a bare follow-up. A child
+that has nothing to do yet ends its turn WITHOUT `shepherd_done`
+and lets the incoming message wake it.
+
+**C1 — parent→child→parent round trip.**
+
+1. Snapshot broker state; `shepherd_spawn` one `worker`.
+2. `shepherd_delegate` a stand-by task with NO time limit in the
+   text ("wait as long as it takes; never give up") — first-wins
+   settlement means a premature give-up `done` poisons the task
+   (observed live: a give-up `failed` won over the correct reply
+   that arrived 9 s later). The delegate `timeout` is the backstop.
+   Task: stand by, reply via `shepherd_message` (`replyTo` the
+   request, text = the code word), then `shepherd_done`.
+3. `shepherd_message` to the exact agent id with
+   `delivery: "steer"` and `expectsReply: true` (plus the task id),
+   text "request: report code word `mango-<pid>`". Steer, not
+   followUp — a followUp to an idle child sat queued for minutes
+   (observed live). The request wakes the child; the task waits.
+4. Expect the reply notification naming the request, then the
+   `shepherd_done` completion via watch. Assert the code word matches
+   in both the reply and the done summary.
+5. `shepherd_close`; diff broker state (no junk).
+
+Budget minutes, not seconds: child boot plus the idle-wake leg
+dominates on hc. Consumed envelopes land in broker-root
+`processed/`, not `parent/processed/` — look there for forensics.
+
+**C2 — peer→peer ping/pong.**
+
+1. `shepherd_spawn` two `worker`s, A and B. Nonce `ping-<pid>`.
+2. Delegate to B with NO time limit in the text (same first-wins
+   reason as C1): "Stand by. When a message from a peer arrives,
+   reply to the sender via `shepherd_message` (set `replyTo`, text
+   `pong-<pid>`), then `shepherd_done` with the RECEIVED text as
+   summary." Timeout 10. B ends its turn waiting.
+3. Delegate to A, embedding B's exact agent id: "Send
+   `ping-<pid>` to agent <B-id> via `shepherd_message` with
+   `expectsReply: true`. Then end your turn WITHOUT `shepherd_done`
+   and wait — no time limit, never give up. When the reply arrives,
+   `shepherd_done` with the reply text as summary." Timeout 10.
+4. Watch both tasks (expect pending, then both completed — order:
+   B first, then A).
+5. Assert A's done summary is `pong-<pid>` and B's is `ping-<pid>`:
+   the full round trip went through the broker relay with no parent
+   involvement. Close both; diff broker state (no junk).
+
+**Pass criteria.** C1: reply notification + done, code word intact
+both ways. C2: crossed summaries exact, both sheep closed, no junk.
+Timeouts must never fire — a timeout means a wake or relay failed.
 
 ## Backend differences
 
