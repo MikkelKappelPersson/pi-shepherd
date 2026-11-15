@@ -1058,6 +1058,152 @@ exit 0
   await fire('session_shutdown', { type: 'session_shutdown' }, { isIdle: () => true });
 }
 
+// ── Phase 3: deadline drains inbox before settling timeout (010 §3) ───────
+// Live bug: the bare hc delegate `setTimeout(deadline)` settled `timed_out`
+// without draining, so a `task_done` already queued in the parent inbox lost
+// the race. The `watch` loop already drain-then-checks; the timer now does
+// the same. Deterministic, no live spawn: source-order assertion plus
+// first-wins semantics on both settlement paths, with transcript
+// readability and single-winner unseen entries.
+{
+  const hcRuntimeSource = readFileSync(
+    new URL('../src/runtimes/hc/runtime.ts', import.meta.url),
+    'utf8'
+  );
+  assert.ok(
+    /record\.timeoutId = setTimeout\(\(\) => \{[\s\S]*?drainBrokerInbox\(\)[\s\S]*?status: 'timed_out'/.test(
+      hcRuntimeSource
+    ),
+    'hc deadline timer drains the parent inbox before it may settle timed_out'
+  );
+  assert.ok(
+    hcRuntimeSource.includes('drainBrokerInbox();') &&
+      hcRuntimeSource.includes("source: 'delegate-submission-failure'"),
+    'hc drain-first timer leaves the delegate-submission-failure path unchanged'
+  );
+  console.log('PASS hc deadline timer drains the inbox before settling timeout');
+
+  // Done-in-inbox-before-deadline wins: completed settles first, the expired
+  // deadline attempt is a no-op, no timeout entry arises.
+  const doneFirstRegistry = new LifecycleRegistry();
+  const doneFirstEvents = [];
+  const doneFirstOff = doneFirstRegistry.onTaskSettled((result, context) => {
+    doneFirstEvents.push({ result, context });
+  });
+  const doneFirstAgent = doneFirstRegistry.registerAgent({ agent: 'worker', label: 'deadline-drain' });
+  const doneFirstTask = doneFirstRegistry.createTask(doneFirstAgent, 'drain-first probe');
+  doneFirstRegistry.setTaskRunning(doneFirstTask.id);
+  doneFirstRegistry.settleTask(doneFirstTask.id, { status: 'completed', text: 'done was already queued' });
+  const deadlineLoser = doneFirstRegistry.settleTask(doneFirstTask.id, {
+    status: 'timed_out',
+    error: 'Tracked task deadline reached.',
+  });
+  assert.equal(deadlineLoser.status, 'completed', 'an expired deadline cannot overwrite a queued done');
+  assert.equal(doneFirstEvents.length, 1, 'the deadline loser is never observed');
+  assert.equal(doneFirstRegistry.taskResult(doneFirstTask.id).status, 'completed');
+  assert.equal(doneFirstRegistry.taskResult(doneFirstTask.id).text, 'done was already queued');
+  doneFirstOff();
+  const doneFirstLedger = new UnseenCompletionLedger();
+  const doneFirstHcOff = onHcTaskSettled((result, context) => {
+    doneFirstLedger.record(result, context);
+  });
+  const doneFirstHcTask = 'shepherd-task-hc-deadline-drain-done';
+  const doneFirstHcAgent = 'shepherd-agent-hc-deadline-drain';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: doneFirstHcTask,
+      agentId: doneFirstHcAgent,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'done was already queued',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'deadline-drain' }
+  );
+  notifyHcTaskSettledObservers(
+    {
+      taskId: doneFirstHcTask,
+      agentId: doneFirstHcAgent,
+      status: 'timed_out',
+      ok: false,
+      returnCode: 124,
+      error: 'Tracked task deadline reached.',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'deadline-drain' }
+  );
+  doneFirstHcOff();
+  assert.equal(doneFirstLedger.pending().length, 1, 'single winner-only entry when done was queued');
+  assert.equal(doneFirstLedger.pending()[0].status, 'completed');
+  assert.equal(doneFirstLedger.pending()[0].text, 'done was already queued');
+  console.log('PASS done-in-inbox-before-deadline wins with no timeout entry');
+
+  // Empty inbox + expired deadline: timed_out settles and is itself an unseen
+  // entry when unwatched; a late done afterwards is ignored with a readable
+  // winning transcript and still a single entry.
+  const timeoutRegistry = new LifecycleRegistry();
+  const timeoutEvents = [];
+  const timeoutOff = timeoutRegistry.onTaskSettled((result, context) => {
+    timeoutEvents.push({ result, context });
+  });
+  const timeoutAgent = timeoutRegistry.registerAgent({ agent: 'worker', label: 'deadline-empty' });
+  const timeoutTask = timeoutRegistry.createTask(timeoutAgent, 'empty inbox probe');
+  timeoutRegistry.setTaskRunning(timeoutTask.id);
+  timeoutRegistry.settleTask(timeoutTask.id, {
+    status: 'timed_out',
+    error: 'Tracked task deadline reached.',
+  });
+  const lateDone = timeoutRegistry.settleTask(timeoutTask.id, {
+    status: 'completed',
+    text: 'late done',
+  });
+  assert.equal(lateDone.status, 'timed_out', 'a late done cannot overwrite the deadline');
+  assert.equal(timeoutEvents.length, 1, 'the late done is never observed');
+  assert.equal(timeoutRegistry.taskResult(timeoutTask.id).status, 'timed_out');
+  assert.equal(timeoutRegistry.taskResult(timeoutTask.id).error, 'Tracked task deadline reached.');
+  timeoutOff();
+  const timeoutLedger = new UnseenCompletionLedger();
+  const timeoutHcOff = onHcTaskSettled((result, context) => {
+    timeoutLedger.record(result, context);
+  });
+  const timeoutHcTask = 'shepherd-task-hc-deadline-timeout';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: timeoutHcTask,
+      agentId: doneFirstHcAgent,
+      status: 'timed_out',
+      ok: false,
+      returnCode: 124,
+      error: 'Tracked task deadline reached.',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'deadline-empty' }
+  );
+  assert.equal(timeoutLedger.pending().length, 1, 'an unwatched timeout is itself an unseen entry');
+  assert.equal(timeoutLedger.pending()[0].status, 'timed_out');
+  assert.match(
+    formatUnseenCompletionNotice(timeoutLedger.pending()),
+    /timed_out/
+  );
+  notifyHcTaskSettledObservers(
+    {
+      taskId: timeoutHcTask,
+      agentId: doneFirstHcAgent,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'late done',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'deadline-empty' }
+  );
+  timeoutHcOff();
+  assert.equal(timeoutLedger.pending().length, 1, 'late done keeps a single winner-only entry');
+  assert.equal(timeoutLedger.pending()[0].status, 'timed_out');
+  console.log('PASS empty inbox times out as unseen; late done is ignored with a readable winner');
+}
+
 function ledgerCount(ledger) {
   return ledger.pending().length;
 }

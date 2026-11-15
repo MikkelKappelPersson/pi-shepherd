@@ -1066,8 +1066,11 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     }
   }
 
-  function applyMessageEnvelope(envelope: ShepherdMessageEnvelope): void {
-    const active = ensureBroker();
+  // The drain's broker is threaded through: resolving a *separate* broker
+  // here (bare `ensureBroker()`) would mint a fallback-keyed store, orphan
+  // the session mailbox, and address reply relays to a store the child
+  // never polls.
+  function applyMessageEnvelope(active: ParentBroker, envelope: ShepherdMessageEnvelope): void {
     switch (envelope.kind) {
       case 'runtime': {
         if (envelope.replyReceived === true && envelope.taskId && envelope.replyTo) {
@@ -1140,7 +1143,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     for (const envelope of envelopes) {
       try {
         if (envelope.kind === 'task_done') applyTaskDoneEnvelope(envelope);
-        else applyMessageEnvelope(envelope);
+        else applyMessageEnvelope(active, envelope);
       } catch {
         /* one bad envelope must not stop the drain */
       }
@@ -1362,6 +1365,11 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
       if (deadlineAt !== undefined) {
         const delay = Math.max(0, deadlineAt - Date.now());
         record.timeoutId = setTimeout(() => {
+          // Drain-first: a `task_done` already queued in the parent inbox
+          // wins over the bare deadline (mirrors the `watch`-loop
+          // drain-then-check order; 010 §3). A genuinely late done still
+          // loses: `settleTask` on an already-terminal record is a no-op.
+          drainBrokerInbox();
           if (!record.result) {
             settleTask(record, { status: 'timed_out', error: 'Tracked task deadline reached.' });
           }

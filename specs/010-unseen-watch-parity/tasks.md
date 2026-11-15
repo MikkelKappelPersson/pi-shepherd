@@ -22,7 +22,7 @@ the later implementation.
 
 ## Phase 0 — hc observer hook, no behavior change
 
-- [ ] **0.1 Add `onTaskSettled` to the hc settle path**
+- [x] **0.1 Add `onTaskSettled` to the hc settle path**
   - In `src/runtimes/hc/runtime.ts`: listener set + `onTaskSettled`
     returning unsubscribe, mirroring
     `src/runtimes/herdr/orchestration.ts` `onTaskSettled`.
@@ -38,7 +38,7 @@ the later implementation.
   - Bridge NOT rewired yet; direct ledger write stays until Phase 1, so
     behavior is unchanged.
 
-- [ ] **0.2 Verify Phase 0**
+- [x] **0.2 Verify Phase 0**
   - `npm test` green; no existing suite modified.
   - Observer unit cases (hc side, in the unseen suite file or a scratch
     harness): settle with watcher → `hadWatchers: true`; without →
@@ -47,7 +47,7 @@ the later implementation.
 
 ## Phase 1 — bridge via active runtime; parity live
 
-- [ ] **1.1 Subscribe through the resolved runtime**
+- [x] **1.1 Subscribe through the resolved runtime**
   - `src/extension/unseen-completions.ts`: replace the direct Herdr
     `lifecycleRegistry` import with subscription through the active
     runtime's registry (per-command `resolveBackend` result; see plan.md
@@ -63,7 +63,7 @@ the later implementation.
     `record` → `scheduleIdleWake`, exactly like Herdr. The bridge owns
     the only `record` call sites.
 
-- [ ] **1.2 Verify Phase 1**
+- [x] **1.2 Verify Phase 1**
   - No-watch done → settle-or-idle-wake on BOTH backends: busy → one
     boundary continuation; idle → exactly one debounced wake per burst;
     notice text backend-agnostic (ids differ, wording identical).
@@ -102,7 +102,7 @@ the later implementation.
 
 ## Phase 3 — deadline drains inbox before settling timeout (live bug)
 
-- [ ] **3.1 Drain-first deadline timer on hc**
+- [x] **3.1 Drain-first deadline timer on hc**
   - In `src/runtimes/hc/runtime.ts` delegate deadline `setTimeout`:
     call `drainBrokerInbox()` first, settle `timed_out` only if the
     record still has no result (mirrors the `watch`-loop
@@ -111,7 +111,7 @@ the later implementation.
     loses (first-wins by arrival). `delegate-submission-failure` path
     unchanged.
 
-- [ ] **3.2 Regression test (deterministic, no live spawn)**
+- [x] **3.2 Regression test (deterministic, no live spawn)**
   - Inbox has queued `task_done` + expired deadline → `completed`,
     no timeout entry. Empty inbox + expired deadline → `timed_out`
     unseen entry. Late done after terminal timeout ignored, transcript

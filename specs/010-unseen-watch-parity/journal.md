@@ -100,3 +100,73 @@
   `session-boundary:test` ("parent extension registers session_start
   handlers") fail identically on `main` with this worker's changes
   stashed — environment drift, not Phase 2. Untouched, as required.
+
+## Phase 3 — deadline drains inbox before settling timeout — 2026-11-15
+
+- Scope: 3.1 (`src/runtimes/hc/runtime.ts` delegate `setTimeout` calls
+  `drainBrokerInbox()` first, settles `timed_out` only if still no
+  result) + 3.2 (deterministic regression block in
+  `test/verify-unseen-completions.mjs`, no live spawn). No other behavior
+  change; `delegate-submission-failure` path untouched.
+- Evidence: `unseen-completions:test` EXIT 0, 34 PASS (3 new Phase 3
+  lines: drain-order source check, done-in-inbox wins with no timeout
+  entry, empty-inbox timeout as unseen + late done ignored with readable
+  winner); `hc-matrix:test` EXIT 0; `status:test`, `stale-wait:test`
+  EXIT 0. Full `npm test` chain still stops at pre-existing `command-ux`
+  drift (unchanged).
+- Landing: Phase 0 (`c3df761`), Phase 1 (`5d18cac`), Phase 2 (`f6f976b`)
+  boxes now checked in `tasks.md` (implementation was committed but boxes
+  were stale); Phase 3 boxes checked by this worker. No commit made here;
+  landing commit left to the session owner.
+
+## Follow-up — blind-drain anomaly (live 010 smoke, 2026-11-15 ~18:15–18:25)
+
+- Symptom: hc `task_done` + `reply` sat in `parent/inbox` ~9 min across
+  several status/watch drains that all reported `running`; the Phase 3
+  deadline timer's drain then consumed both and settled `completed`.
+  Separately, a fallback-key broker dir (`hc-parent-<gen>`) appeared at
+  18:25:11, proving at least one runtime call ran with undefined
+  sessionId in the same process/generation.
+- TEMP-DIAG: `src/runtimes/hc/runtime.ts` gained file-flagged tracing
+  (`/tmp/pi-shepherd-drain-debug.on` enables, appends to
+  `/tmp/pi-shepherd-drain-debug.log`): broker creation (key + rootDir),
+  every drain (sessionId, key, rootDir, inbox count, polled kinds),
+  every `applyTaskDoneEnvelope` exit (settling / no-sender /
+  pending-requests silent drop / rejected). All `drainDebug` calls are
+  no-ops when the flag is absent; suites stay deterministic. REMOVE the
+  helper + call sites once the anomaly is explained (do not land it).
+
+## Diagnosis (same day) — no blind drain; two real findings
+
+- The "blind" status/watch drains never existed: the extension routes hc
+  `watch` to non-blocking `hcTaskWatcherService.watch` (no drain) and hc
+  `status` to `describeHcStatusView` (no drain). Only `message` and the
+  delegate deadline timer drain. Smoke-1 therefore waited for the timer;
+  smoke-2 completed fast because a `message` call drained. The live log
+  proved it (`drain start` appears only for message/timer drains).
+- Real bug, fixed: `applyMessageEnvelope` called bare `ensureBroker()`,
+  minting a fallback-keyed junk broker mid-drain, hijacking the module
+  broker (orphaning the session mailbox for later drains) and addressing
+  reply relays to a store the child never polls (junk dirs `AyfED1`,
+  `84O93R` were the evidence). Fix: thread the drain's `active` broker
+  through (`applyMessageEnvelope(active, envelope)`). TEMP-DIAG fully
+  removed; `unseen-completions`, `hc-matrix`, `messaging` suites green.
+- Open design question (not fixed): should hc watch-registration and
+  `describeHcStatusView` drain first so they never report stale
+  pending/running for already-settled tasks? Check Herdr parity
+  (`taskWatcherService.watch` / pane status view) before deciding.
+
+## Verification (same day, post-reload) — hijack fix proven live
+
+- Smoke-3 (scout, same session): spawn → delegate → watch (pending) →
+  done lands in new session broker `mw96y7` → `message` drains →
+  `completed` via watcher, inbox drained, close clean.
+- Exactly ONE new broker dir (`mw96y7`, legitimate); ZERO new
+  `hc-parent-*` junk dirs (previously every reply-applying drain minted
+  one: `AyfED1`, `84O93R`). The threaded-broker fix holds.
+- Herdr parity answer: pane backend polls the parent inbox on a 250ms
+  background timer (`lifecycle.ts:84`); hc has no equivalent — drains
+  happen only in `message` and the delegate deadline. So on hc,
+  watch/status can report stale state indefinitely with an idle parent.
+  Recommendation: mirror the Herdr background poll (or drain-first
+  watch/status) as new spec work, not in 010.
