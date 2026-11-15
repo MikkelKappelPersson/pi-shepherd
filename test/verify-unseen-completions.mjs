@@ -9,9 +9,14 @@
  * continuation, retrieval/close clearing, renderer registration, and shutdown
  * release. The bridge is driven directly through a fake pi surface (no pi
  * subprocess), with an isolated ledger and injected coalesce windows.
+ *
+ * 010 Phase 2 adds the hc matrix alongside the 009 `verify-hc-matrix.mjs`
+ * pattern: same prompts on both runtimes settle to byte-identical notices
+ * modulo opaque ids, with no-id-leak, submission-failure, race, and close
+ * cases — deterministic (isolated ledgers, injected coalesce, fake pi).
  */
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { UnseenCompletionLedger, unseenCompletionLedger } from '../src/core/unseen-completions.ts';
@@ -24,6 +29,13 @@ import {
 import { doAction } from '../src/extension/shepherd.ts';
 import { delegateAgent } from '../src/runtimes/herdr/lifecycle.ts';
 import { LifecycleRegistry, lifecycleRegistry } from '../src/runtimes/herdr/orchestration.ts';
+import {
+  isHcTaskId,
+  notifyHcTaskSettledObservers,
+  onTaskSettled as onHcTaskSettled,
+  resolveHcAgentId,
+  watchHcTasks,
+} from '../src/runtimes/hc/runtime.ts';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -693,6 +705,357 @@ exit 0
   await fire2('session_shutdown', { type: 'session_shutdown' });
   assert.equal(ledger2.pending().length, 0);
   console.log('PASS a fake pi without sendMessage never throws and keeps entries pending');
+}
+
+// ── hc matrix (010 Phase 2; cross-links test/verify-hc-matrix.mjs) ───────
+// Same prompts on both runtimes settle through one bridge seam: Herdr via a
+// registry observer, hc via `notifyHcTaskSettledObservers` (the settle-path
+// call Phase 0 exports so observer parity is unit-testable without a live
+// terminal). Deterministic: isolated ledgers, injected coalesce windows,
+// fake pi surface, no live spawn — the same discipline as the bridge cases
+// above and the 009 `verify-hc-matrix.mjs` pattern.
+{
+  const PROMPT = 'Implement the auth middleware from the plan.';
+  const SUMMARY = 'implemented with tests';
+  const normalizeIds = text =>
+    text.replace(/shepherd-(task|agent)-[A-Za-z0-9-]+/g, 'shepherd-$1-<id>');
+
+  // Same prompts, both runtimes: byte-identical notice text modulo ids.
+  const herdrLedger = new UnseenCompletionLedger();
+  const herdrMatrix = new LifecycleRegistry();
+  const herdrOff = herdrMatrix.onTaskSettled((result, context) => {
+    herdrLedger.record(result, context);
+  });
+  const herdrAgent = herdrMatrix.registerAgent({ agent: 'worker', label: 'matrix' });
+  const herdrTask = herdrMatrix.createTask(herdrAgent, PROMPT);
+  herdrMatrix.setTaskRunning(herdrTask.id);
+  herdrMatrix.settleTask(herdrTask.id, { status: 'completed', text: SUMMARY });
+  herdrOff();
+  assert.equal(herdrLedger.pending().length, 1, 'herdr settle records one unseen entry');
+
+  const hcLedger = new UnseenCompletionLedger();
+  const hcAgentId = 'shepherd-agent-hc-matrix-0001';
+  const hcTaskId = 'shepherd-task-hc-matrix-0001';
+  const hcOff = onHcTaskSettled((result, context) => {
+    hcLedger.record(result, context);
+  });
+  notifyHcTaskSettledObservers(
+    {
+      taskId: hcTaskId,
+      agentId: hcAgentId,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: SUMMARY,
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'matrix' }
+  );
+  hcOff();
+  assert.equal(hcLedger.pending().length, 1, 'hc observation records one unseen entry');
+  assert.equal(
+    normalizeIds(formatUnseenCompletionNotice(hcLedger.pending())),
+    normalizeIds(formatUnseenCompletionNotice(herdrLedger.pending())),
+    'same prompts settle to byte-identical notices modulo opaque ids'
+  );
+  console.log('PASS same prompts on both runtimes settle to byte-identical notices modulo ids');
+
+  // No id leak on hc: notices, details, and tool refusals carry opaque ids
+  // only — no raw terminal/pane addresses, socket paths, or env values.
+  const hcNoticeJson = JSON.stringify({
+    content: formatUnseenCompletionNotice(hcLedger.pending()),
+    details: hcLedger.pending(),
+  });
+  for (const [pattern, name] of [
+    [/\bw\d+:p\d+\b/, 'pane id'],
+    [/(?:^|\W)t\d+(?:\W|$)/, 'terminal address'],
+    [/\.sock\b/, 'socket path'],
+    [/HERDR_/, 'HERDR_* value'],
+    [/\bHC_/, 'HC_* value'],
+  ]) {
+    assert.ok(!pattern.test(hcNoticeJson), `hc notice carries no ${name}`);
+  }
+  assert.ok(hcNoticeJson.includes(hcTaskId), 'hc notice names the opaque task id');
+  assert.equal(isHcTaskId('t4'), false, 'isHcTaskId refuses a raw terminal address');
+  assert.equal(isHcTaskId('w1:p1'), false, 'isHcTaskId refuses a raw pane id');
+  assert.equal(resolveHcAgentId('t4'), undefined, 'read-target resolution refuses raw terminals');
+  assert.equal(resolveHcAgentId('w1:p1'), undefined, 'read-target resolution refuses raw panes');
+  assert.throws(() => watchHcTasks('t4'), /Unknown task/, 'hc watch refuses a raw address');
+  let rawRefusal = '';
+  try {
+    watchHcTasks('t4');
+  } catch (error) {
+    rawRefusal = String(error?.message ?? error);
+  }
+  assert.ok(!/\.sock/.test(rawRefusal) && !/HERDR_|HC_/.test(rawRefusal));
+  console.log('PASS hc notices, details, and tool refusals leak no native ids');
+
+  // delegate-submission-failure on hc records nothing.
+  const failureLedger = new UnseenCompletionLedger();
+  const failureOff = onHcTaskSettled((result, context) => {
+    failureLedger.record(result, context);
+  });
+  notifyHcTaskSettledObservers(
+    {
+      taskId: 'shepherd-task-hc-matrix-failure',
+      agentId: hcAgentId,
+      status: 'failed',
+      ok: false,
+      returnCode: 1,
+      error: 'submit boom',
+      completedAt: Date.now(),
+    },
+    {
+      hadWatchers: false,
+      agent: 'worker',
+      label: 'matrix',
+      source: 'delegate-submission-failure',
+    }
+  );
+  failureOff();
+  assert.equal(failureLedger.pending().length, 0, 'an hc submission failure records nothing');
+  console.log('PASS delegate-submission-failure on hc records nothing');
+
+  // Timeout-vs-done race: the first settlement wins, the loser is ignored,
+  // and the winner stays readable for shepherd_watch/shepherd_read.
+  const raceRegistry = new LifecycleRegistry();
+  const raceEvents = [];
+  const raceOff = raceRegistry.onTaskSettled((result, context) => {
+    raceEvents.push({ result, context });
+  });
+  const raceAgent = raceRegistry.registerAgent({ agent: 'worker', label: 'race' });
+  const raceTask = raceRegistry.createTask(raceAgent, PROMPT);
+  raceRegistry.setTaskRunning(raceTask.id);
+  raceRegistry.settleTask(raceTask.id, {
+    status: 'timed_out',
+    error: 'Tracked task deadline reached.',
+  });
+  const lateLoser = raceRegistry.settleTask(raceTask.id, {
+    status: 'completed',
+    text: 'late done',
+  });
+  assert.equal(lateLoser.status, 'timed_out', 'a late done cannot overwrite the deadline');
+  assert.equal(raceEvents.length, 1, 'the loser is never observed');
+  assert.equal(raceRegistry.taskResult(raceTask.id).status, 'timed_out');
+  assert.equal(raceRegistry.taskResult(raceTask.id).error, 'Tracked task deadline reached.');
+  raceOff();
+  const raceLedger = new UnseenCompletionLedger();
+  const raceHcOff = onHcTaskSettled((result, context) => {
+    raceLedger.record(result, context);
+  });
+  const raceTaskId = 'shepherd-task-hc-matrix-race';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: raceTaskId,
+      agentId: hcAgentId,
+      status: 'timed_out',
+      ok: false,
+      returnCode: 124,
+      text: 'Timed out waiting for a reply from the target agent (message never answered).',
+      error: 'Tracked reply deadline reached.',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'race' }
+  );
+  notifyHcTaskSettledObservers(
+    {
+      taskId: raceTaskId,
+      agentId: hcAgentId,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'late done',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'race' }
+  );
+  raceHcOff();
+  assert.equal(raceLedger.pending().length, 1, 'single winner-only unseen entry');
+  assert.equal(raceLedger.pending()[0].status, 'timed_out', 'the deadline winner is kept');
+  assert.ok(raceLedger.pending()[0].text.includes('Timed out waiting'));
+  const hcRuntimeSource = readFileSync(
+    new URL('../src/runtimes/hc/runtime.ts', import.meta.url),
+    'utf8'
+  );
+  const paneRegistrySource = readFileSync(
+    new URL('../src/runtimes/herdr/orchestration.ts', import.meta.url),
+    'utf8'
+  );
+  assert.ok(
+    hcRuntimeSource.includes('if (record.result) return'),
+    'hc second settle is a no-op'
+  );
+  assert.ok(
+    paneRegistrySource.includes('if (record.settled) return'),
+    'pane second settle is a no-op'
+  );
+  console.log('PASS timeout-vs-done keeps the deadline winner with a readable transcript');
+
+  // Close-cancels-watch: cancelled settles resolve blocked watchers but never
+  // enter the ledger; close drops pending entries and reports their ids.
+  const closeLedger = new UnseenCompletionLedger();
+  const closeRegistry = new LifecycleRegistry();
+  const closeOff = closeRegistry.onTaskSettled((result, context) => {
+    closeLedger.record(result, context);
+  });
+  const closingAgent = closeRegistry.registerAgent({ agent: 'worker', label: 'closing' });
+  const closingTask = closeRegistry.createTask(closingAgent, PROMPT);
+  const cancelledDeliveries = [];
+  closeRegistry.watchTasks(closingTask.id, completion => cancelledDeliveries.push(completion));
+  closeRegistry.settleTask(closingTask.id, { status: 'cancelled', error: 'Agent was closed.' });
+  assert.equal(cancelledDeliveries.length, 1, 'a blocked watch resolves with the cancellation');
+  assert.equal(cancelledDeliveries[0].status, 'cancelled');
+  assert.equal(closeLedger.pending().length, 0, 'the cancellation never enters the ledger');
+  closeOff();
+  const hcCloseLedger = new UnseenCompletionLedger();
+  const hcCloseOff = onHcTaskSettled((result, context) => {
+    hcCloseLedger.record(result, context);
+  });
+  notifyHcTaskSettledObservers(
+    {
+      taskId: 'shepherd-task-hc-matrix-cancelled',
+      agentId: hcAgentId,
+      status: 'cancelled',
+      ok: false,
+      returnCode: 130,
+      error: 'Agent was closed.',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: true, agent: 'worker', label: 'closing' }
+  );
+  assert.equal(
+    hcCloseLedger.pending().length,
+    0,
+    'hc cancellation records nothing even when watched'
+  );
+  hcCloseLedger.record(
+    {
+      taskId: 'shepherd-task-hc-matrix-drop',
+      agentId: hcAgentId,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: SUMMARY,
+    },
+    { hadWatchers: false, agent: 'worker', label: 'closing' }
+  );
+  assert.deepEqual(hcCloseLedger.clearForAgent(hcAgentId), ['shepherd-task-hc-matrix-drop']);
+  assert.equal(hcCloseLedger.pending().length, 0, 'close drops the agent ledger clean');
+  hcCloseOff();
+  const shepherdSource = readFileSync(
+    new URL('../src/extension/shepherd.ts', import.meta.url),
+    'utf8'
+  );
+  assert.ok(shepherdSource.includes('clearForAgent'), 'close clears pending entries per agent');
+  assert.ok(shepherdSource.includes('clearedUnseenCompletions'), 'close reports the dropped ids');
+  assert.ok(hcRuntimeSource.includes("status: 'cancelled'"), 'hc close settles cancelled');
+  console.log('PASS close cancels the watch, keeps the ledger clean, and reports dropped ids');
+}
+
+// ── hc bridge seam (010 Phase 2): the production bridge delivers hc ─────
+// settles exactly like Herdr settles — one boundary continuation while
+// busy, one coalesced idle wake per burst, retrieval clear instead of a
+// duplicate notice. Runs through `subscribeToTaskSettlements` (both
+// registries) with an isolated ledger and a small injected coalesce window.
+{
+  const sent = [];
+  const handlers = new Map();
+  const fakePi = {
+    registerMessageRenderer() {},
+    on(event, handler) {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+    },
+    sendMessage(message, options) {
+      sent.push({ message, options });
+    },
+  };
+  const fire = async (event, payload, ctx) => {
+    const results = [];
+    for (const handler of handlers.get(event) ?? []) results.push(await handler(payload, ctx));
+    return results;
+  };
+  const bridgeLedger = new UnseenCompletionLedger();
+  configureUnseenCompletionBridge(fakePi, { coalesceMs: 15, ledger: bridgeLedger });
+  await fire('session_start', { type: 'session_start' }, { isIdle: () => true });
+
+  // Idle burst on the hc path: one coalesced triggerTurn wake, then drained.
+  const hcIdleTask = 'shepherd-task-hc-matrix-idle';
+  const hcIdleAgent = 'shepherd-agent-hc-matrix-idle';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: hcIdleTask,
+      agentId: hcIdleAgent,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'idle hc done',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'bridge-idle' }
+  );
+  await delay(60);
+  assert.equal(sent.length, 1, 'an idle hc burst wakes exactly once');
+  assert.deepEqual(sent[0].options, { triggerTurn: true });
+  assert.match(sent[0].message.content, /no watcher attached/);
+  assert.ok(sent[0].message.content.includes(hcIdleTask));
+  assert.deepEqual(sent[0].message.details.taskIds, [hcIdleTask]);
+  assert.match(sent[0].message.content, /Full results: shepherd_watch/);
+  assert.equal(bridgeLedger.pending().length, 0, 'the idle wake drains the ledger');
+  console.log('PASS an idle hc settle fires one coalesced wake and drains');
+
+  // Retrieval clear (the ledger call shepherd_watch makes): no duplicate.
+  const hcRetrievedTask = 'shepherd-task-hc-matrix-retrieved';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: hcRetrievedTask,
+      agentId: hcIdleAgent,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'retrieved hc done',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'bridge-idle' }
+  );
+  assert.deepEqual(bridgeLedger.clear([hcRetrievedTask]), [hcRetrievedTask]);
+  await delay(50);
+  assert.equal(sent.length, 1, 'no notice follows a retrieval clear');
+  console.log('PASS shepherd_watch retrieval clears the hc entry with no duplicate notice');
+
+  // Busy hc settle: no mid-turn wake; one continuation at the completed boundary.
+  await fire('agent_start', { type: 'agent_start' }, { isIdle: () => false });
+  const hcBusyTask = 'shepherd-task-hc-matrix-busy';
+  notifyHcTaskSettledObservers(
+    {
+      taskId: hcBusyTask,
+      agentId: hcIdleAgent,
+      status: 'completed',
+      ok: true,
+      returnCode: 0,
+      text: 'busy hc done',
+      completedAt: Date.now(),
+    },
+    { hadWatchers: false, agent: 'worker', label: 'bridge-busy' }
+  );
+  await delay(50);
+  assert.equal(sent.length, 1, 'no idle wake fires while the Shepherd is busy');
+  const boundary = (
+    await fire(
+      'agent_before_settle',
+      { type: 'agent_before_settle', outcome: 'completed', context: { canContinue: false } },
+      { isIdle: () => false }
+    )
+  )[0];
+  assert.ok(boundary, 'a completed boundary offers a continuation for the hc settle');
+  assert.equal(boundary.continue, true);
+  assert.deepEqual(boundary.entries[0].details.taskIds, [hcBusyTask]);
+  assert.equal(bridgeLedger.pending().length, 0, 'the boundary drains the hc entry');
+  assert.equal(sent.length, 1, 'the boundary delivers in-turn instead of via sendMessage');
+  console.log('PASS a busy hc settle is delivered once at the completed settle boundary');
+
+  await fire('session_shutdown', { type: 'session_shutdown' }, { isIdle: () => true });
 }
 
 function ledgerCount(ledger) {

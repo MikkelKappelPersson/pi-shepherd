@@ -71,7 +71,7 @@ the later implementation.
 
 ## Phase 2 — matrix verification, docs, landing
 
-- [ ] **2.1 Unseen matrix case for hc** (in
+- [x] **2.1 Unseen matrix case for hc** (in
   `test/verify-unseen-completions.mjs`; cross-link `verify-hc-matrix.mjs`)
   - Same prompts both runtimes: delegate + no watch + settle-as-done →
     byte-identical notice text modulo task/agent ids, Herdr and hc.
@@ -87,7 +87,7 @@ the later implementation.
   - Deterministic: injected small `coalesceMs`, isolated ledger, fake pi
     surface, no live spawn.
 
-- [ ] **2.2 Docs + live proof**
+- [x] **2.2 Docs + live proof**
   - One-row parity note where 007 documented the notice (README `###
     Delegate, then watch` + `docs/guides/tool-reference.md`
     `shepherd_watch` entry): the notice holds on both backends.
@@ -95,7 +95,7 @@ the later implementation.
     boundary notice + `shepherd_watch` retrieval; idle wake fires once;
     close drops + reports; race keeps winner + transcript.
 
-- [ ] **2.3 Full suite + landing**
+- [x] **2.3 Full suite + landing**
   - `npm test` green with all existing suites untouched.
   - Record scope, evidence, and the landing note in a `journal.md`
     before merging (follow the 007 journal precedent).

@@ -14,6 +14,9 @@
 // reachable and cleans up after itself. Live spawn/delegate/watch parity was
 // proven manually in 1.1; the resolver wiring it exercises lives in
 // src/extension/shepherd.ts (delegate/close routed, rest concrete).
+// Cross-link (010 Phase 2): unwatched-notice parity (same-prompts,
+// no-id-leak, race, close) lives in test/verify-unseen-completions.mjs;
+// this suite keeps the ownership/id-refusal cases both suites rely on.
 import { currentParentBroker, shutdownParentBroker } from '../src/runtimes/herdr/lifecycle.ts';
 import { createHerdrRuntime } from '../src/runtimes/herdr/runtime.ts';
 import {
