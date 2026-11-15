@@ -521,6 +521,72 @@ function notifyHcTaskWatchers(result: TaskResultInternal): boolean {
   return hadWatchers;
 }
 
+/** Internal source tags for settlements that are not unseen-at-source. */
+export type HcTaskSettlementSource = 'delegate-submission-failure';
+
+/**
+ * Context attached to each hc settlement observation.
+ *
+ * `hadWatchers` is true only when at least one hc task-watcher callback was
+ * actually invoked for this settlement. `agent`/`label` come from the settled
+ * agent's handle. `source` marks settlements callers must not treat as unseen
+ * completions (a delegate submission failure is already reported in the
+ * `shepherd_delegate` tool result).
+ */
+export interface HcTaskSettlementContext {
+  hadWatchers: boolean;
+  agent?: string;
+  label?: string;
+  source?: HcTaskSettlementSource;
+}
+
+/** One hc settlement observation; see {@link onTaskSettled}. */
+export type HcTaskSettledListener = (result: TaskResultInternal, context: HcTaskSettlementContext) => void;
+
+/** Internal settle options; only the delegate failure path passes `source`. */
+export interface HcSettleTaskOptions {
+  source?: HcTaskSettlementSource;
+}
+
+const hcSettlementListeners = new Set<HcTaskSettledListener>();
+
+/**
+ * Registry contract: observe hc settlements that reach a terminal task state.
+ *
+ * Mirrors the pane-backend registry `onTaskSettled` contract: the listener fires once per actual
+ * transition into a terminal task state, after the hc watcher fan-out, with
+ * a shallow copy of the result and a fresh context. Listener failures are
+ * swallowed and can never affect settlement; with no listener subscribed,
+ * `settleTask` behaves exactly as before. Prompt (legacy) settlements are not
+ * observed (the hc runtime has no prompt path).
+ */
+export function onTaskSettled(listener: HcTaskSettledListener): () => void {
+  hcSettlementListeners.add(listener);
+  return () => {
+    hcSettlementListeners.delete(listener);
+  };
+}
+
+/**
+ * Deliver one terminal settlement to `onTaskSettled` subscribers, each with
+ * its own shallow copy of the result and context. Listener failures are
+ * swallowed and can never affect settlement. Called by the settle path after
+ * the hc watcher fan-out; exported so observer parity is unit-testable
+ * without a live terminal (mirrors the pane-backend settle listener loop).
+ */
+export function notifyHcTaskSettledObservers(
+  result: TaskResultInternal,
+  context: HcTaskSettlementContext
+): void {
+  for (const listener of [...hcSettlementListeners]) {
+    try {
+      listener({ ...result }, { ...context });
+    } catch {
+      /* settlement observation must not break settlement */
+    }
+  }
+}
+
 export type HcTaskWatcherNotifier = (notification: {
   watcherId: string;
   completions: HcTaskWatcherCompletion[];
@@ -809,7 +875,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     finalizeArtifact(artifactSession, artifact, { status, output: result.text, error: result.error });
   }
 
-  function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }): TaskResultInternal {
+  function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }, options: HcSettleTaskOptions = {}): TaskResultInternal {
     if (record.result) return { ...record.result };
     const completedAt = settlement.completedAt ?? Date.now();
     const ok = settlement.status === 'completed' && settlement.ok !== false;
@@ -871,21 +937,24 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
     // Non-blocking watcher delivery + unseen-ledger feed (pane parity):
     // a settlement with an attached watcher notifies it; a watcher-less
     // settlement (except cancellations) becomes an unseen completion.
+    // Phase 0: the direct ledger write stays until the bridge subscribes
+    // through the active runtime (Phase 1); the observer hook below fires
+    // with the same context so tests and the future bridge observe it.
+    const hadWatchers = notifyHcTaskWatchers(result);
+    const agentHandle = agents.get(record.agentId)?.handle;
+    const settlementContext: HcTaskSettlementContext = {
+      hadWatchers,
+      ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
+      ...(options.source !== undefined ? { source: options.source } : {}),
+    };
     try {
-      const hadWatchers = notifyHcTaskWatchers(result);
       if (result.status !== 'cancelled') {
-        const agentHandle = agents.get(record.agentId)?.handle;
-        unseenCompletionLedger.record(
-          { ...result },
-          {
-            hadWatchers,
-            ...(agentHandle ? { agent: agentHandle.agent, label: agentHandle.label } : {}),
-          }
-        );
+        unseenCompletionLedger.record({ ...result }, { ...settlementContext });
       }
     } catch {
       /* observer feed must not break settlement */
     }
+    notifyHcTaskSettledObservers(result, settlementContext);
     return { ...result };
   }
 
@@ -1334,10 +1403,14 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
         record.state = 'running';
         return id;
       } catch (error) {
-        settleTask(record, {
-          status: 'failed',
-          error: String((error as any)?.message ?? error),
-        });
+        settleTask(
+          record,
+          {
+            status: 'failed',
+            error: String((error as any)?.message ?? error),
+          },
+          { source: 'delegate-submission-failure' }
+        );
         throw new Error(`Task submission failed: ${String((error as any)?.message ?? error)}`);
       }
     },
