@@ -25,7 +25,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { hostCapabilities } from '../../core/host.ts';
 import { sessionOwner } from '../herdr/orchestration.ts';
 import {
   readCompletionSignal,
@@ -251,8 +251,9 @@ function terminalOwner(entry: CreatedTerminal): string {
 
 function registryFile(): string {
   // Beside created-panes.json in the active agent dir (~/.pi/agent by
-  // default, overridable via PI_CODING_AGENT_DIR).
-  return path.join(getAgentDir(), 'pi-shepherd', 'created-terminals.json');
+  // default on Pi, overridable via PI_CODING_AGENT_DIR).
+  const host = hostCapabilities();
+  return path.join(host.getAgentDir(), host.dataDirName, 'created-terminals.json');
 }
 
 export function loadCreatedTerminals(): CreatedTerminal[] {

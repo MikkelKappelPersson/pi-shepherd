@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as url from 'node:url';
-import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from '@earendil-works/pi-coding-agent';
+import { hostCapabilities } from './host.ts';
 
 export type AgentScope = 'user' | 'project' | 'both';
 
@@ -200,7 +200,9 @@ function loadAgentsFromDir(dir: string, source: Source): AgentConfig[] {
       continue;
     }
 
-    const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+    const { frontmatter, body } = hostCapabilities().parseFrontmatter<Record<string, unknown>>(
+      content
+    );
 
     const agentName = frontmatter.name;
     const description = frontmatter.description;
@@ -274,12 +276,12 @@ function buildLocations(
   const bundledAgents = path.join(pkgDir, '.agents', 'agents');
 
   if (scope === 'user' || scope === 'both') {
-    locations.push({ dir: path.join(getAgentDir(), 'agents'), source: 'user' });
+    locations.push({ dir: path.join(hostCapabilities().getAgentDir(), 'agents'), source: 'user' });
     locations.push({ dir: path.join(os.homedir(), '.agents', 'agents'), source: 'user' });
   }
 
   if (scope === 'project' || scope === 'both') {
-    const piDir = findNearestProjectAgentsDir(cwd, CONFIG_DIR_NAME);
+    const piDir = findNearestProjectAgentsDir(cwd, hostCapabilities().projectConfigDirName);
     if (piDir) {
       locations.push({ dir: piDir, source: 'project' });
       projectDirs.push(piDir);

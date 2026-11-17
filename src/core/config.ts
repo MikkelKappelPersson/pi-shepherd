@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { hostCapabilities } from './host.ts';
 import type { AgentScope } from './discovery.ts';
 
 /** Fields that a project config may own.
@@ -84,7 +84,8 @@ export const DEFAULT_SETTINGS: ShepherdSettings = {
 };
 
 export function userConfigFile(): string {
-  return path.join(getAgentDir(), 'pi-shepherd', 'config.json');
+  const host = hostCapabilities();
+  return path.join(host.getAgentDir(), host.dataDirName, 'config.json');
 }
 
 export function projectConfigFile(projectRoot: string): string {

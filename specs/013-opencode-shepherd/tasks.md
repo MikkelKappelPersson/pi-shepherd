@@ -8,9 +8,9 @@
 as before.
 **Checkpoint**: full existing `verify-*` suites green, zero Pi behavior change.
 
-- [ ] T001 [US5] Inject agent/config directories and frontmatter parsing into `src/core/discovery.ts` and `src/core/config.ts` (no `@earendil-works` imports left in shared engine).
-- [ ] T002 [US5] Parameterize the launch-file builder (`src/runtimes/herdr/herdr.ts`) by child binary, child entry, and env-capability prefix; Pi passes today's values.
-- [ ] T003 [US5] Run all `verify-*` suites plus manual Pi spawn → delegate → watch → close; confirm green and unchanged.
+- [x] T001 [US5] Inject agent/config directories and frontmatter parsing into `src/core/discovery.ts` and `src/core/config.ts` (no `@earendil-works` imports left in shared engine).
+- [x] T002 [US5] Parameterize the launch-file builder (`src/runtimes/herdr/herdr.ts`) by child binary, child entry, and env-capability prefix; Pi passes today's values.
+- [x] T003 [US5] Run all `verify-*` suites plus manual Pi spawn → delegate → watch → close; confirm green and unchanged.
 
 ## Phase 2 — OpenCode spawn and inspect (US1)
 

@@ -1,5 +1,22 @@
-import { StringEnum } from '@earendil-works/pi-ai';
-import { Type } from 'typebox';
+import { Type, type TUnsafe } from 'typebox';
+
+/**
+ * String-enum schema helper (spec 013: vendored into the engine so shared
+ * code needs no host SDK). Identical output to the Pi helper: a plain
+ * `{ type: 'string', enum }` schema, compatible with providers that do not
+ * support anyOf/const patterns.
+ */
+function StringEnum<T extends readonly string[]>(
+  values: T,
+  options?: { description?: string; default?: T[number] }
+): TUnsafe<T[number]> {
+  return Type.Unsafe<T[number]>({
+    type: 'string',
+    enum: values,
+    ...(options?.description && { description: options.description }),
+    ...(options?.default && { default: options.default }),
+  });
+}
 
 export const AgentScopeSchema = StringEnum(['user', 'project', 'both'] as const, {
   description:

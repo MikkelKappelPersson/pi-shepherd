@@ -23,9 +23,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { fileURLToPath } from 'node:url';
-import { Text } from '@earendil-works/pi-tui';
+import { hostCapabilities } from '../../core/host.ts';
 import { lifecycleRegistry, sessionOwner } from './orchestration.ts';
 import type { ChildCapability } from './messaging.ts';
 import { normalizeThinking, type AgentThinkingLevel } from '../../core/discovery.ts';
@@ -310,9 +309,10 @@ function paneOwner(entry: CreatedPane): string {
 }
 
 function registryFile(): string {
-  // getAgentDir() resolves the active agent dir (~/.pi/agent by default,
+  // Resolves the active agent dir (~/.pi/agent by default on Pi,
   // overridable via the PI_CODING_AGENT_DIR env var).
-  return path.join(getAgentDir(), 'pi-shepherd', 'created-panes.json');
+  const host = hostCapabilities();
+  return path.join(host.getAgentDir(), host.dataDirName, 'created-panes.json');
 }
 
 export function loadCreatedPanes(): CreatedPane[] {
@@ -588,13 +588,31 @@ export function writePiLaunchFiles(opts: {
   childBroker?: ChildCapability & { rootDir: string };
   /** Active tracked task context, when this launch is for delegated work. */
   taskId?: string;
+  /**
+   * Child CLI binary (default `'pi'`). The OpenCode adapter passes its own
+   * binary; Pi callers omit this and get byte-identical scripts.
+   */
+  binary?: string;
+  /**
+   * Absolute path to the child extension entry (default: shepherd-done.ts).
+   * The OpenCode adapter passes its own child plugin entry.
+   */
+  extensionEntry?: string;
+  /**
+   * Env capability prefix (default `'PI_SHEPHERD'`). Children read the
+   * handoff under their host's prefix; Pi's prefix stays frozen.
+   */
+  envPrefix?: string;
 }): { dir: string; sessionFile: string; scriptFile: string } {
   const thinking = normalizeThinking(opts.thinking);
+  const binary = opts.binary ?? 'pi';
+  const envPrefix = opts.envPrefix ?? 'PI_SHEPHERD';
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-'));
   const safe = opts.name.replace(/[^\w.-]+/g, '_') || 'agent';
   const sessionFile = path.join(dir, `session-${safe}.jsonl`);
   const scriptFile = path.join(dir, `launch-${safe}.sh`);
-  const doneExt = fileURLToPath(new URL('../../extension/shepherd-done.ts', import.meta.url));
+  const doneExt =
+    opts.extensionEntry ?? fileURLToPath(new URL('../../extension/shepherd-done.ts', import.meta.url));
 
   const args: string[] = ['--session', shellQuote(sessionFile), '-e', shellQuote(doneExt)];
   if (opts.model) args.push('--model', shellQuote(opts.model));
@@ -627,29 +645,29 @@ export function writePiLaunchFiles(opts: {
   const displayName = trimmedLabel ? `${opts.name}: ${trimmedLabel}` : opts.name;
   const launchScript = [
     '#!/bin/bash',
-    `export PI_SHEPHERD_SESSION=${shellQuote(sessionFile)}`,
-    `export PI_SHEPHERD_AGENT_DISPLAY=${shellQuote(displayName)}`,
+    `export ${envPrefix}_SESSION=${shellQuote(sessionFile)}`,
+    `export ${envPrefix}_AGENT_DISPLAY=${shellQuote(displayName)}`,
     systemPromptFile
-      ? `export PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE=${shellQuote(systemPromptFile)}`
-      : 'unset PI_SHEPHERD_AGENT_SYSTEM_PROMPT_FILE',
+      ? `export ${envPrefix}_AGENT_SYSTEM_PROMPT_FILE=${shellQuote(systemPromptFile)}`
+      : `unset ${envPrefix}_AGENT_SYSTEM_PROMPT_FILE`,
     opts.omitPiDocumentation
-      ? 'export PI_SHEPHERD_OMIT_PI_DOCUMENTATION=1'
-      : 'unset PI_SHEPHERD_OMIT_PI_DOCUMENTATION',
+      ? `export ${envPrefix}_OMIT_PI_DOCUMENTATION=1`
+      : `unset ${envPrefix}_OMIT_PI_DOCUMENTATION`,
     opts.childBroker
-      ? `export PI_SHEPHERD_BROKER_DIR=${shellQuote(opts.childBroker.rootDir)}\nexport PI_SHEPHERD_BROKER_SESSION_ID=${shellQuote(opts.childBroker.sessionId)}\nexport PI_SHEPHERD_BROKER_ID=${shellQuote(opts.childBroker.brokerId)}\nexport PI_SHEPHERD_AGENT_ID=${shellQuote(opts.childBroker.agentId)}\nexport PI_SHEPHERD_BROKER_TOKEN=${shellQuote(opts.childBroker.token)}\nexport PI_SHEPHERD_AGENT_INBOX=${shellQuote(opts.childBroker.inboxPath)}`
-      : 'unset PI_SHEPHERD_BROKER_DIR PI_SHEPHERD_BROKER_SESSION_ID PI_SHEPHERD_BROKER_ID PI_SHEPHERD_AGENT_ID PI_SHEPHERD_BROKER_TOKEN PI_SHEPHERD_AGENT_INBOX',
+      ? `export ${envPrefix}_BROKER_DIR=${shellQuote(opts.childBroker.rootDir)}\nexport ${envPrefix}_BROKER_SESSION_ID=${shellQuote(opts.childBroker.sessionId)}\nexport ${envPrefix}_BROKER_ID=${shellQuote(opts.childBroker.brokerId)}\nexport ${envPrefix}_AGENT_ID=${shellQuote(opts.childBroker.agentId)}\nexport ${envPrefix}_BROKER_TOKEN=${shellQuote(opts.childBroker.token)}\nexport ${envPrefix}_AGENT_INBOX=${shellQuote(opts.childBroker.inboxPath)}`
+      : `unset ${envPrefix}_BROKER_DIR ${envPrefix}_BROKER_SESSION_ID ${envPrefix}_BROKER_ID ${envPrefix}_AGENT_ID ${envPrefix}_BROKER_TOKEN ${envPrefix}_AGENT_INBOX`,
     opts.taskId
-      ? `export PI_SHEPHERD_TASK_ID=${shellQuote(opts.taskId)}`
-      : 'unset PI_SHEPHERD_TASK_ID',
+      ? `export ${envPrefix}_TASK_ID=${shellQuote(opts.taskId)}`
+      : `unset ${envPrefix}_TASK_ID`,
 
-    `export PI_SHEPHERD_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
+    `export ${envPrefix}_AUTO_EXIT=${opts.persistent ? 0 : 1}`,
     opts.stayOpen || opts.persistent
-      ? 'export PI_SHEPHERD_STAY_OPEN=1'
-      : 'export PI_SHEPHERD_STAY_OPEN=0',
+      ? `export ${envPrefix}_STAY_OPEN=1`
+      : `export ${envPrefix}_STAY_OPEN=0`,
     // Keep the effective child invocation visible in the spawned pane. This is
     // invaluable when a model/provider sentinel (such as "default") is rejected.
-    `printf '%s\\n' ${shellQuote(`Launching: pi ${args.join(' ')}`)}`,
-    `pi ${args.join(' ')}; echo '__SHEPHERD_DONE_'$?'__'`,
+    `printf '%s\\n' ${shellQuote(`Launching: ${binary} ${args.join(' ')}`)}`,
+    `${binary} ${args.join(' ')}; echo '__SHEPHERD_DONE_'$?'__'`,
   ].join('\n');
   fs.writeFileSync(scriptFile, launchScript, { mode: 0o700 });
   return { dir, sessionFile, scriptFile };
@@ -682,6 +700,12 @@ export function launchPiInPane(
     childBroker?: ChildCapability & { rootDir: string };
     /** Active tracked task context, when this launch is for delegated work. */
     taskId?: string;
+    /** Child CLI binary (default `'pi'`); forwarded to writePiLaunchFiles. */
+    binary?: string;
+    /** Child extension entry; forwarded to writePiLaunchFiles. */
+    extensionEntry?: string;
+    /** Env capability prefix (default `'PI_SHEPHERD'`); forwarded to writePiLaunchFiles. */
+    envPrefix?: string;
   }
 ): { dir: string; sessionFile: string; scriptFile: string } {
   const files = writePiLaunchFiles(opts);
