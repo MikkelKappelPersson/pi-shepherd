@@ -1,9 +1,11 @@
 /**
- * OpenCode server plugin entry (spec 013, Phase 2).
+ * OpenCode server plugin entry (spec 013, Phase 3).
  *
  * Registers the Shepherd tool family and the `/shepherd` command against
- * the shared engine. Phase 2 surface: spawn/status/read/close plus the
- * herd/agents/prune umbrella (delegate/message/watch arrive in Phase 3).
+ * the shared engine: spawn/delegate/message/watch/status/read/close plus
+ * the herd/agents/prune umbrella, with the child shepherd_message and
+ * shepherd_done tools served from the same surface (sheep sessions are
+ * gated out of the parent tools, parent sessions out of shepherd_done).
  * Fieldnotes parent sessions arrive in Phase 4; settings are file-based
  * for now (see the carried-forward spec question).
  */
@@ -12,14 +14,20 @@ import { Plugin } from "@opencode/plugin"
 import { installOpencodeHost } from "./host.ts"
 import {
   closeSheep,
+  delegateSheep,
   listAgents,
   listHerd,
+  messageSheep,
   pruneRegistrations,
   readSheep,
+  sheepDone,
+  sheepMessage,
   spawnSheep,
   statusSheep,
+  watchSheep,
   type OpencodeActionContext,
 } from "./actions.ts"
+import { installOpencodeBridges, isSheepSession, markParentSession } from "./bridge.ts"
 import { parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
 
 installOpencodeHost()
@@ -40,12 +48,24 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "unknown error")
 }
 
+/**
+ * Gate a parent-only tool: sheep sessions cannot orchestrate. Marks every
+ * other caller as a parent session (sheep-only tools refuse those).
+ */
+function parentOnly(sessionID: string, tool: string): void {
+  if (isSheepSession(sessionID)) {
+    throw new Error(`${tool} is not available in sheep sessions; sheep use shepherd_message and shepherd_done.`)
+  }
+  markParentSession(sessionID)
+}
+
 const PLACEMENT_DESC =
   "Optional placement: pane_right or pane_down splits the current pane, tab creates a new tab, and workspace creates a new workspace. If omitted, uses a background tab."
 
 export default Plugin.define({
   id: "shepherd",
   async setup(ctx) {
+    installOpencodeBridges(ctx)
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "shepherd",
@@ -69,6 +89,7 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd")
           const actx = await actionContext(ctx, context.sessionID)
           const action = (input as any).action
           if (action === "herd") return { content: await listHerd(actx) }
@@ -103,6 +124,7 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_spawn")
           const actx = await actionContext(ctx, context.sessionID)
           return {
             content: await spawnSheep(actx, {
@@ -131,6 +153,7 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_status")
           const actx = await actionContext(ctx, context.sessionID)
           return { content: await statusSheep(actx, { id: String((input as any).id ?? "") }) }
         },
@@ -156,6 +179,7 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_read")
           const actx = await actionContext(ctx, context.sessionID)
           return {
             content: await readSheep(actx, {
@@ -182,8 +206,166 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_close")
           const actx = await actionContext(ctx, context.sessionID)
           return { content: await closeSheep(actx, { id: String((input as any).id ?? "") }) }
+        },
+      })
+
+      editor.add({
+        name: "shepherd_delegate",
+        description:
+          "Start tracked asynchronous work on a spawned agent and return a task id immediately. The task can span runs; use shepherd_watch to observe terminal completion. Nothing settles until the sheep calls shepherd_done (or the task fails, is cancelled, or times out).",
+        input: {
+          type: "object",
+          properties: {
+            target: {
+              type: "string",
+              description: "Exact opaque agent id returned by shepherd_spawn. Never a pane id.",
+            },
+            task: { type: "string", description: "Non-empty delegated task description." },
+            timeout: {
+              type: "number",
+              description: "Optional task deadline in minutes (default 60).",
+            },
+          },
+          required: ["target", "task"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_delegate")
+          const actx = await actionContext(ctx, context.sessionID)
+          return {
+            content: await delegateSheep(actx, {
+              target: String((input as any).target ?? ""),
+              task: String((input as any).task ?? ""),
+              timeout: (input as any).timeout,
+            }),
+          }
+        },
+      })
+
+      editor.add({
+        name: "shepherd_watch",
+        description:
+          "Register a non-blocking one-shot watcher for task completions. Returns immediately; already-settled tasks are reported inline and pending completions arrive automatically. Accepts one task id or a non-empty array.",
+        input: {
+          type: "object",
+          properties: {
+            id: {
+              anyOf: [
+                { type: "string", description: "Opaque task id returned by shepherd_delegate." },
+                {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 1,
+                  description: "Non-empty array of opaque task ids.",
+                },
+              ],
+            },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          parentOnly(context.sessionID, "shepherd_watch")
+          const actx = await actionContext(ctx, context.sessionID)
+          return { content: await watchSheep(actx, { id: (input as any).id }) }
+        },
+      })
+
+      editor.add({
+        name: "shepherd_message",
+        description:
+          "Send one asynchronous message and return immediately. Parent form: target MUST be the exact opaque sheep agent id from shepherd_spawn; use expectsReply with a taskId to park the task until the reply arrives. Sheep form (delegated sheep sessions only): target parent/shepherd or a peer agent id; set taskId/replyTo from the delivered task text.",
+        input: {
+          type: "object",
+          properties: {
+            target: {
+              type: "string",
+              description:
+                "Parent form: exact opaque sheep agent id. Sheep form: parent, shepherd, or a peer agent id.",
+            },
+            message: { type: "string", description: "Non-empty message content." },
+            taskId: { type: "string", description: "Active delegated task id, when this message belongs to a task." },
+            threadId: { type: "string", description: "Conversation/thread correlation id." },
+            replyTo: { type: "string", description: "Message id of the request being answered." },
+            expectsReply: {
+              type: "boolean",
+              description: "Track this message as a request that expects a reply.",
+            },
+            delivery: {
+              type: "string",
+              enum: ["followUp", "steer"],
+              description: "Delivery mode; followUp queues passively, steer is for urgent input.",
+            },
+          },
+          required: ["target", "message"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          const actx = await actionContext(ctx, context.sessionID)
+          const args = {
+            target: String((input as any).target ?? ""),
+            message: String((input as any).message ?? ""),
+            taskId: (input as any).taskId,
+            threadId: (input as any).threadId,
+            replyTo: (input as any).replyTo,
+            expectsReply: (input as any).expectsReply,
+            delivery: (input as any).delivery,
+          }
+          if (isSheepSession(context.sessionID)) {
+            const result = await sheepMessage(actx, args, context.sessionID)
+            if (result.parentPrompt && result.parentSessionId) {
+              try {
+                await ctx.session.prompt({ sessionID: result.parentSessionId, text: result.parentPrompt })
+              } catch {
+                result.text += " (parent notice delivery failed; the message itself was accepted)"
+              }
+            }
+            return { content: result.text }
+          }
+          markParentSession(context.sessionID)
+          return { content: await messageSheep(actx, args) }
+        },
+      })
+
+      editor.add({
+        name: "shepherd_done",
+        description:
+          "Sheep-only: explicitly complete, block, or fail the current delegated task. This is the only signal that tells the parent a tracked task has finished. Include the Task ID from the delegated task text.",
+        input: {
+          type: "object",
+          properties: {
+            taskId: {
+              type: "string",
+              description: "Exact Task ID from the delegated task text (omit only to complete the sheep's open task).",
+            },
+            status: {
+              type: "string",
+              enum: ["completed", "blocked", "failed"],
+              description: "Terminal status for the delegated task.",
+            },
+            summary: {
+              type: "string",
+              description: "Concise completion, blocked, or failure summary.",
+            },
+          },
+          required: ["status"],
+          additionalProperties: false,
+        },
+        execute: async (input: any, context: any) => {
+          const actx = await actionContext(ctx, context.sessionID)
+          const result = await sheepDone(
+            actx,
+            {
+              taskId: (input as any).taskId,
+              status: String((input as any).status ?? ""),
+              summary: (input as any).summary,
+            },
+            context.sessionID
+          )
+          return { content: result.text }
         },
       })
     })
@@ -193,6 +375,7 @@ export default Plugin.define({
         name: "shepherd",
         description: "Shepherd: agents | herd | spawn <agent> | status <target> | read <target>",
         execute: async ({ sessionID, prompt }: any) => {
+          markParentSession(sessionID)
           const actx = await actionContext(ctx, sessionID)
           const raw = String(prompt?.text ?? "").trim()
           if (!raw) {

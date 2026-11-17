@@ -27,10 +27,12 @@ as before.
 **Goal**: the full delegate → watch → done loop plus mid-task questions work from OpenCode.
 **Checkpoint**: delegate while doing other work, receive completion; question → reply → resume completes.
 
-- [ ] T008 [US2] `delegate` + `watch` tools with watcher/notifier bridges and exactly-once delivery (settled results retrievable, late watchers served synchronously).
-- [ ] T009 [US2] OpenCode child `shepherd_done` tool publishing the shared `task_done` envelope (task inference, mismatch rejection, broker-unavailable error).
-- [ ] T010 [US3] Parent/peer `shepherd_message` on both sides with `expectsReply` waiting semantics, reply correlation, and the bounded done-nudge + stall escalation.
-- [ ] T011 [US2] Acceptance: unwatched completion never lost; missed deadline settles with explanation; load/duplicate completions handled per failure rules.
+- [x] T008 [US2] `delegate` + `watch` tools with watcher/notifier bridges and exactly-once delivery (settled results retrievable, late watchers served synchronously).
+- [x] T009 [US2] OpenCode child `shepherd_done` tool publishing the shared `task_done` envelope (task inference, mismatch rejection, broker-unavailable error).
+- [x] T010 [US3] Parent/peer `shepherd_message` on both sides with `expectsReply` waiting semantics, reply correlation, and the bounded done-nudge + stall escalation.
+- [ ] T011 [US2] Acceptance remainder: peer reply → resume → done end-to-end without reloads; done-nudge fires for a forgetful sheep; unknown-task done/message errors; missed deadline settles with explanation.
+  - Mechanism proven pre-restart (rose→jack reply resolved the wait; done fired the watcher). Full peer-`expectsReply` re-run pending quota reset.
+  - Post-restart "successes" were INVALID: the bench deleted the dev loader during cache-busting, so later tool output was model improvisation (t28 re-ran adapter logic via shell). Verify tool presence + side-effect artifacts (terminals, broker dirs, registry), never prose alone. Requires: loader file present, fresh server, trivial tool call first, no touches mid-test, fresh TUI sessions (TUIs hold stale catalogs across restarts).
 
 ## Phase 4 — Shared fieldnotes (US4)
 
@@ -54,6 +56,9 @@ as before.
 
 ## Later
 
+- [ ] Reload resilience: plugin reload/server restart orphans live sheep (in-memory registry, brokers, watchers reset while panes/terminals survive). Persist minimal sheep/task maps and rehydrate on setup, or document orphan-reap. Found during Phase 3 peer testing (misdiagnosed first as broker session-key rotation).
+- [ ] Multi-parent broker multiplexing: both parent brokers are process-singletons (last-writer-wins per session key), so two concurrent OpenCode parents on different backends/sessions can strand envelopes. Phase 3 verifies single-parent flows only.
+- [ ] Verification-harness hardening (fold into T016 + contributor notes): `node --check` does NOT resolve imports — add a real module-load smoke test (bun import of server.ts) so a bad import can never sit unnoticed. After every adapter change: reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test. Never touch plugin files mid-test (reloads straddle in-flight flows and orphan in-memory state). Never delete the dev loader without restoring it. Distrust model self-reports of tool absence/presence; assert on artifacts.
 - [ ] Native OpenCode session runtime (no Herdr dependency) — separate effort; Path A deliberately first.
 - [ ] OpenCode settings UI — only if the file-config default (plan Q2) proves insufficient.
 

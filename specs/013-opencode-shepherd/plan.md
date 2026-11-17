@@ -96,6 +96,15 @@ One engine, two thin adapters:
 - Children obtain Shepherd tools from the normally installed plugin (global
   install recommended, mirroring `pi install`, so any child cwd inherits
   it); no per-spawn plugin injection.
+- Parent→sheep delivery uses terminal input (Herdr `agent prompt` with a
+  `pane send-text` fallback; `hc send`), because the opencode TUI ignores
+  `--session` attach and creates its server session lazily on first input.
+  `session.prompt` is used only for parent-session notices, where the
+  session id is exactly known.
+- Operational limits (see tasks.md Later): the parent brokers are
+  process-singletons, so Phase 3 verifies single-parent flows only; and a
+  plugin reload/server restart resets in-memory orchestration state while
+  panes/terminals survive, orphaning live sheep until rehydration lands.
 - The capability handoff (broker directory, session/broker/agent ids,
   token, inbox path) keeps its file+environment-variable shape so the
   shared builder stays single-sourced; each host's surface reads it under

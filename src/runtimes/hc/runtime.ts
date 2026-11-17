@@ -266,6 +266,16 @@ function ensureBroker(sessionId?: string): ParentBroker {
   return broker;
 }
 
+/**
+ * OpenCode adapter hook: resolve (and create if needed) the hc parent
+ * broker for one parent session. Same singleton contract as the internal
+ * ensureBroker; exported so the adapter can re-register sheep after a
+ * broker rotation instead of failing sends with unknown child targets.
+ */
+export function ensureHcBroker(sessionId?: string): ParentBroker {
+  return ensureBroker(sessionId);
+}
+
 function settleTask(record: TaskRecord, settlement: Omit<TaskResultInternal, 'taskId' | 'agentId' | 'completedAt'> & { completedAt?: number }, options: HcSettleTaskOptions = {}): TaskResultInternal {
   if (record.result) return { ...record.result };
   const completedAt = settlement.completedAt ?? Date.now();
@@ -1105,6 +1115,64 @@ export function shutdownHcTaskWatchers(): void {
 export function isHcTaskId(id: unknown): boolean {
   if (typeof id !== 'string' || !id) return false;
   return tasks.has(id);
+}
+
+/**
+ * Non-contract introspection for the OpenCode adapter: mailbox handles for
+ * publishing child envelopes (message/done) as a sheep. Returns undefined
+ * when no broker or record exists (single-active-parent backend: the
+ * current broker wins).
+ */
+export function describeHcSheepMailbox(agentId: string):
+  | {
+      childCapability: ChildCapability;
+      rootDir: string;
+      sessionId: string;
+      brokerId: string;
+      parentId: string;
+    }
+  | undefined {
+  const normalized = normalizeHandleId(agentId, 'AgentHandle');
+  if (!normalized.ok) return undefined;
+  const record = agents.get(normalized.id);
+  if (!record?.childCapability || !broker || broker.closed) return undefined;
+  return {
+    childCapability: record.childCapability,
+    rootDir: broker.rootDir,
+    sessionId: broker.sessionId,
+    brokerId: broker.brokerId,
+    parentId: broker.parentId,
+  };
+}
+
+/**
+ * Non-contract introspection for the OpenCode adapter: task ownership for
+ * routing child calls (done/message) without a bound session. Returns
+ * undefined for unknown task ids.
+ */
+export function describeHcTask(
+  taskId: string
+): { taskId: string; agentId: string; state: string; description: string } | undefined {
+  const record = tasks.get(taskId);
+  if (!record) return undefined;
+  return {
+    taskId: record.taskId,
+    agentId: record.agentId,
+    state: record.state,
+    description: record.description,
+  };
+}
+
+/**
+ * Non-contract introspection for the OpenCode adapter: resolve an owned hc
+ * sheep to its terminal address for input delivery (`hc send`). Returns
+ * undefined for unknown ids or sheep without a terminal (the caller
+ * surfaces the backend's not-found error).
+ */
+export function resolveHcTerminalId(agentId: string): string | undefined {
+  const normalized = normalizeHandleId(agentId, 'AgentHandle');
+  if (!normalized.ok) return undefined;
+  return agents.get(normalized.id)?.handle.terminalId;
 }
 
 /**
