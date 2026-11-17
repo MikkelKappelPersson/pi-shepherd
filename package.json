@@ -78,6 +78,9 @@
     "status:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-status.mjs",
     "compat:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-compat.mjs"
   },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",

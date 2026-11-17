@@ -17,10 +17,10 @@ as before.
 **Goal**: an OpenCode user can herd visible sheep.
 **Checkpoint**: spawn → status → read → close works from OpenCode; unknown names and unreachable Herdr fail cleanly.
 
-- [ ] T004 [US1] OpenCode server-plugin skeleton with tool surface for `spawn`, `herd`/`agents`, `status`, `read`, `close` routed through the shared runtime resolver.
-- [ ] T005 [US1] Child boot via interactive `opencode` in pane/terminal using the parameterized builder (T002); readiness/tail reuse as-is.
-- [ ] T006 [P] [US1] Human command surface mirroring Pi's (`agents`, `herd`, `spawn`, `status`, `read`).
-- [ ] T007 [US1] Acceptance: unknown agent name, unreachable Herdr, and duplicate-label spawn all produce their specified errors.
+- [x] T004 [US1] OpenCode server-plugin skeleton with tool surface for `spawn`, `herd`/`agents`, `status`, `read`, `close` routed through the shared runtime resolver.
+- [x] T005 [US1] Child boot via interactive `opencode` in pane/terminal using the parameterized builder (T002); readiness/tail reuse as-is.
+- [x] T006 [P] [US1] Human command surface mirroring Pi's (`agents`, `herd`, `spawn`, `status`, `read`).
+- [x] T007 [US1] Acceptance: unknown agent name, unreachable Herdr, and duplicate-label spawn all produce their specified errors.
 
 ## Phase 3 — Tracked work and messaging (US2, US3)
 

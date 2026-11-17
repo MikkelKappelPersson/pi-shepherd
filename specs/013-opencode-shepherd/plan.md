@@ -86,9 +86,11 @@ One engine, two thin adapters:
 - The engine gains no host concepts: today's Pi imports in discovery/config
   (agent directory, frontmatter parser, config-dir name) become injected
   parameters with each adapter supplying its host's values.
-- The launch-file builder is parameterized by child binary and child entry
-  (`pi -e <ext>` vs interactive `opencode` with the plugin installed), so
-  Path A reuses the whole spawn/readiness/tail machinery. `opencode run`
+- The launch-file builder is parameterized by child binary, child entry,
+  env prefix, and — because the opencode CLI has no equivalent of pi's
+  session/extension flags — a full-command override (`command: 'opencode'`),
+  which skips Pi arg construction and runs verbatim. Pi callers omit all
+  four and get byte-identical scripts. `opencode run`
   is deliberately *not* used for sheep: it executes one message and exits,
   while sheep must stay alive across turns.
 - Children obtain Shepherd tools from the normally installed plugin (global

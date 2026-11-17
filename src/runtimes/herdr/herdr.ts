@@ -589,13 +589,20 @@ export function writePiLaunchFiles(opts: {
   /** Active tracked task context, when this launch is for delegated work. */
   taskId?: string;
   /**
-   * Child CLI binary (default `'pi'`). The OpenCode adapter passes its own
-   * binary; Pi callers omit this and get byte-identical scripts.
+   * Child CLI binary (default `'pi'`). Only used to build the invocation
+   * line; ignored when `command` is set.
    */
   binary?: string;
   /**
+   * Full shell command run for the child (e.g. `'opencode'`). When set,
+   * the Pi CLI arg construction is skipped and this runs verbatim (plus
+   * the exit-sentinel echo). The OpenCode adapter uses this because the
+   * opencode CLI shape has no equivalent of pi's session/extension flags.
+   */
+  command?: string;
+  /**
    * Absolute path to the child extension entry (default: shepherd-done.ts).
-   * The OpenCode adapter passes its own child plugin entry.
+   * Only used when building the Pi CLI invocation.
    */
   extensionEntry?: string;
   /**
@@ -643,6 +650,8 @@ export function writePiLaunchFiles(opts: {
 
   const trimmedLabel = opts.label?.trim() ?? '';
   const displayName = trimmedLabel ? `${opts.name}: ${trimmedLabel}` : opts.name;
+  // Full-command override (other hosts) runs verbatim; otherwise build the Pi CLI.
+  const invocation = opts.command ?? `${binary} ${args.join(' ')}`;
   const launchScript = [
     '#!/bin/bash',
     `export ${envPrefix}_SESSION=${shellQuote(sessionFile)}`,
@@ -666,8 +675,8 @@ export function writePiLaunchFiles(opts: {
       : `export ${envPrefix}_STAY_OPEN=0`,
     // Keep the effective child invocation visible in the spawned pane. This is
     // invaluable when a model/provider sentinel (such as "default") is rejected.
-    `printf '%s\\n' ${shellQuote(`Launching: ${binary} ${args.join(' ')}`)}`,
-    `${binary} ${args.join(' ')}; echo '__SHEPHERD_DONE_'$?'__'`,
+    `printf '%s\\n' ${shellQuote(`Launching: ${invocation}`)}`,
+    `${invocation}; echo '__SHEPHERD_DONE_'$?'__'`,
   ].join('\n');
   fs.writeFileSync(scriptFile, launchScript, { mode: 0o700 });
   return { dir, sessionFile, scriptFile };
@@ -702,6 +711,8 @@ export function launchPiInPane(
     taskId?: string;
     /** Child CLI binary (default `'pi'`); forwarded to writePiLaunchFiles. */
     binary?: string;
+    /** Full shell command for the child; forwarded to writePiLaunchFiles. */
+    command?: string;
     /** Child extension entry; forwarded to writePiLaunchFiles. */
     extensionEntry?: string;
     /** Env capability prefix (default `'PI_SHEPHERD'`); forwarded to writePiLaunchFiles. */

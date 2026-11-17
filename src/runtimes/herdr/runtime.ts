@@ -52,6 +52,16 @@ export interface HerdrRuntimeContext {
   sessionId?: string;
   /** Parent fieldnotes session, resolved by the calling surface. */
   artifactSession?: ShepherdSession;
+  /**
+   * Child launch overrides (binary/command/env prefix). The Pi path omits
+   * this; other hosts pass their own CLI shape here.
+   */
+  launch?: {
+    binary?: string;
+    extensionEntry?: string;
+    envPrefix?: string;
+    command?: string;
+  };
 }
 
 function toProcState(state: AgentLifecycleState): RuntimeProcState {
@@ -142,6 +152,7 @@ export function createHerdrRuntime(context: HerdrRuntimeContext = {}): ShepherdR
           placement: opts.placement,
           cwd: opts.cwd,
           artifactSession: context.artifactSession,
+          ...(context.launch ? { launch: context.launch } : {}),
         },
         execContext
       );

@@ -129,6 +129,16 @@ export interface StartOptions {
   label?: string;
   /** Internal parent-bound artifact session, resolved by the parent tool. */
   artifactSession?: ShepherdSession;
+  /**
+   * Child launch overrides. The Pi path omits this (Pi CLI defaults);
+   * other hosts pass their binary/command and env prefix here.
+   */
+  launch?: {
+    binary?: string;
+    extensionEntry?: string;
+    envPrefix?: string;
+    command?: string;
+  };
 }
 
 export async function startAgent(
@@ -215,6 +225,13 @@ export async function startAgent(
       model: delegatedModel,
       thinking: delegatedThinking,
       tools: found.tools,
+      // Host launch overrides (other hosts boot their own CLI); Pi omits.
+      ...(options.launch?.binary !== undefined ? { binary: options.launch.binary } : {}),
+      ...(options.launch?.extensionEntry !== undefined
+        ? { extensionEntry: options.launch.extensionEntry }
+        : {}),
+      ...(options.launch?.envPrefix !== undefined ? { envPrefix: options.launch.envPrefix } : {}),
+      ...(options.launch?.command !== undefined ? { command: options.launch.command } : {}),
     });
     setCreatedPaneDir(paneId, files.dir);
     // Keep the launch directory registered while the persistent child is alive;

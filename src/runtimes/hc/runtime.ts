@@ -94,6 +94,16 @@ export interface HcRuntimeContext {
   sessionId?: string;
   /** Parent fieldnotes session, resolved by the calling surface. */
   artifactSession?: ShepherdSession;
+  /**
+   * Child launch overrides (binary/command/env prefix). The Pi path omits
+   * this; other hosts pass their own CLI shape here.
+   */
+  launch?: {
+    binary?: string;
+    extensionEntry?: string;
+    envPrefix?: string;
+    command?: string;
+  };
 }
 
 export class HcRuntimeError extends Error {
@@ -1384,6 +1394,15 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
           model: delegatedModel,
           thinking: delegatedThinking,
           tools: found.tools,
+          // Host launch overrides (other hosts boot their own CLI); Pi omits.
+          ...(context.launch?.binary !== undefined ? { binary: context.launch.binary } : {}),
+          ...(context.launch?.extensionEntry !== undefined
+            ? { extensionEntry: context.launch.extensionEntry }
+            : {}),
+          ...(context.launch?.envPrefix !== undefined
+            ? { envPrefix: context.launch.envPrefix }
+            : {}),
+          ...(context.launch?.command !== undefined ? { command: context.launch.command } : {}),
         });
         const ready = await waitForHcAgentDetected(launched.terminalId, { timeoutMs: 20_000 });
         if (!ready.detected) {
