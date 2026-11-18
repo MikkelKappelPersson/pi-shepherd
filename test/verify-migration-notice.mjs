@@ -59,6 +59,11 @@ assert.match(readme, /Farewell to `@luminascale\/pi-shepherd`/);
 assert.ok(readme.includes(NEW_PACKAGE_NAME), 'README banner names the new package');
 const indexSource = fs.readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
 assert.match(indexSource, /migrationNoticeOnce\(\)/);
+assert.match(
+  indexSource,
+  /customType: 'shepherd-migration-notice'[\s\S]{0,180}deliverAs: 'followUp'/,
+  'Pi notice uses followUp delivery so an idle session renders it without a turn'
+);
 const serverSource = fs.readFileSync(new URL('../src/opencode/server.ts', import.meta.url), 'utf8');
 assert.match(serverSource, /migrationNoticeOnce\(\)/);
 assert.match(serverSource, /!isSheepSession\(sessionID\)/, 'OpenCode notice is human-only');
