@@ -1,6 +1,6 @@
 {
   "name": "@luminascale/shepherd",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "type": "module",
   "description": "🐑 No-fuss herdr native subagent orchestration 🐑 (Pi + OpenCode)",
   "exports": {
@@ -9,13 +9,13 @@
     "./package.json": "./package.json"
   },
   "license": "Apache-2.0",
-  "homepage": "https://github.com/MikkelKappelPersson/pi-shepherd#readme",
+  "homepage": "https://github.com/MikkelKappelPersson/shepherd#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MikkelKappelPersson/pi-shepherd.git"
+    "url": "git+https://github.com/MikkelKappelPersson/shepherd.git"
   },
   "bugs": {
-    "url": "https://github.com/MikkelKappelPersson/pi-shepherd/issues"
+    "url": "https://github.com/MikkelKappelPersson/shepherd/issues"
   },
   "keywords": [
     "pi-package",

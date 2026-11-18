@@ -162,10 +162,13 @@ One engine, two thin adapters:
 - Functional identifiers stay frozen across the rename: `shepherd_*` tool
   names, the env-capability prefix and fields, and the user config/registry
   paths. Only the npm package name changes.
-- Release ordering around the rename: the farewell release (one-time
-  migration notice behind a marker file, human sessions only, plus README
-  banner and `npm deprecate` pointer) ships on the old name *before* the
-  rename lands — never after.
+- Release ordering around the rename: the old name still gets one final
+  notice-bearing release (`@luminascale/pi-shepherd@0.5.2`) and is then
+  deprecated with a pointer. The renamed package
+  (`@luminascale/shepherd@0.6.0`) is published **first**, so the pointer in
+  the notice and the deprecation warning resolves to a real install target.
+  The one-time notice is marker-gated, human-sessions-only, and never emitted
+  in a child sheep pane.
 
 ## Failure behavior
 

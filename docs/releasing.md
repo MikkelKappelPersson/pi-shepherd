@@ -17,15 +17,18 @@ harnesses.
       if OpenCode-only, verify zero `src/extension/`, `index.ts`, or Pi entry
       edits. Shared `src/core/`, `src/runtimes/`, packaging, and docs changes
       are cross-host and must be called out for both.
-- [ ] For the farewell/rename pair, follow the strict order in
-      `specs/013-opencode-shepherd/tasks.md`: T018 (migration notice on the old
-      name) ships **before** T019 (the `@luminascale/shepherd` rename).
-      The farewell release publishes the last `@luminascale/pi-shepherd`
-      version **first**, then marks it deprecated with a pointer:
-      `npm deprecate @luminascale/pi-shepherd@<farewell-version> "Moved to @luminascale/shepherd"`.
-      Only after that may the renamed package be published. The one-time
-      notice is gated by a per-host marker file and is never emitted in a
-      child sheep process.
+- [ ] For the farewell/rename pair, publish the **new package first** so the
+      migration pointer is never a 404:
+      1. Publish `@luminascale/shepherd@<new-version>` (`0.6.0` for the rename).
+      2. Publish the final old-name release from a short-lived release branch
+         or worktree that restores `"name": "@luminascale/pi-shepherd"` and
+         sets `0.5.2`. Its notice is gated by a per-host marker file and is
+         never emitted in a child sheep process.
+      3. Deprecate the old name with a pointer:
+         `npm deprecate @luminascale/pi-shepherd@0.5.2 "Moved to @luminascale/shepherd"`.
+      T018 still means the old name gets its final notice-bearing release and
+      is deprecated; T019 is the new package name. The user-facing ordering
+      requirement is that the pointer target exists before the pointer ships.
 - [ ] Publish and confirm the install path from each host's own docs:
       `pi install npm:<package>` and the OpenCode `plugins` entry.
 

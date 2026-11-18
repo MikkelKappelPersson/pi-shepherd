@@ -110,7 +110,7 @@ as before.
   - `scripts/host-impact.mjs` classifies a git range (or `--files`) into
     Pi-only / OpenCode-only / shared / docs and prints the verdict;
     `test/verify-host-impact.mjs` covers every verdict plus the checklist.
-- [x] T018 [US5] Farewell release on the old name: one-time migration notice (marker file; human sessions only; never in child sheep panes), README banner, publish `@luminascale/pi-shepherd` last, then `npm deprecate` with pointer to the new name. Ships before T019.
+- [x] T018 [US5] Farewell release on the old name: one-time migration notice (marker file; human sessions only; never in child sheep panes), README banner, final old-name publish plus `npm deprecate` with pointer to the new name. The old name gets its final notice-bearing release (`0.5.2`); the new package (`0.6.0`) is published first so the pointer is never a 404. See the revised ordering in `plan.md` and `docs/releasing.md`.
   - `src/core/migration.ts` emits a one-time, display-only notice gated by a
     per-host marker (`<agentDir>/pi-shepherd/migration-notice.json`). Child
     processes (`PI_SHEPHERD_SESSION` / `SHEPHERD_TASK_ID`) never see or consume
@@ -168,7 +168,7 @@ as before.
       walkthrough needs a new, explicitly designed cross-host binding key
       (on both adapters, without regressing Pi) — budget it as a separate
       feature rather than forcing it into this handoff. Tracked as
-      [GH #19](https://github.com/MikkelKappelPersson/pi-shepherd/issues/19).
+      [GH #19](https://github.com/MikkelKappelPersson/shepherd/issues/19).
 - [x] Verification-harness hardening (folded into T016 + contributor notes): the OpenCode suite loads `src/opencode/server.ts` for real via `verify-opencode-surface.mjs` (a bad import can no longer sit unnoticed), and `npm test` gates both suites. The live-testing rules remain in force for human handoffs: after every adapter change reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test; never touch plugin files mid-test; never delete the dev loader without restoring it; distrust model self-reports of tool presence and assert on artifacts.
 - [ ] Native OpenCode session runtime (no Herdr dependency) — separate effort; Path A deliberately first.
 - [ ] OpenCode settings UI — only if the file-config default (plan Q2) proves insufficient.

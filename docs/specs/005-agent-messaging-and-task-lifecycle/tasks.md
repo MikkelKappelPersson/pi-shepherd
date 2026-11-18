@@ -387,7 +387,7 @@ This checklist tracks implementation of:
 - [x] Map deadline expiry to task timeout.
 - [x] Preserve useful child output in failure results; deferred to the
       completion diagnostics follow-up tracked in
-      https://github.com/MikkelKappelPersson/pi-shepherd/issues/11 (spec closed
+      https://github.com/MikkelKappelPersson/shepherd/issues/11 (spec closed
       with this item intentionally outstanding).
 - [x] Ensure persistent children remain open after successful task completion.
 

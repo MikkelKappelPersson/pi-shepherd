@@ -3,7 +3,7 @@
 ## Session state
 
 - Branch: `feat/005-agent-messaging-and-task-lifecycle`
-- Repository: `MikkelKappelPersson/pi-shepherd`
+- Repository: `MikkelKappelPersson/shepherd`
 - Current HEAD: tip of the feature branch — `b2c3b59` plus the Phase 5 failure-test commit and this handoff update (hashes shift when this doc changes; use `git log --oneline`)
 - Working tree: contains the Phase 11 launch-tool fix, verification updates, and documentation/checklist edits
 - Last full verification: `npm test` passed with zero failures
@@ -555,7 +555,7 @@ test passes live, including watcher-completion delivery before cleanup
 Deferred work is tracked out-of-band rather than left open in this spec:
 
 - Preserve useful child output in failure results —
-  https://github.com/MikkelKappelPersson/pi-shepherd/issues/11
+  https://github.com/MikkelKappelPersson/shepherd/issues/11
 
 Housekeeping at close: the spec directory moved from
 `docs/specs/001-agent-messaging-and-task-lifecycle` to

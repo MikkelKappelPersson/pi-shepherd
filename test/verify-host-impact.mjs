@@ -38,7 +38,9 @@ for (const item of [
   'host-impact',
   'Pi impact',
   'OpenCode impact',
-  'ships **before**',
+  'new package first',
+  '0.6.0',
+  '0.5.2',
 ]) {
   assert.ok(checklist.includes(item), `release checklist covers: ${item}`);
 }
