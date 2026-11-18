@@ -1,12 +1,16 @@
 # Shepherd
 
-> **Farewell to `@luminascale/pi-shepherd`.** This is the last release under
-> the old name. Shepherd is moving to **`@luminascale/shepherd`**; when you are
-> ready, install the new package — settings, agent definitions, registrations,
-> and fieldnotes carry over with no manual migration. The one-time notice you
-> see in your host session points to the same place.
+A no-fuss extension for native Herdr agent orchestration, in Pi or OpenCode.
 
-Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
+Your main session — the Shepherd — launches and coordinates specialist agents
+in visible Herdr panes, with shared session fieldnotes so agents can pass
+context across delegated work. One package, two host entry points — no setup
+steps from the other host, no imposed workflow; just inspectable, low-level tools.
+
+```text
+pi install npm:@luminascale/shepherd   # Pi; OpenCode: add to "plugins" in opencode.json
+/shepherd agents                       # verify after restart, in either host
+```
 
 ## Choose your host
 

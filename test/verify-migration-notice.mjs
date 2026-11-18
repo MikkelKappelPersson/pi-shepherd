@@ -55,8 +55,8 @@ assert.equal(migrationNoticeOnce(), undefined);
 console.log('PASS marker is per host user, not global');
 
 const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-assert.match(readme, /Farewell to `@luminascale\/pi-shepherd`/);
-assert.ok(readme.includes(NEW_PACKAGE_NAME), 'README banner names the new package');
+assert.doesNotMatch(readme, /Farewell to `@luminascale\/pi-shepherd`/, 'farewell banner is retired');
+assert.ok(readme.includes(NEW_PACKAGE_NAME), 'README documents the new package name');
 const indexSource = fs.readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
 assert.match(indexSource, /migrationNoticeOnce\(\)/);
 assert.match(
@@ -69,6 +69,6 @@ assert.match(serverSource, /migrationNoticeOnce\(\)/);
 assert.match(serverSource, /!isSheepSession\(sessionID\)/, 'OpenCode notice is human-only');
 const releasing = fs.readFileSync(new URL('../docs/releasing.md', import.meta.url), 'utf8');
 assert.match(releasing, /npm deprecate @luminascale\/pi-shepherd/);
-console.log('PASS both hosts, README banner, and release ordering are wired');
+console.log('PASS both hosts, README, and release ordering are wired');
 
 console.log('\nAll migration-notice assertions passed.');
