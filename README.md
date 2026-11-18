@@ -49,6 +49,7 @@ OpenCode differences:
 - Human `/shepherd …` command output is display-only — it renders in full and returns control without starting an assistant turn.
 - Completion notices arrive as normal parent-session messages that wake the model.
 - Fieldnotes are bound to the OpenCode session id and the session's working directory, on the same `.shepherd/sessions/` layout Pi uses.
+- After an OpenCode server restart, sheep keep running but their opaque ids are lost. You get one display-only notice listing the orphaned sheep; use `shepherd({ action: "reap" })` to close them safely (or respawn and close the old panes). Fieldnotes and queued envelopes remain on disk until reaped.
 
 ## Key Features
 

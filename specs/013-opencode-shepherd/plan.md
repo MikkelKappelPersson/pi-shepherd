@@ -107,10 +107,15 @@ One engine, two thin adapters:
   session id is exactly known; human `/shepherd` command output instead uses
   `session.prompt(..., resume: false)` so it renders in full without waking
   the model.
-- Operational limits (see tasks.md Later): the parent brokers are
-  process-singletons, so Phase 3 verifies single-parent flows only; and a
-  plugin reload/server restart resets in-memory orchestration state while
-  panes/terminals survive, orphaning live sheep until rehydration lands.
+- Operational limits (see tasks.md Later): one active parent session per
+  OpenCode server process is a deliberate, engine-wide boundary (broker
+  singletons, session-keyed registry rotation, one drain timer/poll key),
+  not a broker-only limitation; sheep of one parent never collide. Phase 3
+  verifies single-parent flows only. A plugin reload/server restart resets
+  in-memory orchestration state while panes/terminals survive; the adapter
+  detects those orphans from the ownership registries, notifies once, and
+  offers an ownership-checked `reap` action. Tracked tasks and watchers do
+  not survive a restart.
   Completion notices are delivered only to sessions that were recorded as
   task parents (never to sheep sessions), with bounded retry when the parent
   session is busy. Sheep session binding wins over a stale parent mark so a

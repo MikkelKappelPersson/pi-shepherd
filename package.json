@@ -60,6 +60,7 @@
     "host-impact:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-host-impact.mjs",
     "migration-notice:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-migration-notice.mjs",
     "rename-migration:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-rename-migration.mjs",
+    "opencode-orphans:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-opencode-orphans.mjs",
     "launch:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-launch.mjs",
     "effective-prompt:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-effective-prompt.mjs",
     "registry:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-registry.mjs",

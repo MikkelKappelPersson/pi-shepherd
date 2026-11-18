@@ -26,6 +26,7 @@ const OPENCODE_SUITE = new Set([
   'host-impact:test',
   'migration-notice:test',
   'rename-migration:test',
+  'opencode-orphans:test',
 ]);
 
 const suite = process.argv[2];

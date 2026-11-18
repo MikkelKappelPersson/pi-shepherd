@@ -62,7 +62,12 @@ for (const [name, tool] of tools) {
 }
 console.log('PASS FR-001: plugin registers the full Shepherd tool family');
 
-assert.deepEqual(tools.get('shepherd').input.properties.action.enum, ['herd', 'agents', 'prune']);
+assert.deepEqual(tools.get('shepherd').input.properties.action.enum, [
+  'herd',
+  'agents',
+  'prune',
+  'reap',
+]);
 assert.equal(commands.size, 1, 'one human command');
 assert.equal(commands.get('shepherd').name, 'shepherd');
 const placement = tools.get('shepherd_spawn').input.properties.placement.description;

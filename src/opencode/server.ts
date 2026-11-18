@@ -32,6 +32,7 @@ import { installOpencodeBridges, isSheepSession, markParentSession } from "./bri
 import { parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
 import { displayCommandOutput } from "./display.ts"
 import { migrationNoticeOnce } from "../core/migration.ts"
+import { noticeNewOrphans, reapOrphans } from "./orphans.ts"
 
 installOpencodeHost()
 
@@ -85,18 +86,22 @@ export default Plugin.define({
   id: "shepherd",
   async setup(ctx) {
     installOpencodeBridges(ctx)
+    // A reload loses in-memory sheep state but not the owned panes/terminals.
+    // Surface them once per orphan set; never block tool registration on it.
+    void noticeNewOrphans(ctx)
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "shepherd",
         description:
-          "Shepherd control plane: list the live herd (agents in Herdr panes), list available agent definitions, or prune stale pane registrations. Lifecycle operations are separate tools: shepherd_spawn, shepherd_status, shepherd_read, shepherd_close.",
+          "Shepherd control plane: list the live herd (agents in Herdr panes), list available agent definitions, prune stale registrations, or reap sheep orphaned by a server restart. Lifecycle operations are separate tools: shepherd_spawn, shepherd_status, shepherd_read, shepherd_close.",
         input: {
           type: "object",
           properties: {
             action: {
               type: "string",
-              enum: ["herd", "agents", "prune"],
-              description: "herd: live agents. agents: definitions. prune: drop stale registrations.",
+              enum: ["herd", "agents", "prune", "reap"],
+              description:
+                "herd: live agents. agents: definitions. prune: drop stale registrations. reap: close sheep orphaned by a server restart.",
             },
             agentScope: {
               type: "string",
@@ -114,6 +119,7 @@ export default Plugin.define({
           if (action === "herd") return { content: await listHerd(actx) }
           if (action === "agents")
             return { content: await listAgents(actx, { agentScope: (input as any).agentScope }) }
+          if (action === "reap") return { content: reapOrphans(context.sessionID) }
           return { content: await pruneRegistrations(actx) }
         },
       })

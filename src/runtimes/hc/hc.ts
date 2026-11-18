@@ -287,6 +287,15 @@ export function forgetCreatedTerminal(terminalId: string): void {
   saveCreatedTerminals(loadCreatedTerminals().filter(t => t.terminalId !== terminalId));
 }
 
+/** Drop one registry entry only when its recorded owner matches (orphan reap). */
+export function forgetOwnedTerminal(terminalId: string, ownerSession?: string): boolean {
+  const entry = loadCreatedTerminals().find(t => t.terminalId === terminalId);
+  if (!entry || (ownerSession && terminalOwner(entry) !== ownerSession)) return false;
+  removeCreatedTerminalDir(terminalId);
+  forgetCreatedTerminal(terminalId);
+  return true;
+}
+
 /**
  * Attach (or overwrite) the temp launch dir for an existing terminal so that
  * close can clean it up. The terminal is recorded early (for orphan safety)

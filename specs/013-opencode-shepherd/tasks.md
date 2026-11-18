@@ -134,13 +134,39 @@ as before.
 ## Later
 
 - [x] Watcher completion notices must reach only human parent sessions, never a sheep pane, and must survive a transient parent-busy failure (found in live T011, 2026-11-18). `src/opencode/bridge.ts`: `noteTaskParent` and `promptParent` both reject sheep sessions; `promptParent` retries up to 3 times with backoff and logs on exhaustion instead of silently dropping. Regression: `test/verify-opencode-notice.mjs`. **Live-verified 2026-11-18:** completion notice landed in the parent session.
-- [ ] Reload resilience: plugin reload/server restart orphans live sheep (in-memory registry, brokers, watchers reset while panes/terminals survive). Persist minimal sheep/task maps and rehydrate on setup, or document orphan-reap. Found during Phase 3 peer testing (misdiagnosed first as broker session-key rotation). Recurred in live T011 2026-11-18: a handA spawned before the OpenCode restart was orphaned; a fresh spawn was required.
-- [ ] Multi-parent broker multiplexing: both parent brokers are process-singletons (last-writer-wins per session key), so two concurrent OpenCode parents on different backends/sessions can strand envelopes. Phase 3 verifies single-parent flows only. **Narrowed 2026-11-18:** the specific peer-reply failure seen in T011 was NOT this limit — it was a stale parent mark on a sheep session (fixed below). Re-evaluate whether this broader limit is still observable before budgeting a redesign.
+- [x] Reload resilience — **implemented the "document orphan-reap" option** (2026-11-18). Full rehydration would require restoring opaque-id tokens, broker singletons, task deadlines, reply correlation, watcher queues, and HC generation ids across the shared engine; the supported one-parent-per-process boundary makes that a redesign. Instead, `src/opencode/orphans.ts` detects live owned panes/terminals that have no in-memory `SheepRecord` after a reload, prunes confirmed-gone entries, and emits one display-only notice per distinct orphan set (marker: `orphan-notices.json` in the host data dir; native ids never leak). The `shepherd` tool gained `action: "reap"`, which closes only transports still recorded in the ownership registries for the calling session, then clears their entries and launch dirs. Regression: `test/verify-opencode-orphans.mjs` (fake Herdr/hc, isolated HOME) covers detection, one-time notice, new-orphan notice, reap, launch-dir cleanup, and cross-session protection. **Scope:** tracked tasks/watchers do not survive a restart; orphans are reported and reaped, not reattached. README documents the behavior.
+- [x] Multi-parent broker multiplexing — **re-evaluated 2026-11-18, closed as a
+      documented non-issue for supported flows.** The broker caches are
+      process-singletons keyed by the parent session id (Herdr
+      `ensureParentBroker`, hc `ensureBroker`), and a session switch creates a
+      new broker rootDir. Interleaving two parent sessions in one server
+      process can strand the other session's envelopes, but the whole engine
+      — not just the brokers — is one-parent-per-process: `beginSession`
+      clears watchers and retires opaque ids, the Herdr drain timer and hc
+      poller each track one key, and hc ids carry a process-wide
+      `generationId`. None of the micro-fixes work in isolation: removing the
+      cache would mint a fresh empty mailbox per call, keying by root path is
+      impossible before `createParentBroker` generates it, and a per-session
+      broker map alone would still lose watchers and one-sided drains. Sheep
+      of different parents cannot collide at the broker layer — unique
+      rootDirs, broker ids, and capability validation reject cross-parent
+      addressing. All supported flows (one parent, many sheep, peer replies,
+      done-nudge, watcher notices) are covered and live-verified. If
+      multi-parent concurrency becomes a requirement, it is a separate spec
+      covering broker maps, deterministic roots, session-keyed registries and
+      watchers, per-session timers, and capability survival — not a broker
+      patch.
 - [x] Sheep sessions that call a parent-only tool before binding must not be permanently misclassified as parents (found in live T011 re-run, 2026-11-18: verbatim from handB — "this session was not bound as a delegated sheep session, so the tool fell back to the parent form and returned Unknown child target"). `src/opencode/bridge.ts`: `markParentSession` no-ops for known sheep, `isParentSession` returns false for known sheep, `bindChildSession` clears stale parent marks. Regression in `test/verify-opencode-notice.mjs`. **Live-verified 2026-11-18:** handB replied via `shepherd_message` (zero shell calls), handA called `shepherd_done` completed, watcher completion reached the parent.
-- [ ] Optional live T013 walkthrough: two host TUIs in one project with a
-      shared opaque parent identity, confirming a second sheep reads the first
-      host's note from the shared MOC. The resolver/artifact layer is already
-      covered by `test/verify-cross-host-notes.mjs`.
+- [ ] Optional live T013 walkthrough — **blocked on a product decision, not
+      on test infrastructure.** Cross-host sharing requires both hosts to
+      present the same opaque parent identity; Pi uses its session id and
+      OpenCode uses its session id, and neither public tool surface exposes an
+      identity override. `test/verify-cross-host-notes.mjs` proves the shared
+      layout works when the identity matches, but there is currently no
+      supported way to arrange that in two live host sessions. Enabling this
+      walkthrough needs a new, explicitly designed cross-host binding key
+      (on both adapters, without regressing Pi) — budget it as a separate
+      feature rather than forcing it into this handoff.
 - [x] Verification-harness hardening (folded into T016 + contributor notes): the OpenCode suite loads `src/opencode/server.ts` for real via `verify-opencode-surface.mjs` (a bad import can no longer sit unnoticed), and `npm test` gates both suites. The live-testing rules remain in force for human handoffs: after every adapter change reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test; never touch plugin files mid-test; never delete the dev loader without restoring it; distrust model self-reports of tool presence and assert on artifacts.
 - [ ] Native OpenCode session runtime (no Herdr dependency) — separate effort; Path A deliberately first.
 - [ ] OpenCode settings UI — only if the file-config default (plan Q2) proves insufficient.

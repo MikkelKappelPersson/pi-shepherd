@@ -297,6 +297,14 @@ export function bindChildSession(agentId: string, childSessionId: string): void 
   parentSessions.delete(childSessionId);
 }
 
+/** True when a pane/terminal transport belongs to a currently managed sheep. */
+export function isManagedTransport(id: string): boolean {
+  for (const record of sheepByAgent.values()) {
+    if (record.paneId === id || record.terminalId === id) return true;
+  }
+  return false;
+}
+
 /** Resolve a sheep's agent from its bound session, if any. */
 function agentForSession(sessionId: string): SheepRecord | undefined {
   const agentId = childSessionToAgent.get(sessionId);

@@ -347,6 +347,19 @@ function forgetCreatedPane(paneId: string): void {
 }
 
 /**
+ * Drop one registry entry only when its recorded owner matches. Used by the
+ * orphan-reap path after a reload: the pane id comes from the on-disk
+ * registry, never from a tool argument, and ownership is re-checked here.
+ */
+export function forgetOwnedPane(paneId: string, ownerSession?: string): boolean {
+  const entry = loadCreatedPanes().find(p => p.paneId === paneId);
+  if (!entry || (ownerSession && paneOwner(entry) !== ownerSession)) return false;
+  removeCreatedPaneDir(paneId);
+  forgetCreatedPane(paneId);
+  return true;
+}
+
+/**
  * Attach (or overwrite) the temp launch dir for an existing pane so that
  * `shepherd close` can clean it up. The pane is registered early (for orphan
  * safety) but its launch dir is only known once pi is booted, so we set it
