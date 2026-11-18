@@ -8,10 +8,10 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-666666?labelColor=333333" alt="Apache-2.0 license" /></a>
-  <a href="https://github.com/MikkelKappelPersson/shepherd/stargazers"><img src="https://img.shields.io/github/stars/MikkelKappelPersson/shepherd?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/MikkelKappelPersson/shepherd/releases/latest"><img src="https://img.shields.io/github/v/release/MikkelKappelPersson/shepherd?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
-  <a href="https://www.npmjs.com/package/@luminascale/shepherd"><img src="https://img.shields.io/npm/v/%40luminascale%2Fshepherd?label=npm&labelColor=333333&color=666666&logo=npm" alt="npm version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0" alt="Apache-2.0 license" /></a>
+  <a href="https://github.com/MikkelKappelPersson/shepherd/stargazers"><img src="https://img.shields.io/github/stars/MikkelKappelPersson/shepherd?logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/MikkelKappelPersson/shepherd/releases/latest"><img src="https://img.shields.io/github/v/release/MikkelKappelPersson/shepherd?label=release" alt="latest stable release" /></a>
+  <a href="https://www.npmjs.com/package/@luminascale/shepherd"><img src="https://img.shields.io/npm/v/%40luminascale%2Fshepherd?label=npm&logo=npm" alt="npm version" /></a>
 </p>
 
 Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
