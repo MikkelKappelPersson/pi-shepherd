@@ -65,12 +65,12 @@ execFileSync('npm', ['install', tarball, '--legacy-peer-deps', '--no-audit', '--
 });
 const resolved = execFileSync(
   process.execPath,
-  ['--input-type=module', '-e', 'console.log(import.meta.resolve("@luminascale/pi-shepherd"))'],
+  ['--input-type=module', '-e', 'console.log(import.meta.resolve("@luminascale/shepherd"))'],
   { cwd: consumer, encoding: 'utf8' }
 ).trim();
 assert.match(resolved, /src[\\/]opencode[\\/]server\.ts$/, 'bare import resolves to the OpenCode plugin');
 const installedManifest = JSON.parse(
-  fs.readFileSync(path.join(consumer, 'node_modules', '@luminascale', 'pi-shepherd', 'package.json'), 'utf8')
+  fs.readFileSync(path.join(consumer, 'node_modules', '@luminascale', 'shepherd', 'package.json'), 'utf8')
 );
 assert.deepEqual(
   installedManifest.pi.extensions,

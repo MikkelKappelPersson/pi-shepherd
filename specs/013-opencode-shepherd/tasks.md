@@ -93,10 +93,43 @@ as before.
     OpenCode file-based config and display-only command output).
   - `test/verify-host-docs.mjs` guards the first-screen split and the OpenCode
     `plugins` config snippet. Full suite: 657 PASS (exit 0).
-- [ ] T016 [US5] Mirrored OpenCode verification harness covering FR-001–FR-004; both harnesses run on every change.
-- [ ] T017 [US5] Release checklist: per-host impact notes; Pi-only change ships with zero OpenCode-side edits (and vice versa).
-- [ ] T018 [US5] Farewell release on the old name: one-time migration notice (marker file; human sessions only; never in child sheep panes), README banner, publish `@luminascale/pi-shepherd` last, then `npm deprecate` with pointer to the new name. Ships before T019.
-- [ ] T019 [US6] Rename package to `@luminascale/shepherd` (manifest + URLs; FR-013); verify old-install → remove → new-install keeps settings and herd (SC-005).
+- [x] T016 [US5] Mirrored OpenCode verification harness covering FR-001–FR-004; both harnesses run on every change.
+  - `scripts/verify-suites.mjs` derives the Pi (36 scripts) and OpenCode
+    (11 scripts) suites from `package.json`; `npm test` chains both, and a new
+    `*:test` script cannot silently escape them.
+  - `test/verify-opencode-surface.mjs` loads the real plugin module (module-load
+    smoke test) and drives `setup` with a fake host, asserting the full tool
+    family, visible-pane launch overrides, child-only completion, and
+    watcher/notice isolation (FR-001–FR-004). This absorbs the harness-hardening
+    "Later" item. Full suite: 661 PASS (exit 0).
+- [x] T017 [US5] Release checklist: per-host impact notes; Pi-only change ships with zero OpenCode-side edits (and vice versa).
+  - `docs/releasing.md` requires both suites green, explicit per-host impact
+    lines, and the T018-before-T019 release order including the `npm deprecate`
+    pointer.
+  - `scripts/host-impact.mjs` classifies a git range (or `--files`) into
+    Pi-only / OpenCode-only / shared / docs and prints the verdict;
+    `test/verify-host-impact.mjs` covers every verdict plus the checklist.
+- [x] T018 [US5] Farewell release on the old name: one-time migration notice (marker file; human sessions only; never in child sheep panes), README banner, publish `@luminascale/pi-shepherd` last, then `npm deprecate` with pointer to the new name. Ships before T019.
+  - `src/core/migration.ts` emits a one-time, display-only notice gated by a
+    per-host marker (`<agentDir>/pi-shepherd/migration-notice.json`). Child
+    processes (`PI_SHEPHERD_SESSION` / `SHEPHERD_TASK_ID`) never see or consume
+    it. Wired into Pi `session_start` and the OpenCode command output path;
+    README banner and the deprecated-publish/deprecate ordering added.
+  - `test/verify-migration-notice.mjs` covers once-only, per-host markers,
+    child suppression, and both host entry points.
+  - Operator note: the actual last old-name publish + `npm deprecate` remain a
+    release action documented in `docs/releasing.md`; this commit carries the
+    code/docs that must ship in it.
+- [x] T019 [US6] Rename package to `@luminascale/shepherd` (manifest + URLs; FR-013); verify old-install → remove → new-install keeps settings and herd (SC-005).
+  - Manifest name is now `@luminascale/shepherd`; README install commands and
+    packaging tests updated. Repository URLs stay on the `pi-shepherd` repo,
+    which is unchanged. All functional identifiers stay frozen: `shepherd_*`
+    tool names, `SHEPHERD_`/`PI_SHEPHERD_` env prefixes, `pi-shepherd` user data
+    dir, and `.shepherd/config.json`.
+  - `test/verify-rename-migration.mjs` simulates old-install → remove →
+    new-install with isolated HOME and asserts settings and the created-pane
+    registry are read intact from the frozen paths. Full suite: 670 PASS
+    (pi 36 + opencode 11 scripts).
 
 ## Later
 
@@ -108,7 +141,7 @@ as before.
       shared opaque parent identity, confirming a second sheep reads the first
       host's note from the shared MOC. The resolver/artifact layer is already
       covered by `test/verify-cross-host-notes.mjs`.
-- [ ] Verification-harness hardening (fold into T016 + contributor notes): `node --check` does NOT resolve imports — add a real module-load smoke test (bun import of server.ts) so a bad import can never sit unnoticed. After every adapter change: reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test. Never touch plugin files mid-test (reloads straddle in-flight flows and orphan in-memory state). Never delete the dev loader without restoring it. Distrust model self-reports of tool absence/presence; assert on artifacts.
+- [x] Verification-harness hardening (folded into T016 + contributor notes): the OpenCode suite loads `src/opencode/server.ts` for real via `verify-opencode-surface.mjs` (a bad import can no longer sit unnoticed), and `npm test` gates both suites. The live-testing rules remain in force for human handoffs: after every adapter change reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test; never touch plugin files mid-test; never delete the dev loader without restoring it; distrust model self-reports of tool presence and assert on artifacts.
 - [ ] Native OpenCode session runtime (no Herdr dependency) — separate effort; Path A deliberately first.
 - [ ] OpenCode settings UI — only if the file-config default (plan Q2) proves insufficient.
 - [x] `/shepherd` command output must not start an agent turn (found during T011 sanity, 2026-11-18). Fixed via `ctx.session.prompt({ ..., resume: false })` in `src/opencode/display.ts`; unit + source-guard regression in `test/verify-opencode-display.mjs`. Live TUI confirmation pending with the T011 handoff rerun.

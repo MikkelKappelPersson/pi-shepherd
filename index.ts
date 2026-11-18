@@ -33,6 +33,7 @@ import {
   shutdownStaleWaitMonitor,
 } from './src/runtimes/herdr/lifecycle.ts';
 import { resolveOrCreateParentArtifactSession } from './src/core/artifact-sessions.ts';
+import { migrationNoticeOnce } from './src/core/migration.ts';
 import {
   isHerdrAvailable,
   paneOwnedByCurrentSession,
@@ -405,6 +406,17 @@ function currentCwd(): string {
 
 export default function (pi: ExtensionAPI) {
   pi.on('session_start', (_event, ctx) => {
+    // One-time farewell notice for the old package name. Display-only: it
+    // never wakes the model, and child sheep processes are skipped inside
+    // migrationNoticeOnce().
+    const notice = migrationNoticeOnce();
+    if (notice && typeof pi.sendMessage === 'function') {
+      try {
+        pi.sendMessage({ customType: 'shepherd-migration-notice', content: notice, display: true }, { triggerTurn: false });
+      } catch {
+        /* best effort: marker is already consumed */
+      }
+    }
     setPromptWatcherSessionActive(true);
     setTaskWatcherSessionActive(true);
     setStaleWaitSessionActive(true);

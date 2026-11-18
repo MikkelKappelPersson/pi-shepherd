@@ -1,13 +1,19 @@
 # Shepherd
 
+> **Farewell to `@luminascale/pi-shepherd`.** This is the last release under
+> the old name. Shepherd is moving to **`@luminascale/shepherd`**; when you are
+> ready, install the new package — settings, agent definitions, registrations,
+> and fieldnotes carry over with no manual migration. The one-time notice you
+> see in your host session points to the same place.
+
 Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
 
 ## Choose your host
 
 | Track | Install | Verify after restart |
 | --- | --- | --- |
-| **[Pi](#pi-track)** | `pi install npm:@luminascale/pi-shepherd` | `/shepherd agents` |
-| **[OpenCode](#opencode-track)** | add `@luminascale/pi-shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
+| **[Pi](#pi-track)** | `pi install npm:@luminascale/shepherd` | `/shepherd agents` |
+| **[OpenCode](#opencode-track)** | add `@luminascale/shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
 
 The tools, opaque ids, agent definitions, and fieldnotes layout are shared. Host-specific differences (install, settings surface, command output) are called out in each track below; the rest of this document applies to both.
 
@@ -16,7 +22,7 @@ The tools, opaque ids, agent definitions, and fieldnotes layout are shared. Host
 Install with pi's package installer:
 
 ```bash
-pi install npm:@luminascale/pi-shepherd
+pi install npm:@luminascale/shepherd
 ```
 
 Reload pi, then verify the extension is available with `/shepherd agents`. You should see the bundled agent definitions, including `scout`, `planner`, `worker`, and `reviewer`.
@@ -31,7 +37,7 @@ Add the package to your OpenCode plugin list:
 // ~/.config/opencode/opencode.json (or the project-level .opencode/opencode.json)
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@luminascale/pi-shepherd"]
+  "plugins": ["@luminascale/shepherd"]
 }
 ```
 

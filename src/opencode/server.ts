@@ -31,6 +31,7 @@ import {
 import { installOpencodeBridges, isSheepSession, markParentSession } from "./bridge.ts"
 import { parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
 import { displayCommandOutput } from "./display.ts"
+import { migrationNoticeOnce } from "../core/migration.ts"
 
 installOpencodeHost()
 
@@ -52,6 +53,12 @@ function errorText(error: unknown): string {
 
 /** Display a human-facing command result without starting an assistant turn. */
 async function showCommandOutput(ctx: any, sessionID: string, text: string): Promise<void> {
+  // Farewell notice for the old package name: human sessions only, once per
+  // host user, and display-only like the rest of the command output.
+  if (!isSheepSession(sessionID)) {
+    const notice = migrationNoticeOnce()
+    if (notice) text = `${notice}\n\n${text}`
+  }
   try {
     await displayCommandOutput(ctx, sessionID, text)
   } catch (error) {

@@ -19,10 +19,10 @@ assert.ok(piTrack > -1 && ocTrack > -1, 'both host tracks are on the first scree
 assert.ok(piTrack < sharedContent && ocTrack < sharedContent, 'tracks precede shared content');
 assert.match(firstScreen, /\[Pi\]\(#pi-track\)/, 'Pi track is linked from the picker');
 assert.match(firstScreen, /\[OpenCode\]\(#opencode-track\)/, 'OpenCode track is linked from the picker');
-assert.match(firstScreen, /pi install npm:@luminascale\/pi-shepherd/, 'Pi install command is shown');
+assert.match(firstScreen, /pi install npm:@luminascale\/shepherd/, 'Pi install command is shown');
 assert.match(
   firstScreen,
-  /"plugins": \["@luminascale\/pi-shepherd"\]/,
+  /"plugins": \["@luminascale\/shepherd"\]/,
   'OpenCode plugin config is shown'
 );
 assert.equal((readme.match(/^## Install$/gm) ?? []).length, 0, 'no duplicate Pi-only Install section');
