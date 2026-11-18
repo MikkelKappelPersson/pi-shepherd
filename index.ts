@@ -412,7 +412,10 @@ export default function (pi: ExtensionAPI) {
     const notice = migrationNoticeOnce();
     if (notice && typeof pi.sendMessage === 'function') {
       try {
-        pi.sendMessage({ customType: 'shepherd-migration-notice', content: notice, display: true }, { triggerTurn: false });
+        pi.sendMessage(
+          { customType: 'shepherd-migration-notice', content: notice, display: true },
+          { deliverAs: 'followUp', triggerTurn: false }
+        );
       } catch {
         /* best effort: marker is already consumed */
       }
