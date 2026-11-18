@@ -1,36 +1,62 @@
-# pi-shepherd
+# Shepherd
 
-pi-shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main pi session—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work.
+Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
+
+## Choose your host
+
+| Track | Install | Verify after restart |
+| --- | --- | --- |
+| **[Pi](#pi-track)** | `pi install npm:@luminascale/pi-shepherd` | `/shepherd agents` |
+| **[OpenCode](#opencode-track)** | add `@luminascale/pi-shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
+
+The tools, opaque ids, agent definitions, and fieldnotes layout are shared. Host-specific differences (install, settings surface, command output) are called out in each track below; the rest of this document applies to both.
+
+## Pi track
+
+Install with pi's package installer:
+
+```bash
+pi install npm:@luminascale/pi-shepherd
+```
+
+Reload pi, then verify the extension is available with `/shepherd agents`. You should see the bundled agent definitions, including `scout`, `planner`, `worker`, and `reviewer`.
+
+Pi uses the `/shepherd settings` menu for configuration (see [Settings](#settings)), and pi's steer mode for completion notices. No OpenCode setup is required.
+
+## OpenCode track
+
+Add the package to your OpenCode plugin list:
+
+```jsonc
+// ~/.config/opencode/opencode.json (or the project-level .opencode/opencode.json)
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@luminascale/pi-shepherd"]
+}
+```
+
+Restart OpenCode, then verify with `/shepherd agents`. The `shepherd_*` tools and `/shepherd` command have the same names and semantics as in Pi. You do not need to install pi to use Shepherd from OpenCode.
+
+OpenCode differences:
+
+- Settings are file-based: `~/.config/opencode/pi-shepherd/config.json` (user) and `.shepherd/config.json` (project, with `"projectScope": true`). There is no settings menu yet.
+- Human `/shepherd …` command output is display-only — it renders in full and returns control without starting an assistant turn.
+- Completion notices arrive as normal parent-session messages that wake the model.
+- Fieldnotes are bound to the OpenCode session id and the session's working directory, on the same `.shepherd/sessions/` layout Pi uses.
 
 ## Key Features
 
 -   **Native, no-fuss, low-level Herdr agent orchestration** — Shepherd uses native Herdr panes for all agents and simple, open primitives for agent orchestration. Everything is visible and inspectable. Shepherd does not impose a workflow; it gives you the tools to build your own.
 -   **Herdr headless support** — work inside Herdr or from a plain terminal while keeping launched agents visible and inspectable in Herdr.
 -   **Granular system-prompt and agent-context support** — Shepherd goes beyond standard definitions and utilises pi's open system-prompt. Shepherd agents can be defined with granular control over context for very specific and narrow agent and context control.
--   **Manual agent launch** — start an interactive specialist directly with `/shepherd spawn` and chat with it in its own pi session.
--   **Shared pi-session fieldnotes (artifacts)** — give agents a durable shared place to leave notes and share context across delegated work.
+-   **Manual agent launch** — start an interactive specialist directly with `/shepherd spawn` and chat with it in its own host session.
+-   **Shared session fieldnotes (artifacts)** — give agents a durable shared place to leave notes and share context across delegated work, on the same layout in both hosts.
 
 ## Requirements
 
--   [pi](https://github.com/earendil-works/pi)
+-   [Pi](https://github.com/earendil-works/pi) **or** [OpenCode](https://opencode.ai) (see the tracks above)
 -   [Herdr](https://github.com/herdrdev/herdr)
 -   Node.js 22 or newer
-
-## Install
-
-Install the package using pi’s package installer:
-
-```bash
-pi install npm:@luminascale/pi-shepherd
-```
-
-Reload pi, then verify that the extension is available:
-
-```text
-/shepherd agents
-```
-
-You should see the bundled agent definitions, including `scout`, `planner`, `worker`, and `reviewer`.
 
 ## Available tools
 

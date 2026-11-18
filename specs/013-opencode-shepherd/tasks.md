@@ -76,8 +76,23 @@ as before.
 **Goal**: single installable package, per-host docs, both suites gating every change.
 **Checkpoint**: fresh installs in each host (following only that host's docs) both herd working sheep; both suites green.
 
-- [ ] T014 [P] [US6] Manifest carries both entries (Pi extension + OpenCode plugin); install verified fresh in each host with no steps from the other host.
-- [ ] T015 [P] [US6] README splits into per-host tracks on the first screen.
+- [x] T014 [P] [US6] Manifest carries both entries (Pi extension + OpenCode plugin); install verified fresh in each host with no steps from the other host.
+  - `package.json` now declares `pi.extensions: ["./index.ts"]` and an
+    `exports` map whose root resolves to `./src/opencode/server.ts` (the
+    `Plugin.define` default export OpenCode loads via `plugins` in
+    `opencode.json`).
+  - `test/verify-packaging.mjs` packs the tarball, asserts both entry files
+    and the shared engine are shipped, installs it into an isolated consumer,
+    and checks bare `@luminascale/pi-shepherd` resolves to the OpenCode plugin
+    while the installed manifest still declares the Pi entry. Full suite:
+    657 PASS (exit 0).
+- [x] T015 [P] [US6] README splits into per-host tracks on the first screen.
+  - New title/host-neutral intro, a "Choose your host" picker linking to
+    "Pi track" and "OpenCode track" before shared content. Each track has its
+    own install/verify steps and host-specific behavior (Pi settings menu vs
+    OpenCode file-based config and display-only command output).
+  - `test/verify-host-docs.mjs` guards the first-screen split and the OpenCode
+    `plugins` config snippet. Full suite: 657 PASS (exit 0).
 - [ ] T016 [US5] Mirrored OpenCode verification harness covering FR-001–FR-004; both harnesses run on every change.
 - [ ] T017 [US5] Release checklist: per-host impact notes; Pi-only change ships with zero OpenCode-side edits (and vice versa).
 - [ ] T018 [US5] Farewell release on the old name: one-time migration notice (marker file; human sessions only; never in child sheep panes), README banner, publish `@luminascale/pi-shepherd` last, then `npm deprecate` with pointer to the new name. Ships before T019.
