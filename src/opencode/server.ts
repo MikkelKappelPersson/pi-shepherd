@@ -6,8 +6,9 @@
  * the herd/agents/prune umbrella, with the child shepherd_message and
  * shepherd_done tools served from the same surface (sheep sessions are
  * gated out of the parent tools, parent sessions out of shepherd_done).
- * Fieldnotes parent sessions arrive in Phase 4; settings are file-based
- * for now (see the carried-forward spec question).
+ * Parent fieldnotes sessions resolve onto the shared `.shepherd/sessions`
+ * layout (Phase 4); settings are file-based for now (see the carried-forward
+ * spec question).
  */
 
 import { Plugin } from "@opencode/plugin"

@@ -155,6 +155,11 @@ confirm working sheep in both.
   as a normal session message with `resume: false` (full TUI rendering, but no
   model wake); parent-session notices omit `resume: false` because those are
   meant to wake the model.
+- Fieldnotes are keyed by `(host parent session identity, effective project
+  root)` on both hosts. The OpenCode session id is that opaque identity;
+  neither a pane/terminal id nor an agent/task id is used. The fieldnotes
+  setting is snapshotted per parent session, so disabling it never changes
+  the contract of agents already running in that session.
 
 ## Requirements
 

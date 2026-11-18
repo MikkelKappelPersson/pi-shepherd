@@ -46,6 +46,7 @@ import {
   pruneStaleCreatedPanes,
 } from '../runtimes/herdr/herdr.ts';
 import { OPENCODE_LAUNCH_OVERRIDES } from './host.ts';
+import { parentArtifactSession } from './fieldnotes.ts';
 import {
   agentForChildSession,
   bindChildSession,
@@ -120,10 +121,16 @@ export async function spawnSheep(
   bindSession(ctx);
   const spawnCwd = opts.cwd ?? ctx.cwd;
   const placement = (opts.placement ?? undefined) as Placement | undefined;
+  // Resolve the parent fieldnotes session once for this spawn, on the same
+  // layout Pi uses. Both runtimes store it on the agent so later delegates
+  // reserve their notes in the shared collection.
+  const artifactSession = parentArtifactSession(ctx);
+  const fieldnoteLine = artifactSession ? `\nfieldnote: ${artifactSession.sessionRelativePath}` : '';
   if (backend === 'hc') {
     const runtime = createHcRuntime({
       cwd: spawnCwd,
       sessionId: ctx.sessionId,
+      artifactSession,
       launch: { ...OPENCODE_LAUNCH_OVERRIDES },
     });
     const id = await runtime.spawn({ name: opts.agent } as any, {
@@ -146,11 +153,12 @@ export async function spawnSheep(
       brokerId: mailbox.brokerId,
       parentBrokerId: mailbox.parentId,
     });
-    return `shepherd_spawn spawned ${displayName(handle.agent, handle.label)}\nagent id: ${handle.id}`;
+    return `shepherd_spawn spawned ${displayName(handle.agent, handle.label)}\nagent id: ${handle.id}${fieldnoteLine}`;
   }
   const runtime = createHerdrRuntime({
     cwd: spawnCwd,
     sessionId: ctx.sessionId,
+    artifactSession,
     launch: { ...OPENCODE_LAUNCH_OVERRIDES },
   });
   const id = await runtime.spawn({ name: opts.agent } as any, {
@@ -174,7 +182,7 @@ export async function spawnSheep(
     brokerId: broker.brokerId,
     parentBrokerId: broker.parentId,
   });
-  return `shepherd_spawn spawned ${displayName(handle.agent, handle.label)}\nagent id: ${handle.id}`;
+  return `shepherd_spawn spawned ${displayName(handle.agent, handle.label)}\nagent id: ${handle.id}${fieldnoteLine}`;
 }
 
 export async function statusSheep(
@@ -328,10 +336,14 @@ export async function pruneRegistrations(ctx: OpencodeActionContext): Promise<st
     : `Removed ${pruned} stale pane registration(s); ${remaining} remain.`;
 }
 
-function runtimeFor(ctx: OpencodeActionContext, backend: 'herdr' | 'hc') {
+function runtimeFor(
+  ctx: OpencodeActionContext,
+  backend: 'herdr' | 'hc',
+  artifactSession?: import('../core/artifact-sessions.ts').ArtifactSession
+) {
   return backend === 'hc'
-    ? createHcRuntime({ cwd: ctx.cwd, sessionId: ctx.sessionId })
-    : createHerdrRuntime({ cwd: ctx.cwd, sessionId: ctx.sessionId });
+    ? createHcRuntime({ cwd: ctx.cwd, sessionId: ctx.sessionId, artifactSession })
+    : createHerdrRuntime({ cwd: ctx.cwd, sessionId: ctx.sessionId, artifactSession });
 }
 
 function requireSheep(agentId: string): import('./bridge.ts').SheepRecord {
@@ -398,7 +410,9 @@ export async function delegateSheep(
     throw new Error('Delegated task timeout must be a positive number of minutes.');
   }
   ensureSheepBroker(record);
-  const runtime = runtimeFor(ctx, backend);
+  // Re-resolve on delegate so a task always reserves its note in the shared
+  // collection, even if the agent record predates fieldnotes resolution.
+  const runtime = runtimeFor(ctx, backend, parentArtifactSession(ctx));
   const taskId = await runtime.delegate(opts.target, opts.task, { timeoutMin: timeoutMinutes });
   noteTaskParent(taskId, ctx.sessionId ?? '');
   const display = sheepDisplay(opts.target);

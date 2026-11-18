@@ -32,7 +32,11 @@ and unsuitable for persistent sheep) and get their `shepherd_message` /
   `.shepherd/config.json` stays the single project source.
 - **FR-006** (cross-host fieldnotes) → artifact sessions are host-neutral
   files; the OpenCode adapter resolves/creates the same parent session
-  layout the Pi adapter uses.
+  layout the Pi adapter uses. The OpenCode session id is the opaque parent
+  identity and the session cwd is the project root — the same
+  `(parent identity, effective project root)` binding key Pi uses — passed
+  to the shared resolver. Spawn stores the session on the agent record and
+  delegate re-resolves it, so both runtimes reserve notes in that collection.
 - **FR-007** (no Pi regression) → zero behavior change in the Pi adapter;
   the full existing `verify-*` suites stay green and run on every change.
 - **FR-008** (no cross-host code paths) → layout rule: shared engine

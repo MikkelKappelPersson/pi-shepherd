@@ -43,7 +43,20 @@ as before.
 **Goal**: notes flow across delegations and across hosts.
 **Checkpoint**: Pi sheep reads OpenCode sheep's notes and vice versa.
 
-- [ ] T012 [US4] Parent artifact-session resolution in the OpenCode adapter onto the same shared layout Pi uses.
+- [x] T012 [US4] Parent artifact-session resolution in the OpenCode adapter onto the same shared layout Pi uses.
+  - Added `src/opencode/fieldnotes.ts`: resolves/creates the parent fieldnotes
+    session with the OpenCode session id as the opaque parent identity and the
+    session cwd as the project root, using the shared engine resolver — no
+    layout duplication and no Pi adapter import. The fieldnotes setting is
+    snapshotted per `(session id, cwd)` like Pi's session-scoped setting.
+  - `spawnSheep` resolves once and threads the session into both hc and Herdr
+    runtime contexts (so the agent record and later delegates reserve notes);
+    `delegateSheep` re-resolves so a task always reserves its note. Spawn
+    results now print `fieldnote: <relative path>` when enabled.
+  - Regression: `test/verify-opencode-fieldnotes.mjs` — layout creation/reuse,
+    identity+root separation, Pi↔OpenCode resolution of the same session and
+    shared notes, disabled/session-scoped gate, and spawn/delegate wiring.
+    Full suite: 650 PASS (exit 0).
 - [ ] T013 [US4] Acceptance: sequential delegations across hosts share notes; disabled-notes mode stays off everywhere.
 
 ## Phase 5 — One package, verified twice (US5, US6)
