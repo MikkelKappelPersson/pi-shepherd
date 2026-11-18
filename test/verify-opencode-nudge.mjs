@@ -32,6 +32,10 @@ esac
 fs.chmodSync(fakeHerdr, 0o755);
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ''}`;
 process.env.SHEPHERD_DONE_NUDGES = '1';
+// Resolve backend "auto" to the fake Herdr CLI above instead of depending on
+// a real Herdr session being present on the machine running the suite.
+process.env.HERDR_ENV = '1';
+process.env.HERDR_PANE_ID = 'pane-test';
 
 const { lifecycleRegistry } = await import('../src/runtimes/herdr/orchestration.ts');
 const {
