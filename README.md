@@ -28,7 +28,7 @@ The tools, opaque ids, agent definitions, and fieldnotes layout are shared acros
 ## Key Features
 
 -   **Native, no-fuss, low-level Herdr agent orchestration** — Shepherd uses native Herdr panes for all agents and simple, open primitives for agent orchestration. Everything is visible and inspectable. Shepherd does not impose a workflow; it gives you the tools to build your own.
--   **Herdr headless support** — work inside Herdr or from a plain terminal while keeping launched agents visible and inspectable in Herdr.
+-   **Herdr and hc support** — run inside the Herdr TUI or in an hc (herdr-app) terminal; launched agents stay visible and inspectable in their panes or terminals. `backend: auto` runs where you called from, or pin `herdr` / `hc`.
 -   **Granular system-prompt and agent-context support** — Shepherd goes beyond standard definitions and utilises pi's open system-prompt. Shepherd agents can be defined with granular control over context for very specific and narrow agent and context control.
 -   **Manual agent launch** — start an interactive specialist directly with `/shepherd spawn` and chat with it in its own host session.
 -   **Shared session fieldnotes (artifacts)** — give agents a durable shared place to leave notes and share context across delegated work, on the same layout in both hosts.
@@ -36,7 +36,7 @@ The tools, opaque ids, agent definitions, and fieldnotes layout are shared acros
 ## Requirements
 
 -   [Pi](https://github.com/earendil-works/pi) **or** [OpenCode](https://opencode.ai) (see [Install](#install))
--   [Herdr](https://github.com/herdrdev/herdr)
+-   [Herdr](https://github.com/herdrdev/herdr) (TUI panes) **or** hc / herdr-app (desktop-app terminals)
 -   Node.js 22 or newer
 
 ## Available tools
