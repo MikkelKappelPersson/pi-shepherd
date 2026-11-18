@@ -57,7 +57,19 @@ as before.
     identity+root separation, Pi↔OpenCode resolution of the same session and
     shared notes, disabled/session-scoped gate, and spawn/delegate wiring.
     Full suite: 650 PASS (exit 0).
-- [ ] T013 [US4] Acceptance: sequential delegations across hosts share notes; disabled-notes mode stays off everywhere.
+- [x] T013 [US4] Acceptance: sequential delegations across hosts share notes; disabled-notes mode stays off everywhere.
+  - Filesystem acceptance via `test/verify-cross-host-notes.mjs`: one opaque
+    parent identity + one project root yields exactly one
+    `.shepherd/sessions/NNNN-*` directory across sequential Pi → OpenCode and
+    OpenCode → Pi delegations, with two/three distinct finalized notes, one
+    MOC linking them, metadata reload, and no global index (spec 003 non-goal).
+    Both per-session setting gates honor `fieldnotes: false` and stay off
+    across a mid-session config flip; new sessions observe the change.
+    Full suite: 653 PASS (exit 0).
+  - Scope: the handoff is verified at the resolver/gate + artifact layer, not
+    with two live host TUIs; cross-host sharing requires both hosts to present
+    the same opaque parent identity for a project. A live two-host walkthrough
+    remains optional (see "Later").
 
 ## Phase 5 — One package, verified twice (US5, US6)
 
@@ -77,6 +89,10 @@ as before.
 - [ ] Reload resilience: plugin reload/server restart orphans live sheep (in-memory registry, brokers, watchers reset while panes/terminals survive). Persist minimal sheep/task maps and rehydrate on setup, or document orphan-reap. Found during Phase 3 peer testing (misdiagnosed first as broker session-key rotation). Recurred in live T011 2026-11-18: a handA spawned before the OpenCode restart was orphaned; a fresh spawn was required.
 - [ ] Multi-parent broker multiplexing: both parent brokers are process-singletons (last-writer-wins per session key), so two concurrent OpenCode parents on different backends/sessions can strand envelopes. Phase 3 verifies single-parent flows only. **Narrowed 2026-11-18:** the specific peer-reply failure seen in T011 was NOT this limit — it was a stale parent mark on a sheep session (fixed below). Re-evaluate whether this broader limit is still observable before budgeting a redesign.
 - [x] Sheep sessions that call a parent-only tool before binding must not be permanently misclassified as parents (found in live T011 re-run, 2026-11-18: verbatim from handB — "this session was not bound as a delegated sheep session, so the tool fell back to the parent form and returned Unknown child target"). `src/opencode/bridge.ts`: `markParentSession` no-ops for known sheep, `isParentSession` returns false for known sheep, `bindChildSession` clears stale parent marks. Regression in `test/verify-opencode-notice.mjs`. **Live-verified 2026-11-18:** handB replied via `shepherd_message` (zero shell calls), handA called `shepherd_done` completed, watcher completion reached the parent.
+- [ ] Optional live T013 walkthrough: two host TUIs in one project with a
+      shared opaque parent identity, confirming a second sheep reads the first
+      host's note from the shared MOC. The resolver/artifact layer is already
+      covered by `test/verify-cross-host-notes.mjs`.
 - [ ] Verification-harness hardening (fold into T016 + contributor notes): `node --check` does NOT resolve imports — add a real module-load smoke test (bun import of server.ts) so a bad import can never sit unnoticed. After every adapter change: reload, confirm NO "failed to load plugin" lines, run one trivial tool call, then test. Never touch plugin files mid-test (reloads straddle in-flight flows and orphan in-memory state). Never delete the dev loader without restoring it. Distrust model self-reports of tool absence/presence; assert on artifacts.
 - [ ] Native OpenCode session runtime (no Herdr dependency) — separate effort; Path A deliberately first.
 - [ ] OpenCode settings UI — only if the file-config default (plan Q2) proves insufficient.
