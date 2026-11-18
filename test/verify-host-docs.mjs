@@ -8,9 +8,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const readme = fs.readFileSync(path.resolve(import.meta.dirname, '../README.md'), 'utf8');
-const firstScreen = readme.split('\n').slice(0, 60).join('\n');
+const sharedHeading = '## Key Features';
+const firstScreen = readme.slice(0, readme.indexOf(sharedHeading) + sharedHeading.length);
 
-assert.match(firstScreen, /^# Shepherd$/m, 'host-neutral title');
+assert.match(
+  firstScreen,
+  /<p align="center">[\s\S]{0,160}<strong>SHEPHERD<\/strong>/,
+  'host-neutral centered title banner'
+);
 assert.match(firstScreen, /## Choose your host/, 'host picker is on the first screen');
 const piTrack = firstScreen.indexOf('## Pi track');
 const ocTrack = firstScreen.indexOf('## OpenCode track');

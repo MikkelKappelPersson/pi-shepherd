@@ -1,16 +1,20 @@
-# Shepherd
+<p align="center">
+  <strong>SHEPHERD</strong><br />
+  <em>Native Herdr agent orchestration for Pi and OpenCode</em>
+</p>
 
-A no-fuss extension for native Herdr agent orchestration, in Pi or OpenCode.
+<p align="center">
+  <a href="#choose-your-host">Install</a> · <a href="#key-features">Features</a> · <a href="#available-tools">Tools</a> · <a href="#settings">Settings</a> · <a href="#fieldnotes">Fieldnotes</a>
+</p>
 
-Your main session — the Shepherd — launches and coordinates specialist agents
-in visible Herdr panes, with shared session fieldnotes so agents can pass
-context across delegated work. One package, two host entry points — no setup
-steps from the other host, no imposed workflow; just inspectable, low-level tools.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-666666?labelColor=333333" alt="Apache-2.0 license" /></a>
+  <a href="https://github.com/MikkelKappelPersson/shepherd/stargazers"><img src="https://img.shields.io/github/stars/MikkelKappelPersson/shepherd?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/MikkelKappelPersson/shepherd/releases/latest"><img src="https://img.shields.io/github/v/release/MikkelKappelPersson/shepherd?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
+  <a href="https://www.npmjs.com/package/@luminascale/shepherd"><img src="https://img.shields.io/npm/v/%40luminascale%2Fshepherd?label=npm&labelColor=333333&color=666666&logo=npm" alt="npm version" /></a>
+</p>
 
-```text
-pi install npm:@luminascale/shepherd   # Pi; OpenCode: add to "plugins" in opencode.json
-/shepherd agents                       # verify after restart, in either host
-```
+Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
 
 ## Choose your host
 
