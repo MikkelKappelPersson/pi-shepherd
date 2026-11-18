@@ -92,14 +92,27 @@ const taskToParent = new Map<string, Map<string, string>>();
 /** Sessions that used parent tools: sheep-only tools refuse them. */
 const parentSessions = new Set<string>();
 
-/** Mark a session as a parent (orchestrator) session. */
+/**
+ * Mark a session as a parent (orchestrator) session.
+ * A sheep that touched a parent-only tool before its session was bound must
+ * not keep a stale parent mark: sheep binding wins (see isParentSession).
+ */
 export function markParentSession(sessionId: string): void {
-  if (sessionId) parentSessions.add(sessionId);
+  if (!sessionId) return;
+  if (isSheepSession(sessionId)) {
+    parentSessions.delete(sessionId);
+    return;
+  }
+  parentSessions.add(sessionId);
 }
 
-/** True when the session was seen driving the parent surface. */
+/**
+ * True when the session was seen driving the parent surface.
+ * Known sheep sessions are never parents, even if an early parent-tool call
+ * marked them before binding — otherwise `sheepMessage` rejects the reply.
+ */
 export function isParentSession(sessionId: string): boolean {
-  return parentSessions.has(sessionId);
+  return parentSessions.has(sessionId) && !isSheepSession(sessionId);
 }
 
 function parentMapFor(taskId: string): Map<string, string> {
@@ -108,8 +121,15 @@ function parentMapFor(taskId: string): Map<string, string> {
   return map;
 }
 
-/** Remember which parent session owns a task (delegate/watch time). */
+/**
+ * Remember which parent session owns a task (delegate/watch time).
+ * Sheep sessions are never notice recipients: a child that learns a task id
+ * (e.g. from a relayed question) must not become a "parent" and receive the
+ * completion notice. This also keeps a stray peer-process observation from
+ * prompting a sheep pane.
+ */
 export function noteTaskParent(taskId: string, parentSessionId: string): void {
+  if (!parentSessionId || isSheepSession(parentSessionId)) return;
   parentMapFor(taskId).set('parent', parentSessionId);
 }
 
@@ -272,6 +292,9 @@ export function bindChildSession(agentId: string, childSessionId: string): void 
   if (record.boundChildSessionId) childSessionToAgent.delete(record.boundChildSessionId);
   record.boundChildSessionId = childSessionId;
   childSessionToAgent.set(childSessionId, agentId);
+  // A pre-binding parent-tool call may have marked this session as a parent;
+  // binding as a sheep must win so `sheepMessage` accepts its replies.
+  parentSessions.delete(childSessionId);
 }
 
 /** Resolve a sheep's agent from its bound session, if any. */
@@ -548,16 +571,32 @@ export function publishSheepMessage(
 
 // ── Parent-session prompting ────────────────────────────────────────────
 
+const PARENT_NOTICE_RETRIES = 3;
+const parentNoticeDelay = (attempt: number) => 250 * (attempt + 1);
+
+/**
+ * Deliver a notice to a human parent session. Sheep sessions are never
+ * notified, and a transient failure (the parent is generating a reply, so
+ * `session.prompt` rejects) is retried instead of silently dropped. Results
+ * stay retrievable via status/watch even if every attempt fails.
+ */
 async function promptParent(
   ctx: any,
   parentSessionId: string | undefined,
   content: string
 ): Promise<void> {
-  if (!parentSessionId) return;
-  try {
-    await ctx.session.prompt({ sessionID: parentSessionId, text: content });
-  } catch {
-    /* delivery is best effort; results stay retrievable via status */
+  if (!parentSessionId || isSheepSession(parentSessionId)) return;
+  for (let attempt = 0; attempt < PARENT_NOTICE_RETRIES; attempt++) {
+    try {
+      await ctx.session.prompt({ sessionID: parentSessionId, text: content });
+      return;
+    } catch (error) {
+      if (attempt === PARENT_NOTICE_RETRIES - 1) {
+        console.error(`shepherd: parent notice delivery failed after ${PARENT_NOTICE_RETRIES} attempts: ${String(error)}`);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, parentNoticeDelay(attempt)));
+    }
   }
 }
 

@@ -149,6 +149,12 @@ confirm working sheep in both.
   reminder, then the stall is escalated visibly instead of looping forever.
 - A project-local agent definition the user hasn't approved: OpenCode asks
   first, same trust gate as Pi.
+- Human `/shepherd …` command results are display-only: listing agents (or
+  herd/status/read) via the command shows the result and returns control to
+  the user, without starting an assistant turn. Command output is delivered
+  as a normal session message with `resume: false` (full TUI rendering, but no
+  model wake); parent-session notices omit `resume: false` because those are
+  meant to wake the model.
 
 ## Requirements
 
@@ -162,7 +168,13 @@ confirm working sheep in both.
   signal from the working sheep, a cancellation/close, or its deadline —
   never through a turn ending, idleness, or silence.
 - **FR-004**: Settled task results MUST remain retrievable after settlement
-  and MUST be delivered exactly once to watchers.
+  and MUST be delivered exactly once to watchers. Automatic completion notices
+  MUST go only to human parent sessions, never to a sheep pane, and MUST be
+  retried when the parent session is temporarily busy.
+- **FR-015**: A delegated sheep session MUST remain recognised as a sheep even
+  if it called a parent-only tool before its session was lazily bound. Such an
+  early call MUST NOT permanently classify it as a parent, which would block
+  the sheep form of `shepherd_message` for peer replies.
 - **FR-005**: Agent definitions and project configuration MUST be shared
   between hosts, not forked; a definition written for Pi MUST work from
   OpenCode unchanged.

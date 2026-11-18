@@ -29,6 +29,7 @@ import {
 } from "./actions.ts"
 import { installOpencodeBridges, isSheepSession, markParentSession } from "./bridge.ts"
 import { parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
+import { displayCommandOutput } from "./display.ts"
 
 installOpencodeHost()
 
@@ -46,6 +47,16 @@ async function actionContext(ctx: any, sessionID: string): Promise<OpencodeActio
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "unknown error")
+}
+
+/** Display a human-facing command result without starting an assistant turn. */
+async function showCommandOutput(ctx: any, sessionID: string, text: string): Promise<void> {
+  try {
+    await displayCommandOutput(ctx, sessionID, text)
+  } catch (error) {
+    // Never fall back to session.prompt here: that would reintroduce the turn.
+    console.error(`shepherd: command display failed: ${errorText(error)}`)
+  }
 }
 
 /**
@@ -379,19 +390,20 @@ export default Plugin.define({
           const actx = await actionContext(ctx, sessionID)
           const raw = String(prompt?.text ?? "").trim()
           if (!raw) {
-            await ctx.session.prompt({
+            await showCommandOutput(
+              ctx,
               sessionID,
-              text: [
+              [
                 "Shepherd settings are file-based in Phase 2: edit the user config or the",
                 "project `.shepherd/config.json` directly. For herd operations use one of:",
                 "agents, herd, spawn <agent>, status <target>, read <target>.",
-              ].join("\n"),
-            })
+              ].join("\n")
+            )
             return
           }
           const parsed = parseShepherdCli(tokenizeCli(raw))
           if ("error" in parsed) {
-            await ctx.session.prompt({ sessionID, text: `Shepherd: ${parsed.error}` })
+            await showCommandOutput(ctx, sessionID, `Shepherd: ${parsed.error}`)
             return
           }
           try {
@@ -421,9 +433,9 @@ export default Plugin.define({
               default:
                 result = `Shepherd: action "${parsed.action}" is not available from the command yet; use the shepherd_* tools.`
             }
-            await ctx.session.prompt({ sessionID, text: `[shepherd ${parsed.action}]\n${result}` })
+            await showCommandOutput(ctx, sessionID, `[shepherd ${parsed.action}]\n${result}`)
           } catch (error) {
-            await ctx.session.prompt({ sessionID, text: `Shepherd command failed: ${errorText(error)}` })
+            await showCommandOutput(ctx, sessionID, `Shepherd command failed: ${errorText(error)}`)
           }
         },
       })

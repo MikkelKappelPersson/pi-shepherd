@@ -100,11 +100,17 @@ One engine, two thin adapters:
   `pane send-text` fallback; `hc send`), because the opencode TUI ignores
   `--session` attach and creates its server session lazily on first input.
   `session.prompt` is used only for parent-session notices, where the
-  session id is exactly known.
+  session id is exactly known; human `/shepherd` command output instead uses
+  `session.prompt(..., resume: false)` so it renders in full without waking
+  the model.
 - Operational limits (see tasks.md Later): the parent brokers are
   process-singletons, so Phase 3 verifies single-parent flows only; and a
   plugin reload/server restart resets in-memory orchestration state while
   panes/terminals survive, orphaning live sheep until rehydration lands.
+  Completion notices are delivered only to sessions that were recorded as
+  task parents (never to sheep sessions), with bounded retry when the parent
+  session is busy. Sheep session binding wins over a stale parent mark so a
+  child that called a parent tool before binding can still reply to peers.
 - The capability handoff (broker directory, session/broker/agent ids,
   token, inbox path) keeps its file+environment-variable shape so the
   shared builder stays single-sourced; each host's surface reads it under
