@@ -23,10 +23,16 @@ assert.match(firstScreen, /## Install/, 'compact install section is on the first
 assert.match(firstScreen, /pi install npm:@luminascale\/shepherd/, 'Pi install command is shown');
 assert.match(firstScreen, /`@luminascale\/shepherd` to `plugins`/, 'OpenCode plugin entry is shown');
 assert.match(firstScreen, /\/shepherd agents/, 'verify command is shared by both hosts');
+assert.match(firstScreen, /\| Harness \| Installation \|/, 'table has a dedicated Installation column');
 assert.match(
   firstScreen,
-  /\[installation guide\]\(docs\/guides\/installation\.md\)/,
-  'README links to the detailed guide'
+  /\[Pi setup guide\]\(docs\/guides\/installation\.md#pi\)/,
+  'Pi installation link points to its guide section'
+);
+assert.match(
+  firstScreen,
+  /\[OpenCode setup guide\]\(docs\/guides\/installation\.md#opencode\)/,
+  'OpenCode installation link points to its guide section'
 );
 assert.equal((readme.match(/^## Install$/gm) ?? []).length, 1, 'one install section, no duplicate');
 assert.doesNotMatch(readme, /^## (Pi|OpenCode) track$/m, 'detailed tracks moved out of the README');

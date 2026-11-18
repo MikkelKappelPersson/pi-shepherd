@@ -18,12 +18,12 @@ Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration.
 
 ## Install
 
-| Host | Quick install | Verify after restart |
-| --- | --- | --- |
-| **Pi** | `pi install npm:@luminascale/shepherd` | `/shepherd agents` |
-| **OpenCode** | add `@luminascale/shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
+| Harness | Installation | Quick install | Verify after restart |
+| --- | --- | --- | --- |
+| Pi | [Pi setup guide](docs/guides/installation.md#pi) | `pi install npm:@luminascale/shepherd` | `/shepherd agents` |
+| OpenCode | [OpenCode setup guide](docs/guides/installation.md#opencode) | add `@luminascale/shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
 
-Full install steps, config locations, and host-specific behavior live in the [installation guide](docs/guides/installation.md). The tools, opaque ids, agent definitions, and fieldnotes layout are shared across both hosts.
+The tools, opaque ids, agent definitions, and fieldnotes layout are shared across both hosts.
 
 ## Key Features
 
@@ -53,7 +53,6 @@ pi-shepherd exposes these tools to the Shepherd. You can use them explicitly whe
 | `shepherd_status` | Inspect an agent without focusing its pane; reports process and task state independently |
 | `shepherd_close` | Close an owned agent, cancel its active task, and clear pending requests |
 | `shepherd_read` | Read recent terminal output for diagnostics |
-| `shepherd_prompt` | **Deprecated** one-turn compatibility path; prefer `shepherd_delegate` for tracked work |
 
 Child agents additionally see `shepherd_message` (talk to the parent or a peer) and `shepherd_done` (the only normal successful completion of their tracked task).
 
