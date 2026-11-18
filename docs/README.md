@@ -4,6 +4,7 @@
 
 User-facing documentation:
 
+- [Installation](guides/installation.md)
 - [Agent definitions](guides/agent-definitions.md)
 - [Tool reference](guides/tool-reference.md)
 - [Diagnostics](guides/diagnostics.md)

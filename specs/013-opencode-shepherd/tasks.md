@@ -94,6 +94,10 @@ as before.
     OpenCode file-based config and display-only command output).
   - `test/verify-host-docs.mjs` guards the first-screen split and the OpenCode
     `plugins` config snippet. Full suite: 657 PASS (exit 0).
+  - Follow-up: the detailed per-host steps moved to
+    `docs/guides/installation.md`; the README keeps a compact host-neutral
+    install picker linking to it, and `verify-host-docs.mjs` now checks both
+    the picker and the guide.
 - [x] T016 [US5] Mirrored OpenCode verification harness covering FR-001–FR-004; both harnesses run on every change.
   - `scripts/verify-suites.mjs` derives the Pi (36 scripts) and OpenCode
     (11 scripts) suites from `package.json`; `npm test` chains both, and a new

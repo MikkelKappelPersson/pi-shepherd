@@ -4,60 +4,26 @@
 </p>
 
 <p align="center">
-  <a href="#choose-your-host">Install</a> · <a href="#key-features">Features</a> · <a href="#available-tools">Tools</a> · <a href="#settings">Settings</a> · <a href="#fieldnotes">Fieldnotes</a>
+  <a href="#install">Install</a> · <a href="#key-features">Features</a> · <a href="#available-tools">Tools</a> · <a href="#settings">Settings</a> · <a href="#fieldnotes">Fieldnotes</a>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0" alt="Apache-2.0 license" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/npm/l/%40luminascale%2Fshepherd" alt="Apache-2.0 license" /></a>
   <a href="https://github.com/MikkelKappelPersson/shepherd/stargazers"><img src="https://img.shields.io/github/stars/MikkelKappelPersson/shepherd?logo=github" alt="GitHub stars" /></a>
   <a href="https://github.com/MikkelKappelPersson/shepherd/releases/latest"><img src="https://img.shields.io/github/v/release/MikkelKappelPersson/shepherd?label=release" alt="latest stable release" /></a>
   <a href="https://www.npmjs.com/package/@luminascale/shepherd"><img src="https://img.shields.io/npm/v/%40luminascale%2Fshepherd?label=npm&logo=npm" alt="npm version" /></a>
 </p>
 
-Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session in Pi or OpenCode—can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work. One package, two host entry points; Pi and OpenCode users never need steps from the other host.
+Shepherd is a no-fuss extension for native, low-level Herdr agent orchestration. The **Shepherd**—your main session can launch and coordinate specialized agents in visible Herdr panes, while shared session fieldnotes (artifacts) let agents share context across delegated work.
 
-## Choose your host
+## Install
 
-| Track | Install | Verify after restart |
+| Host | Quick install | Verify after restart |
 | --- | --- | --- |
-| **[Pi](#pi-track)** | `pi install npm:@luminascale/shepherd` | `/shepherd agents` |
-| **[OpenCode](#opencode-track)** | add `@luminascale/shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
+| **Pi** | `pi install npm:@luminascale/shepherd` | `/shepherd agents` |
+| **OpenCode** | add `@luminascale/shepherd` to `plugins` in `opencode.json` | `/shepherd agents` |
 
-The tools, opaque ids, agent definitions, and fieldnotes layout are shared. Host-specific differences (install, settings surface, command output) are called out in each track below; the rest of this document applies to both.
-
-## Pi track
-
-Install with pi's package installer:
-
-```bash
-pi install npm:@luminascale/shepherd
-```
-
-Reload pi, then verify the extension is available with `/shepherd agents`. You should see the bundled agent definitions, including `scout`, `planner`, `worker`, and `reviewer`.
-
-Pi uses the `/shepherd settings` menu for configuration (see [Settings](#settings)), and pi's steer mode for completion notices. No OpenCode setup is required.
-
-## OpenCode track
-
-Add the package to your OpenCode plugin list:
-
-```jsonc
-// ~/.config/opencode/opencode.json (or the project-level .opencode/opencode.json)
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@luminascale/shepherd"]
-}
-```
-
-Restart OpenCode, then verify with `/shepherd agents`. The `shepherd_*` tools and `/shepherd` command have the same names and semantics as in Pi. You do not need to install pi to use Shepherd from OpenCode.
-
-OpenCode differences:
-
-- Settings are file-based: `~/.config/opencode/pi-shepherd/config.json` (user) and `.shepherd/config.json` (project, with `"projectScope": true`). There is no settings menu yet.
-- Human `/shepherd …` command output is display-only — it renders in full and returns control without starting an assistant turn.
-- Completion notices arrive as normal parent-session messages that wake the model.
-- Fieldnotes are bound to the OpenCode session id and the session's working directory, on the same `.shepherd/sessions/` layout Pi uses.
-- After an OpenCode server restart, sheep keep running but their opaque ids are lost. You get one display-only notice listing the orphaned sheep; use `shepherd({ action: "reap" })` to close them safely (or respawn and close the old panes). Fieldnotes and queued envelopes remain on disk until reaped.
+Full install steps, config locations, and host-specific behavior live in the [installation guide](docs/guides/installation.md). The tools, opaque ids, agent definitions, and fieldnotes layout are shared across both hosts.
 
 ## Key Features
 
@@ -69,7 +35,7 @@ OpenCode differences:
 
 ## Requirements
 
--   [Pi](https://github.com/earendil-works/pi) **or** [OpenCode](https://opencode.ai) (see the tracks above)
+-   [Pi](https://github.com/earendil-works/pi) **or** [OpenCode](https://opencode.ai) (see [Install](#install))
 -   [Herdr](https://github.com/herdrdev/herdr)
 -   Node.js 22 or newer
 
