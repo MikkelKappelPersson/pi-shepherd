@@ -91,7 +91,7 @@ watch → completion (`OK`) → message → close all succeeded with opaque ids.
 
 ## Follow-ups
 
-- Confirm the exact hc version bundled with supported Herdr app releases
-  accepts `--no-parent` (present in the installed 0.9.5-era toolchain).
+- ~~Confirm hc accepts `--no-parent`~~ — resolved: hc 0.1.21 accepts it and
+  the live probe produced a parentless terminal in its own tab.
 - Decide whether a no-parent agent should be allowed to opt back into a
-  parent relationship later (not proposed in this spec).
+  parent relationship later (deferred; not in this spec).

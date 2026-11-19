@@ -168,8 +168,8 @@ is exposed on any tool.
 
 - Is the TUI free of a parent/subagent distinction? — Answered: yes; see
   `research.md`. The mode is hc-only.
-- Name of the spawn request — carried forward to `plan.md` (product owner to
-  confirm the user-facing wording).
+- Name of the spawn request — answered: `no_parent`, mirroring hc's
+  `--no-parent` (product owner, 2026-11-19; see `plan.md`).
 - Missing placement context — answered by FR-008: fail cleanly, no fallback.
 - Reaping without a parent link — answered by FR-009 and `research.md`:
   ownership-registry based, not parent based.

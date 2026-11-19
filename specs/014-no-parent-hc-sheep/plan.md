@@ -124,5 +124,5 @@ Env: `HC_TERMINAL_ID` — address of the calling terminal; used to read its
    (product owner, 2026-11-19).
 2. Whether to add the optional `--subagent` escape hatch on `/shepherd spawn`
    (out of scope unless the product owner asks).
-3. hc version floor for `--no-parent` — confirm against the supported Herdr
-   app toolchain; if a floor is needed, document it in the failure hint.
+3. ~~hc version floor for `--no-parent`~~ — resolved: present in the installed
+   hc 0.1.21 toolchain and verified live; no separate floor documented.
