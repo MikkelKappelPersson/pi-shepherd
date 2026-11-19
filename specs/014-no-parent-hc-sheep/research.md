@@ -69,6 +69,26 @@ remove. No new dependency is required.
 - Using the herdr/TUI backend for manual spawns — wrong runtime, needs the
   TUI server, and would cross-spawn from the app.
 
+## Visual baseline (live Herdr app, 2026-11-19)
+
+Captured with `herdr-app ls` in the `shepherd` space. A default spawn and a
+`no_parent: true` spawn were launched back-to-back from the same caller;
+`hc get` supplies the native details that the app summary omits.
+
+```text
+default (scout, "baseline subagent")            no_parent (worker, "separate tab")
+  hc:   t3g                                       hc:   t3h
+  parent: t2g                                     parent: null
+  labels: shepherd.owned/agent/name               labels: + herdr.space=<caller space>
+          (no herdr.space)                                + shepherd.no-parent=true
+  herdr: sub_agents of t2g, tab OpenCode          herdr: own tab tb065b387…, sub_agents []
+```
+
+`hc get t3h` also reported `die_with_parent: false` and `where: shepherd / 2`,
+confirming the terminal was adopted into a new tab in the caller's space.
+Lifecycle parity was then checked on a fresh no-parent sheep: delegate →
+watch → completion (`OK`) → message → close all succeeded with opaque ids.
+
 ## Follow-ups
 
 - Confirm the exact hc version bundled with supported Herdr app releases

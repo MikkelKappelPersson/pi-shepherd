@@ -74,6 +74,9 @@ const placement = tools.get('shepherd_spawn').input.properties.placement.descrip
 for (const value of ['pane_right', 'pane_down', 'tab', 'workspace']) {
   assert.ok(placement.includes(value), `FR-002: ${value} placement is documented`);
 }
+const noParent = tools.get('shepherd_spawn').input.properties.no_parent;
+assert.equal(noParent?.type, 'boolean', 'FR-002: no_parent is an explicit boolean tool argument');
+assert.match(noParent.description, /parentless/, 'FR-002: no_parent documents the separate-agent mode');
 const { OPENCODE_LAUNCH_OVERRIDES, OPENCODE_CHILD_COMMAND } = await import('../src/opencode/host.ts');
 assert.equal(OPENCODE_LAUNCH_OVERRIDES.command, OPENCODE_CHILD_COMMAND);
 assert.equal(OPENCODE_LAUNCH_OVERRIDES.command, 'opencode', 'FR-002: children boot the OpenCode CLI');

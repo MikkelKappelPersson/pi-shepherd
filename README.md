@@ -207,6 +207,22 @@ shepherd_spawn({
 
 The working directory defaults to the Shepherd session and `cwd` can be supplied when spawning. The child model and requested thinking level come from the discovered agent definition; omission, `null`, or `default` inherits the Shepherd session's corresponding setting. Agent scope, project approval, and prompt-shaping options come from Shepherd settings and the discovered definition; they are not spawn overrides.
 
+### Subagents and separate agents in the Herdr app
+
+When Shepherd runs in an hc terminal in the Herdr desktop app, a spawned agent is normally a **subagent**: Herdr lists it under the calling agent. Pass `no_parent: true` to launch a **separate agent** instead — a parentless terminal that Herdr adopts into its own tab at the same level, not under the caller:
+
+```text
+shepherd_spawn({
+  agent: "worker",
+  label: "independent review",
+  no_parent: true,
+})
+```
+
+Separate agents are still ordinary Shepherd sheep: the same opaque id, delegation, messaging, watching, fieldnotes, and close path apply. Only their place in the Herdr layout changes. If the calling terminal has no Herdr app space to place them in, the spawn fails with a clear hint rather than silently creating a subagent.
+
+`/shepherd spawn <agent>` always uses `no_parent: true` in the Herdr app: typing the command by hand means you want a separate agent with that definition's context. This mode is **hc/herdr-app only**. The older Herdr TUI has no parent relationship — every agent there already gets its own pane — so `no_parent` is accepted and ignored, and the result says so.
+
 Lifecycle tools use short, opaque, session-scoped IDs:
 
 ```text
@@ -231,7 +247,7 @@ The slash command is useful when you want to manage an agent directly rather tha
 /shepherd settings
 ```
 
-Supported actions are `agents`, `herd`, `prune`, `spawn`, `status`, `read`, and `settings`. `/shepherd list` remains a compatibility alias for `/shepherd agents`. Optional spawn flags include: `--placement pane_right|pane_down|tab|workspace` and `--cwd <path>`.
+Supported actions are `agents`, `herd`, `prune`, `spawn`, `status`, `read`, and `settings`. `/shepherd list` remains a compatibility alias for `/shepherd agents`. Optional spawn flags include: `--placement pane_right|pane_down|tab|workspace`, `--no-parent` (Herdr app only; also always implied by the command itself), and `--cwd <path>`.
 
 For one-shot delegation, prompting, waiting, parallel work, and opaque-ID lifecycle control, use the structured `shepherd_*` tools instead of manual commands. The old single-tool form such as `shepherd({ action: "prompt", ... })` is no longer supported.
 

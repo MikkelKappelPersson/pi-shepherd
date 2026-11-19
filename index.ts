@@ -24,7 +24,7 @@ import {
   setShepherdMessageSessionActive,
   type ShepherdArgs,
 } from './src/extension/shepherd.ts';
-import { parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
+import { manualSpawnArgs, parseShepherdCli, tokenizeCli } from './src/extension/cli.ts';
 import { configureUnseenCompletionBridge } from './src/extension/unseen-completions.ts';
 import { lifecycleRegistry, bindSessionOwner } from './src/runtimes/herdr/orchestration.ts';
 import {
@@ -582,7 +582,8 @@ export default function (pi: ExtensionAPI) {
         try {
           await runCommandAction(
             {
-              ...parsed.args,
+              // Manual spawn always means a separate agent (T012).
+              ...manualSpawnArgs(parsed.args),
               // Pre-resolve tolerantly (undefined when fieldnotes are
               // disabled or no session identity exists); 'artifactSession'
               // in args makes doAction honor the explicit value instead of

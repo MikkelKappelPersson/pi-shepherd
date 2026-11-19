@@ -110,7 +110,13 @@ function displayName(agent: string, label: string): string {
 
 export async function spawnSheep(
   ctx: OpencodeActionContext,
-  opts: { agent: string; label: string; placement?: string; cwd?: string }
+  opts: {
+    agent: string;
+    label: string;
+    placement?: string;
+    no_parent?: boolean;
+    cwd?: string;
+  }
 ): Promise<string> {
   if (opts.placement !== undefined && !(PLACEMENTS as readonly string[]).includes(opts.placement)) {
     throw new Error(
@@ -137,6 +143,7 @@ export async function spawnSheep(
       cwd: spawnCwd,
       label: opts.label,
       placement,
+      no_parent: opts.no_parent === true,
     });
     const handle = describeHcAgent(id);
     const mailbox = describeHcSheepMailbox(id);

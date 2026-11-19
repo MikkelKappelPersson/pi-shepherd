@@ -94,7 +94,7 @@ export interface ShepherdRuntime {
   /** Launch a sheep from a discovered agent definition. */
   spawn(
     def: AgentConfig,
-    opts: { cwd?: string; label?: string; placement?: SpawnPlacement }
+    opts: { cwd?: string; label?: string; placement?: SpawnPlacement; no_parent?: boolean }
   ): Promise<AgentHandle>;
 
   /** Submit a task to an owned sheep. `requestId` dedups retried submissions. */

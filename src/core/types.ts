@@ -44,6 +44,12 @@ export const SpawnParams = Type.Object({
       'Short task-specific human label for this spawned instance. Letters, numbers, spaces, _, -, and . only; max 64 characters.',
   }),
   placement: Type.Optional(SpawnPlacementSchema),
+  no_parent: Type.Optional(
+    Type.Boolean({
+      description:
+        'hc/herdr-app only: launch as a separate, parentless terminal in its own tab instead of a subagent under the caller. Defaults to false. Ignored on the Herdr TUI backend, where every agent already has its own pane.',
+    })
+  ),
   cwd: Type.Optional(Type.String()),
 });
 export const AgentIdSchema = Type.String({

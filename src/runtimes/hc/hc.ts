@@ -184,6 +184,81 @@ export async function hcExec(args: string[]): Promise<unknown> {
   return throwOnHcError(parsed, args[0] ?? '');
 }
 
+/**
+ * Read a terminal's Herdr desktop-app space label. The app adopts an hc
+ * terminal into a tab when `herdr.space` is present; without `herdr.tab` it
+ * creates a new tab in that space. Returns undefined when no space is recorded
+ * (plain hc terminal, TUI, or `hc get` failure).
+ */
+export function readHerdrSpace(terminalId: string): string | undefined {
+  if (!terminalId) return undefined;
+  try {
+    const record = hcExecSync(['get', terminalId, '--json']) as {
+      labels?: Record<string, unknown>;
+    };
+    const value = record?.labels?.['herdr.space'];
+    return typeof value === 'string' && value ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Caller's Herdr space, failing with the actionable FR-008 hint when absent. */
+export function readCallerHerdrSpace(): string {
+  const space = readHerdrSpace(process.env.HC_TERMINAL_ID ?? '');
+  if (!space) {
+    throw new Error(
+      'Cannot launch a no-parent sheep: the calling terminal has no Herdr app space. ' +
+        'Run from an hc terminal attached to the Herdr desktop window. ' +
+        HC_SETUP_HINT
+    );
+  }
+  return space;
+}
+
+/**
+ * Build the exact `hc run` argv for a sheep launch. Exported so the launch
+ * contract can be tested without booting an agent. The default (subagent)
+ * array is deliberately unchanged from the original launch path.
+ */
+export function buildHcLaunchArgs(opts: {
+  cwd: string;
+  agent: string;
+  scriptFile: string;
+  noParent?: boolean;
+  space?: string;
+}): string[] {
+  const args = [
+    'run',
+    '--bg',
+    '--json',
+    '--cwd',
+    opts.cwd,
+    '--label',
+    'shepherd.owned=true',
+    '--label',
+    `shepherd.agent=${opts.agent}`,
+  ];
+  if (opts.noParent) {
+    if (!opts.space) {
+      throw new Error('buildHcLaunchArgs: no-parent launches require a Herdr app space.');
+    }
+    args.push(
+      '--label',
+      'shepherd.no-parent=true',
+      '--label',
+      `herdr.space=${opts.space}`,
+      '--no-parent'
+    );
+  } else {
+    // No parent to notify on a no-parent launch; keep the original flag for
+    // the default path byte-for-byte.
+    args.push('--no-notify');
+  }
+  args.push('--outlive-parent', 'bash', opts.scriptFile);
+  return args;
+}
+
 function shellQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
@@ -242,6 +317,8 @@ export interface CreatedTerminal {
   dir?: string;
   /** Parent pi session that created this terminal (legacy entries omit it). */
   ownerSession?: string;
+  /** True when launched with --no-parent into its own Herdr app tab (diagnostics). */
+  noParent?: boolean;
 }
 
 /** Owner session id of a terminal entry; legacy entries belong to the current session. */
@@ -395,12 +472,21 @@ export function terminalOwnedByCurrentSession(entry: CreatedTerminal): boolean {
  * panes do). `--keep` is deliberately NOT passed: a crashed pi must surface
  * as a finished terminal (fast failure) instead of being replaced by a
  * shell that masks the exit.
+ *
+ * With `noParent`, `--no-notify` is dropped (there is no parent to notify)
+ * and `--no-parent` plus the caller's `herdr.space` label are added so the
+ * Herdr desktop app adopts the terminal into a new sibling tab instead of
+ * listing it under the caller as a subagent. The default argv is unchanged.
  */
 export function launchPiInHcTerminal(
   name: string,
-  opts: Parameters<typeof writePiLaunchFiles>[0] & { cwd: string; label?: string }
+  opts: Parameters<typeof writePiLaunchFiles>[0] & {
+    cwd: string;
+    label?: string;
+    noParent?: boolean;
+  }
 ): { terminalId: string; dir: string; sessionFile: string; scriptFile: string } {
-  const { cwd, label: _label, ...launchOpts } = opts;
+  const { cwd, label: _label, noParent, ...launchOpts } = opts;
   void _label;
   const files = writePiLaunchFiles(launchOpts);
   // Point the shared launch script at the absolute pi binary (see
@@ -416,21 +502,18 @@ export function launchPiInHcTerminal(
   const sanitizedAgent = name.replace(/[^a-z0-9-_]/gi, '-').slice(0, 20) || 'agent';
   let terminalId: string;
   try {
-    const out = hcExecSync([
-      'run',
-      '--bg',
-      '--json',
-      '--cwd',
-      cwd,
-      '--label',
-      'shepherd.owned=true',
-      '--label',
-      `shepherd.agent=${sanitizedAgent}`,
-      '--no-notify',
-      '--outlive-parent',
-      'bash',
-      files.scriptFile,
-    ]);
+    // Resolve the caller's space before launching: a no-parent request must
+    // fail with a clear hint, never fall back to a nested subagent.
+    const space = noParent ? readCallerHerdrSpace() : undefined;
+    const out = hcExecSync(
+      buildHcLaunchArgs({
+        cwd,
+        agent: sanitizedAgent,
+        scriptFile: files.scriptFile,
+        noParent,
+        space,
+      })
+    );
     terminalId = terminalAddressOf(out, 'run');
   } catch (error) {
     try {
@@ -451,6 +534,7 @@ export function launchPiInHcTerminal(
     cwd,
     createdAt: Date.now(),
     ownerSession: sessionOwner(),
+    ...(noParent ? { noParent: true } : {}),
   });
   setCreatedTerminalDir(terminalId, files.dir);
   return { terminalId, ...files };

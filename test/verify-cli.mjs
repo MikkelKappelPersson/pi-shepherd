@@ -10,6 +10,7 @@
 import {
   parseShepherdCli,
   formatShepherdCommand,
+  manualSpawnArgs,
   statusHandleTarget,
   tokenizeCli,
 } from '../src/extension/cli.ts';
@@ -61,6 +62,12 @@ check(
   'spawn: placement encodes pane direction'
 );
 
+const okSpawnNoParent = parsed(['spawn', 'scout', '--no-parent']);
+check(
+  okSpawnNoParent.args.no_parent === true,
+  'spawn: --no-parent is a bare boolean flag'
+);
+
 const okSpawnSpace = parsed(['spawn', 'scout', '--cwd', '/tmp/x']);
 check(
   okSpawnSpace.args.cwd === '/tmp/x' &&
@@ -106,6 +113,7 @@ const shouldFail = [
   [['agents', 'both', 'user'], 'agents takes at most one'],
   [['agents', 'both', '--scope=user'], 'agents takes at most one'],
   [['spawn', 'w', '--placement=up'], 'Invalid value "up" for --placement'],
+  [['spawn', 'w', '--no-parent=true'], 'takes no value'],
   [['spawn', 'w', '--direction=down'], 'Unknown option "--direction"'],
   [['spawn', 'w', '--scope=project'], 'Unknown option "--scope"'],
   [['spawn', 'w', '--confirm-project-agents=false'], 'Unknown option "--confirm-project-agents"'],
@@ -161,6 +169,7 @@ for (const toks of [
   ['herd'],
   ['spawn', 'worker'],
   ['spawn', 'worker', '--placement=pane_down'],
+  ['spawn', 'worker', '--no-parent'],
   ['spawn', 'scout', '--cwd=/a b'],
   ['read', 'p5', '--lines=7', '--source=visible'],
 ]) {
@@ -169,6 +178,17 @@ for (const toks of [
 }
 
 // The spawn preview is CLI-style: `spawn scout --cwd=/a b` (quoted if needed).
+// T012: a manual spawn is always no-parent, even if a default said otherwise.
+check(
+  manualSpawnArgs({ agent: 'worker', no_parent: false }).no_parent === true &&
+    manualSpawnArgs({ agent: 'worker' }).no_parent === true,
+  'manual spawn forces no_parent true (T012)'
+);
+check(
+  formatShepherdCommand('spawn', manualSpawnArgs({ agent: 'worker' })).rest.includes('--no-parent'),
+  'preview renders the manual no-parent flag'
+);
+
 const preview = formatShepherdCommand('spawn', { agent: 'scout', cwd: '/a b' });
 check(
   preview.verb === 'spawn' &&

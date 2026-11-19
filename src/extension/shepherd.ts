@@ -1096,7 +1096,12 @@ export async function doAction(
         });
         const id = await hcRuntime.spawn(
           { name: a.agent } as any,
-          { cwd: a.cwd, label: a.label, placement: a.placement }
+          {
+            cwd: a.cwd,
+            label: a.label,
+            placement: a.placement,
+            no_parent: a.no_parent === true,
+          }
         );
         const hcHandle = hcAgentIdentity(id);
         return textResult(
@@ -1127,8 +1132,14 @@ export async function doAction(
         },
         { ...ctx, sessionId: ctx.sessionManager?.getSessionId() }
       );
+      // The Herdr TUI has no parent relationship: every agent already gets
+      // its own pane, so the hc-only no_parent mode is accepted and ignored.
+      const tuiPlacementNote =
+        a.no_parent === true
+          ? ' (no_parent ignored: Herdr TUI agents already have their own pane)'
+          : '';
       return textResult(
-        `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}`,
+        `shepherd_spawn spawned ${handle.label ? `${handle.agent}: ${handle.label}` : handle.agent}${tuiPlacementNote}`,
         {
           id: handle.id,
           agent: handle.agent,
@@ -1770,7 +1781,7 @@ export function registerShepherdTools(pi: ExtensionAPI) {
     label: 'Shepherd: spawn agent',
     description:
       'Spawn an idle, persistent agent in a Herdr pane (no task submitted). Provide a short task-specific label (for example label: "code review"). Use shepherd({ action: "agents" }) first if you do not know an exact agent name. ' +
-      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model and thinking level, and a new tab; the agent definition can override both. Use placement pane_right or pane_down to split the current pane.',
+      'The result prints an opaque agent id; pass it as the top-level id argument to shepherd_prompt, shepherd_status, or shepherd_close. Defaults to the configured working directory, inherited parent model and thinking level, and a new tab; the agent definition can override both. Use placement pane_right or pane_down to split the current pane. On the Herdr app / hc backend, set no_parent true to launch a separate parentless agent in its own tab instead of a subagent under the caller; this is ignored on the Herdr TUI backend.',
     promptSnippet: 'Spawn a new agent in a Herdr pane.',
     promptGuidelines: [
       'When using shepherd_spawn, copy the printed agent id into the top-level id argument of shepherd_prompt, shepherd_status, or shepherd_close. After shepherd_prompt, copy the printed prompt id into shepherd_watch. Do not use a Herdr pane id; lifecycle ids are session-scoped.',
@@ -1785,6 +1796,12 @@ export function registerShepherdTools(pi: ExtensionAPI) {
         StringEnum(['pane_right', 'pane_down', 'tab', 'workspace'] as const, {
           description:
             'Optional placement: pane_right or pane_down splits the current pane, tab creates a new tab, and workspace creates a new workspace. If omitted, uses a background tab.',
+        })
+      ),
+      no_parent: Type.Optional(
+        Type.Boolean({
+          description:
+            'Herdr app / hc only: launch a separate parentless agent in its own tab instead of a subagent under the caller. Defaults to false. Ignored on the Herdr TUI backend.',
         })
       ),
       cwd: Type.Optional(
@@ -1807,10 +1824,11 @@ export function registerShepherdTools(pi: ExtensionAPI) {
       const agent = typeof args.agent === 'string' ? args.agent : 'agent';
       const label = typeof args.label === 'string' && args.label ? ` · ${args.label}` : '';
       const placement = typeof args.placement === 'string' ? ` · ${args.placement}` : '';
+      const noParent = args.no_parent === true ? ' · no-parent' : '';
       component.setText(
         theme.fg('toolTitle', theme.bold('shepherd_spawn')) +
           ` ${theme.fg('accent', agent)}` +
-          theme.fg('dim', `${label}${placement}`)
+          theme.fg('dim', `${label}${placement}${noParent}`)
       );
       return component;
     },

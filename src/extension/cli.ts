@@ -43,6 +43,7 @@ const OPTION_SPECS: Record<string, OptionSpec> = {
   agentScope: { flag: 'scope', aliases: ['agent-scope'], key: 'agentScope', values: SCOPE_VALUES },
   label: { flag: 'label', key: 'label' },
   placement: { flag: 'placement', key: 'placement', values: PLACEMENT_VALUES },
+  no_parent: { flag: 'no-parent', key: 'no_parent', bare: true },
   cwd: { flag: 'cwd', key: 'cwd' },
   lines: { flag: 'lines', key: 'lines', integer: true },
   source: { flag: 'source', key: 'source', values: SOURCE_VALUES },
@@ -56,12 +57,12 @@ for (const spec of Object.values(OPTION_SPECS)) {
 }
 
 // Which option keys each command verb accepts (renderer and parser agree).
-const SPAWN_OPTION_KEYS = ['label', 'placement', 'cwd'];
+const SPAWN_OPTION_KEYS = ['label', 'placement', 'no_parent', 'cwd'];
 const READ_OPTION_KEYS = ['lines', 'source'];
 
 const USAGE =
   'Usage: /shepherd <agents [user|project|both] | herd | spawn <agent> [options] | status <agent|id> | read <target> [options] | settings>\n' +
-  '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --cwd <path>\n' +
+  '  spawn options: --label \"task label\", --placement pane_right|pane_down|tab|workspace, --no-parent, --cwd <path>\n' +
   '  read options: --lines <n>, --source ' +
   SOURCE_VALUES.join('|');
 
@@ -267,6 +268,16 @@ export function parseShepherdCli(tokens: string[]): ParseShepherdCliResult {
 }
 
 // ── Rendering (inverse of the parser) ───────────────────────────────────────
+
+/**
+ * Manual `/shepherd spawn` means "give me a separate agent": on the Herdr
+ * app / hc backend it always requests a parentless tab, regardless of any
+ * default the parser or a tool transport materialized. The Herdr TUI backend
+ * ignores the mode because every agent already has its own pane.
+ */
+export function manualSpawnArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return { ...args, no_parent: true };
+}
 
 /**
  * Tool transports may materialize optional spawn defaults before the renderer

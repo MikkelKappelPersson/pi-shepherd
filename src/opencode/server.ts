@@ -140,6 +140,11 @@ export default Plugin.define({
               description: "Short task-specific label (max 64 characters).",
             },
             placement: { type: "string", description: PLACEMENT_DESC },
+            no_parent: {
+              type: "boolean",
+              description:
+                "Herdr app / hc only: launch a separate parentless agent in its own tab instead of a subagent under the caller. Defaults to false. Ignored on the Herdr TUI backend.",
+            },
             cwd: {
               type: "string",
               description: "Working directory for the child; defaults to the session cwd.",
@@ -156,6 +161,7 @@ export default Plugin.define({
               agent: String((input as any).agent ?? ""),
               label: String((input as any).label ?? ""),
               placement: (input as any).placement,
+              no_parent: (input as any).no_parent,
               cwd: (input as any).cwd,
             }),
           }

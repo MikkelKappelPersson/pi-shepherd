@@ -1,6 +1,6 @@
 # Tasks — No-parent sheep in the Herdr app
 
-`specs/014-no-parent-hc-sheep` · draft · spec: `spec.md` · plan: `plan.md`
+`specs/014-no-parent-hc-sheep` · complete · spec: `spec.md` · plan: `plan.md`
 
 ## Phase 1 — Baseline and guardrails (US1, US4)
 
@@ -8,11 +8,11 @@
 **Checkpoint**: Existing hc and herdr verification suites pass unchanged; a
 default hc spawn is still nested under its parent.
 
-- [ ] T001 [US1] Add a regression test asserting a default `shepherd_spawn` on
+- [x] T001 [US1] Add a regression test asserting a default `shepherd_spawn` on
       hc passes the current launch flags and produces a nested subagent.
-- [ ] T002 [US4] Add a regression test asserting the herdr backend spawn path
+- [x] T002 [US4] Add a regression test asserting the herdr backend spawn path
       and tool schemas are unchanged, including no backend parameter.
-- [ ] T003 [US1] Record a `herdr-app ls` snapshot of a default spawn as the
+- [x] T003 [US1] Record a `herdr-app ls` snapshot of a default spawn as the
       visual baseline for later comparison.
 
 ## Phase 2 — No-parent hc launch (US2)
@@ -22,18 +22,18 @@ Herdr tab while remaining a fully managed sheep.
 **Checkpoint**: In an hc/herdr-app session, a no-parent spawn appears as its
 own tab, is absent from `sub_agents`, and can complete a delegated task.
 
-- [ ] T004 [US2] Add the `no_parent` spawn option to the tool schema, parser,
+- [x] T004 [US2] Add the `no_parent` spawn option to the tool schema, parser,
       and CLI option table with default `false`.
-- [ ] T005 [US2] Implement caller-space resolution from the calling terminal's
+- [x] T005 [US2] Implement caller-space resolution from the calling terminal's
       `herdr.space` label, failing with the FR-008 hint when absent.
-- [ ] T006 [US2] Extend the hc launch helper to add `--no-parent`, the
+- [x] T006 [US2] Extend the hc launch helper to add `--no-parent`, the
       `herdr.space` label and `shepherd.no-parent=true` only for no-parent
       spawns.
-- [ ] T007 [US2] Keep the subagent launch path byte-for-byte unchanged; verify
+- [x] T007 [US2] Keep the subagent launch path byte-for-byte unchanged; verify
       T001 still passes.
-- [ ] T008 [US2] Add tests for both modes' launch arguments, labels, and
+- [x] T008 [US2] Add tests for both modes' launch arguments, labels, and
       resulting `parent` / `sub_agents` state.
-- [ ] T009 [US4] Make the herdr backend accept and ignore the mode, reporting
+- [x] T009 [US4] Make the herdr backend accept and ignore the mode, reporting
       its existing pane placement; test that no herdr flags change.
 
 ## Phase 3 — Manual spawn is no-parent (US3)
@@ -43,10 +43,10 @@ agent, with no extra typing.
 **Checkpoint**: Running the command by hand in the app shows a new sibling tab
 and a ready-to-chat agent.
 
-- [ ] T010 [US3] Set `no_parent: true` on the slash command's hc spawn path.
-- [ ] T011 [US3] Verify manual spawn keeps agent definition, context, model
+- [x] T010 [US3] Set `no_parent: true` on the slash command's hc spawn path.
+- [x] T011 [US3] Verify manual spawn keeps agent definition, context, model
       inheritance and fieldnotes identical to today.
-- [ ] T012 [US3] Add a test asserting manual spawn ignores any default that
+- [x] T012 [US3] Add a test asserting manual spawn ignores any default that
       would produce a subagent.
 
 ## Phase 4 — Lifecycle, recovery and documentation (US2, US4)
@@ -54,16 +54,16 @@ and a ready-to-chat agent.
 **Goal**: No-parent sheep are no worse to manage and clean up than subagents.
 **Checkpoint**: Restart/reap and close tests pass; docs describe both modes.
 
-- [ ] T013 [US2] Store the no-parent marker in the created-terminal registry
+- [x] T013 [US2] Store the no-parent marker in the created-terminal registry
       at launch time and assert restart-time reaping finds it without a parent
       link.
-- [ ] T014 [US2] Verify delegate, message, watch, completion notice and close
+- [x] T014 [US2] Verify delegate, message, watch, completion notice and close
       on a no-parent sheep, using the same opaque-id calls as a subagent.
-- [ ] T015 [US2] Add failure-path tests for missing space label and rejected
+- [x] T015 [US2] Add failure-path tests for missing space label and rejected
       `--no-parent`, asserting no fallback spawn occurs.
-- [ ] T016 [US4] Run the full hc and herdr verification suites; confirm no TUI
+- [x] T016 [US4] Run the full hc and herdr verification suites; confirm no TUI
       expectations changed.
-- [ ] T017 [US2] Document both modes, the manual-spawn rule, and the hc-only
+- [x] T017 [US2] Document both modes, the manual-spawn rule, and the hc-only
       constraint in the README and command reference.
 
 ## Later

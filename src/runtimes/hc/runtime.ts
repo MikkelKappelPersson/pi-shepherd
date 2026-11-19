@@ -1410,6 +1410,9 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
       // the sheep always starts as a background terminal in the cwd.
       const _placement: SpawnPlacement | undefined = opts.placement;
       void _placement;
+      // `no_parent` is the hc-only placement switch: a parentless terminal
+      // adopted into its own Herdr app tab. False keeps today's subagent.
+      const noParent = opts.no_parent === true;
       const discovered = discoverAgents(spawnCwd, settings.agentScope, {
         includeBundled: settings.includeBundledAgents,
       }).agents;
@@ -1454,6 +1457,7 @@ export function createHcRuntime(context: HcRuntimeContext = {}): ShepherdRuntime
           label,
           cwd: spawnCwd,
           persistent: true,
+          noParent,
           childBroker: { rootDir: active.rootDir, ...childCapability },
           systemPrompt: found.systemPrompt,
           omitSystemPrompt: found.omitSystemPrompt,

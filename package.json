@@ -84,6 +84,7 @@
     "detect:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-detect.mjs",
     "backend:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-backend.mjs",
     "hc-matrix:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-hc-matrix.mjs",
+    "hc-no-parent:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-hc-no-parent.mjs",
     "hc-poll:test": "node --experimental-strip-types --disable-warning=ExperimentalWarning test/verify-hc-poll.mjs",
     "smoke:poll": "node --experimental-strip-types --disable-warning=ExperimentalWarning .agents/skills/smoke-test/scripts/live-smoke-poll.mjs",
     "show:shepherd-prompt": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/show-shepherd-prompt.mjs",

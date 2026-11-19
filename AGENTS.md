@@ -62,7 +62,10 @@ may be committed explicitly; runtime fieldnote sessions remain ignored.
 - Spawn uses the persisted agent scope and project-approval settings, plus the
   discovered definition's prompt options; these cannot be overridden by spawn
   arguments. Spawn placement is one optional value: `pane_right`, `pane_down`,
-  `tab`, or `workspace`.
+  `tab`, or `workspace`. The separate `no_parent` boolean is hc/herdr-app
+  only: it launches a parentless terminal in its own tab; the default stays a
+  subagent and `/shepherd spawn` always sets it on hc. The herdr/TUI backend
+  ignores it because every agent already has its own pane.
 - Model-facing lifecycle tools accept opaque agent/prompt ids; internal handles
   must never be confused with raw Herdr pane IDs.
 - Only panes recorded in `~/.pi/agent/pi-shepherd/created-panes.json` may be

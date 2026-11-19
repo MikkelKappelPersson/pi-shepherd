@@ -85,8 +85,13 @@ for (const tool of registered) {
       );
       assert.deepEqual(
         Object.keys(schema.properties).sort(),
-        ['agent', 'cwd', 'label', 'placement'],
+        ['agent', 'cwd', 'label', 'no_parent', 'placement'],
         'shepherd_spawn exposes only the public spawn arguments'
+      );
+      assert.equal(
+        schema.properties.no_parent.type,
+        'boolean',
+        'shepherd_spawn no_parent is a boolean flag'
       );
       for (const removed of [
         'agentScope',
@@ -97,6 +102,7 @@ for (const tool of registered) {
       ]) {
         assert.ok(!(removed in schema.properties), `shepherd_spawn must not expose ${removed}`);
       }
+      assert.ok(!('backend' in schema.properties), 'backend stays app-side, never a tool parameter');
       assert.deepEqual(schema.properties.placement.enum, [
         'pane_right',
         'pane_down',
