@@ -37,6 +37,13 @@ assert.equal(lockfile.version, manifest.version, 'lockfile version matches the m
 assert.equal(lockfile.packages?.['']?.name, manifest.name, 'root lockfile entry name matches');
 console.log('PASS lockfile identity matches the manifest');
 
+// OpenDock and similar OpenCode directories discover plugins by npm keyword.
+assert.ok(
+  manifest.keywords?.includes('opencode-plugin'),
+  'npm metadata carries the opencode-plugin discovery keyword'
+);
+console.log('PASS npm metadata is discoverable as an OpenCode plugin');
+
 // Pack and install into an isolated consumer, the way each host's docs say.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-packaging-'));
 const packResult = JSON.parse(
