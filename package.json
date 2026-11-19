@@ -1,6 +1,6 @@
 {
   "name": "@luminascale/shepherd",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "module",
   "description": "🐑 No-fuss herdr native subagent orchestration 🐑 (Pi + OpenCode)",
   "exports": {
