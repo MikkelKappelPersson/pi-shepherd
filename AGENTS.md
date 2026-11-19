@@ -77,6 +77,17 @@ may be committed explicitly; runtime fieldnote sessions remain ignored.
   outstanding. A nudge never invents a terminal status; an exhausted budget is
   escalated to the parent as an ordinary message.
 
+## Local development
+
+The working copy is `~/projects/shepherd`; run `npm test` from there. Both hosts
+load this live folder, so edits take effect without reinstalling:
+
+- **Pi** — installed via `pi install /home/mikkelkp/projects/shepherd`, which adds
+  `../../projects/shepherd` to `~/.pi/agent/settings.json`. Start a new Pi session
+  after changing the extension.
+- **OpenCode** — `~/.config/opencode/plugins/shepherd-dev.ts` re-exports this
+  repo's `src/opencode/server.ts`. Restart OpenCode after changing the plugin.
+
 ## Reference implementation
 
 [pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents) — a tmux-based pi extension for async subagents; useful inspiration for pi-shepherd. Local clone: `/mnt/Projects/Projects/references/pi-interactive-subagents`.
