@@ -26,7 +26,7 @@ suite is green (631 pass); only live OpenCode acceptance remains.
 ## Setup (you)
 
 1. Open a **new** terminal, `cd` to the repo
-   (`/home/mikkelkp/.pi/agent/extensions/pi-shepherd`), run `opencode`.
+   (`/home/mikkelkp/projects/shepherd`), run `opencode`.
 2. Fresh session (new TUI = new session). Do not reuse an old session —
    TUIs hold stale tool catalogs across server restarts.
 3. Sanity check first — paste: `Call the shepherd tool with action agents.
