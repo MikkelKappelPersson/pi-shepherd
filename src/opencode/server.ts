@@ -29,7 +29,7 @@ import {
   type OpencodeActionContext,
 } from "./actions.ts"
 import { installOpencodeBridges, isSheepSession, markParentSession } from "./bridge.ts"
-import { parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
+import { manualSpawnArgs, parseShepherdCli, tokenizeCli } from "../extension/cli.ts"
 import { displayCommandOutput } from "./display.ts"
 import { migrationNoticeOnce } from "../core/migration.ts"
 import { noticeNewOrphans, reapOrphans } from "./orphans.ts"
@@ -436,14 +436,20 @@ export default Plugin.define({
               case "agents":
                 result = await listAgents(actx, { agentScope: args.agentScope })
                 break
-              case "spawn":
+              case "spawn": {
+                // Manual /shepherd spawn means a separate agent (T012), just
+                // like Pi's command path: force no_parent even though the bare
+                // shepherd_spawn tool defaults to a subagent.
+                const spawnArgs = manualSpawnArgs(args)
                 result = await spawnSheep(actx, {
-                  agent: args.agent,
-                  label: args.label ?? "",
-                  placement: args.placement,
-                  cwd: args.cwd,
+                  agent: String(spawnArgs.agent),
+                  label: String(spawnArgs.label ?? ""),
+                  placement: spawnArgs.placement as string | undefined,
+                  cwd: spawnArgs.cwd as string | undefined,
+                  no_parent: spawnArgs.no_parent === true,
                 })
                 break
+              }
               case "status":
                 result = await statusSheep(actx, { id: args.id })
                 break

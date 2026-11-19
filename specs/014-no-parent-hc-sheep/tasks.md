@@ -49,6 +49,13 @@ and a ready-to-chat agent.
 - [x] T012 [US3] Add a test asserting manual spawn ignores any default that
       would produce a subagent.
 
+  Follow-up (2026-11-19): T010 was implemented only on Pi's `/shepherd spawn`
+  command. The OpenCode host's command forwarded the tool's `no_parent: false`
+  default, so a manual spawn there still produced a subagent (parented to the
+  OpenCode host terminal rather than the calling session). The command now
+  routes through `manualSpawnArgs` like Pi, and the OpenCode surface suite
+  guards the path.
+
 ## Phase 4 — Lifecycle, recovery and documentation (US2, US4)
 
 **Goal**: No-parent sheep are no worse to manage and clean up than subagents.

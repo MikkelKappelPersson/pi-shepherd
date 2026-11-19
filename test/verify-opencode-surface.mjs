@@ -77,6 +77,21 @@ for (const value of ['pane_right', 'pane_down', 'tab', 'workspace']) {
 const noParent = tools.get('shepherd_spawn').input.properties.no_parent;
 assert.equal(noParent?.type, 'boolean', 'FR-002: no_parent is an explicit boolean tool argument');
 assert.match(noParent.description, /parentless/, 'FR-002: no_parent documents the separate-agent mode');
+// The tool defaults to a subagent, but a manually typed `/shepherd spawn` must
+// force no_parent on the OpenCode host too (T012), mirroring Pi's command path.
+const { readFile } = await import('node:fs/promises');
+const serverSource = await readFile(new URL('../src/opencode/server.ts', import.meta.url), 'utf8');
+const commandSpawn = serverSource.slice(
+  serverSource.indexOf('case "spawn":'),
+  serverSource.indexOf('case "status":')
+);
+assert.match(
+  commandSpawn,
+  /manualSpawnArgs\(args\)/,
+  'T012: /shepherd spawn forces no_parent via manualSpawnArgs'
+);
+assert.match(commandSpawn, /no_parent:/, 'T012: /shepherd spawn forwards no_parent to spawnSheep');
+console.log('PASS T012: manual /shepherd spawn forces a parentless agent on the OpenCode host');
 const { OPENCODE_LAUNCH_OVERRIDES, OPENCODE_CHILD_COMMAND } = await import('../src/opencode/host.ts');
 assert.equal(OPENCODE_LAUNCH_OVERRIDES.command, OPENCODE_CHILD_COMMAND);
 assert.equal(OPENCODE_LAUNCH_OVERRIDES.command, 'opencode', 'FR-002: children boot the OpenCode CLI');
