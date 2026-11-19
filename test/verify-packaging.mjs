@@ -28,6 +28,15 @@ assert.match(pluginSource, /Plugin\.define\(/);
 assert.match(pluginSource, /id: "shepherd"/);
 console.log('PASS manifest declares both host entries');
 
+// The lockfile must track the published package identity, not the pre-rename
+// name. `npm ci` tolerates the drift, but `npm pack`/publish metadata should
+// never disagree with the manifest.
+const lockfile = JSON.parse(fs.readFileSync(path.join(repo, 'package-lock.json'), 'utf8'));
+assert.equal(lockfile.name, manifest.name, 'lockfile name matches the manifest');
+assert.equal(lockfile.version, manifest.version, 'lockfile version matches the manifest');
+assert.equal(lockfile.packages?.['']?.name, manifest.name, 'root lockfile entry name matches');
+console.log('PASS lockfile identity matches the manifest');
+
 // Pack and install into an isolated consumer, the way each host's docs say.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-shepherd-packaging-'));
 const packResult = JSON.parse(
